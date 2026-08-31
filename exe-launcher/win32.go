@@ -72,6 +72,7 @@ var (
 	pLoadImageW             = user32.NewProc("LoadImageW")
 	pRegisterWindowMessageW = user32.NewProc("RegisterWindowMessageW")
 	pIsWindowVisible        = user32.NewProc("IsWindowVisible")
+	pIsDialogMessageW       = user32.NewProc("IsDialogMessageW")
 )
 
 // ---------- 窗口/消息 ----------
@@ -98,12 +99,15 @@ const (
 	logPixelSX  = 88
 	smCxVScroll = 2
 
-	wmNull       = 0x0000
-	wmCreate     = 0x0001
-	wmDestroy    = 0x0002
-	wmSize       = 0x0005
-	wmSetRedraw  = 0x000B
-	wmClose      = 0x0010
+	wmNull          = 0x0000
+	wmCreate        = 0x0001
+	wmDestroy       = 0x0002
+	wmSize          = 0x0005
+	wmSetRedraw     = 0x000B
+	wmSettext       = 0x000C
+	wmGettext       = 0x000D
+	wmGettextLength = 0x000E
+	wmClose         = 0x0010
 	wmSetFont    = 0x0030
 	wmSetIcon    = 0x0080
 	wmCommand    = 0x0111
@@ -247,6 +251,7 @@ const (
 	cddsPrepaint       = 0x00000001
 	cddsItem           = 0x00010000
 	cddsItemPrepaint   = cddsItem | cddsPrepaint
+	cddsSubitem        = 0x00020000
 
 	sbSetText = 0x040B // WM_USER+11
 
@@ -254,6 +259,23 @@ const (
 	mfGrayed       = 0x0001
 	mfSeparator    = 0x0800
 	tpmRightButton = 0x0002
+
+	idCancel = 2 // IsDialogMessage 按 Esc 产生的 IDCANCEL 命令
+)
+
+// ---------- ComboBox / Edit / Button ----------
+
+const (
+	cbsDropdownlist = 0x0003
+
+	cbAddString = 0x0143
+	cbGetCurSel = 0x0147
+	cbSetCurSel = 0x014E
+
+	cbnSelchange = 1 // WM_COMMAND HIWORD：下拉选中项变化
+
+	esAutoHscroll   = 0x0080
+	bsDefpushbutton = 0x0001
 )
 
 // ---------- 字体 ----------

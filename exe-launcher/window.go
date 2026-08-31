@@ -19,6 +19,7 @@ const (
 	idcClean   = 1007
 	idcRefresh = 1008
 	idcMdDoc   = 1009
+	idcTag     = 1010
 )
 
 // 控件 ID（WM_NOTIFY 里用 idFrom 区分来源）
@@ -26,6 +27,7 @@ const (
 	idList    = 100
 	idToolbar = 101
 	idStatus  = 102
+	idFilter  = 103
 )
 
 const (
@@ -38,11 +40,14 @@ type mainWindow struct {
 	hToolbar uintptr
 	hList    uintptr
 	hStatus  uintptr
+	hFilter  uintptr
 	hFont    uintptr
 	tbH      int
 	scale    float64
 	st       *store
 	cfg      *config
+	filter   string // 系统标签 key，空 = 不筛选
+	visible  []int  // 列表行 → store.entries 下标（筛选时下标不连续）
 }
 
 var mainWin *mainWindow
@@ -71,8 +76,8 @@ var mainWndProcCb = syscall.NewCallback(func(hwnd uintptr, msg uint32, wp, lp ui
 		return 0
 	case wmCommand:
 		id := loword(wp)
-		log.Printf("WM_COMMAND id=%d", id)
-		w.onCommand(id)
+		log.Printf("WM_COMMAND id=%d code=%d", id, hiword(wp))
+		w.onCommand(id, hiword(wp))
 		return 0
 	case wmNotify:
 		return w.onNotify(lp)
@@ -163,6 +168,7 @@ func createMainWindow(st *store, cfg *config) (*mainWindow, error) {
 
 	w.hFont = w.createFont()
 	w.createToolbar(hInst)
+	w.createFilter(hInst)
 	w.createList(hInst)
 	w.createStatus(hInst)
 	w.reloadList()
@@ -194,7 +200,7 @@ func (w *mainWindow) createToolbar(hInst uintptr) {
 	sendMsg(w.hToolbar, wmSetFont, w.hFont, 1)
 	sendMsg(w.hToolbar, tbButtonStructSize, unsafe.Sizeof(tbButton{}), 0)
 
-	strs := utf16DoubleNull("添加 EXE", "扫描目录", "启动", "打开目录", "PowerShell", "介绍", "移除", "清理失效", "刷新")
+	strs := utf16DoubleNull("添加 EXE", "扫描目录", "启动", "打开目录", "PowerShell", "介绍", "打标", "移除", "清理失效", "刷新")
 	base := sendMsg(w.hToolbar, tbAddString, 0, uintptr(unsafe.Pointer(&strs[0])))
 
 	mk := func(id int, s uintptr) tbButton {
@@ -214,10 +220,11 @@ func (w *mainWindow) createToolbar(hInst uintptr) {
 		mk(idcOpenDir, base+3),
 		mk(idcPowerSh, base+4),
 		mk(idcMdDoc, base+5),
+		mk(idcTag, base+6),
 		{fsStyle: tbstySep},
-		mk(idcRemove, base+6),
-		mk(idcClean, base+7),
-		mk(idcRefresh, base+8),
+		mk(idcRemove, base+7),
+		mk(idcClean, base+8),
+		mk(idcRefresh, base+9),
 	}
 	sendMsg(w.hToolbar, tbAddButtons, uintptr(len(btns)), uintptr(unsafe.Pointer(&btns[0])))
 	sendMsg(w.hToolbar, tbAutosize, 0, 0)
@@ -225,6 +232,20 @@ func (w *mainWindow) createToolbar(hInst uintptr) {
 	if w.tbH <= 0 {
 		w.tbH = int(30 * w.scale) // 兜底，避免量出 0 把工具栏压没
 	}
+}
+
+// createFilter 工具栏行右侧的系统标签筛选下拉（todo 视图：只看某标签的记录）。
+func (w *mainWindow) createFilter(hInst uintptr) {
+	style := uintptr(wsChild | wsVisible | wsTabStop | cbsDropdownlist)
+	w.hFilter, _, _ = pCreateWindowExW.Call(0,
+		uintptr(unsafe.Pointer(mustUTF16("COMBOBOX"))),
+		0, style, 0, 0, 0, 0, w.hwnd, idFilter, hInst, 0)
+	sendMsg(w.hFilter, wmSetFont, w.hFont, 1)
+	sendMsg(w.hFilter, cbAddString, 0, uintptr(unsafe.Pointer(mustUTF16("全部"))))
+	for _, t := range sysTagDefs {
+		sendMsg(w.hFilter, cbAddString, 0, uintptr(unsafe.Pointer(mustUTF16("只看"+t.Label))))
+	}
+	sendMsg(w.hFilter, cbSetCurSel, 0, 0)
 }
 
 func (w *mainWindow) createList(hInst uintptr) {
@@ -236,7 +257,7 @@ func (w *mainWindow) createList(hInst uintptr) {
 	ext := uintptr(lvsExFullRowSelect | lvsExDoubleBuffer | lvsExLabelTip)
 	sendMsg(w.hList, lvmSetExtStyle, ext, ext)
 
-	for i, name := range []string{"名称", "路径", "状态"} {
+	for i, name := range []string{"名称", "标签", "路径", "状态"} {
 		col := lvColumnW{
 			mask:     lvcfFmt | lvcfWidth | lvcfText,
 			fmt:      lvcfmtLeft,
@@ -270,7 +291,22 @@ func (w *mainWindow) layout() {
 			w.tbH = int(30 * w.scale)
 		}
 	}
-	pMoveWindow.Call(w.hToolbar, 0, 0, uintptr(cw), uintptr(w.tbH), 1)
+	// 工具栏右侧留出筛选下拉的位置
+	filterW := int(120 * w.scale)
+	filterGap := int(10 * w.scale)
+	pMoveWindow.Call(w.hToolbar, 0, 0, uintptr(cw-filterW-filterGap-4), uintptr(w.tbH), 1)
+
+	// ComboBox 窗口高度是展开总高度，闭合高度由字体决定；垂直居中于工具栏行
+	fh := int(200 * w.scale)
+	fClosed := clientHeight(w.hFilter)
+	if fClosed <= 0 {
+		fClosed = int(22 * w.scale)
+	}
+	fy := (w.tbH - fClosed) / 2
+	if fy < 0 {
+		fy = 0
+	}
+	pMoveWindow.Call(w.hFilter, uintptr(cw-filterW), uintptr(fy), uintptr(filterW), uintptr(fh), 1)
 
 	sendMsg(w.hStatus, wmSize, 0, makelparam(cw, ch))
 	sbH := clientHeight(w.hStatus)
@@ -284,15 +320,17 @@ func (w *mainWindow) layout() {
 	var lrc rect
 	pGetClientRect.Call(w.hList, uintptr(unsafe.Pointer(&lrc)))
 	vsb, _, _ := pGetSystemMetrics.Call(smCxVScroll)
-	colName := int(220 * w.scale)
-	colState := int(70 * w.scale)
-	colPath := int(lrc.right) - colName - colState - int(vsb) - 4
+	colName := int(200 * w.scale)
+	colTag := int(150 * w.scale)
+	colState := int(64 * w.scale)
+	colPath := int(lrc.right) - colName - colTag - colState - int(vsb) - 4
 	if colPath < 120 {
 		colPath = 120
 	}
 	sendMsg(w.hList, lvmSetColumnWidth, 0, uintptr(colName))
-	sendMsg(w.hList, lvmSetColumnWidth, 1, uintptr(colPath))
-	sendMsg(w.hList, lvmSetColumnWidth, 2, uintptr(colState))
+	sendMsg(w.hList, lvmSetColumnWidth, 1, uintptr(colTag))
+	sendMsg(w.hList, lvmSetColumnWidth, 2, uintptr(colPath))
+	sendMsg(w.hList, lvmSetColumnWidth, 3, uintptr(colState))
 }
 
 func (w *mainWindow) onDpiChanged(wp, lp uintptr) {
@@ -307,7 +345,7 @@ func (w *mainWindow) onDpiChanged(wp, lp uintptr) {
 	w.scale = ns
 	pDeleteObject.Call(w.hFont)
 	w.hFont = w.createFont()
-	for _, h := range []uintptr{w.hToolbar, w.hList, w.hStatus} {
+	for _, h := range []uintptr{w.hToolbar, w.hList, w.hStatus, w.hFilter} {
 		sendMsg(h, wmSetFont, w.hFont, 1)
 	}
 	sendMsg(w.hToolbar, tbAutosize, 0, 0)
@@ -331,10 +369,17 @@ func statusText(valid bool) string {
 func (w *mainWindow) reloadList() {
 	sendMsg(w.hList, wmSetRedraw, 0, 0)
 	sendMsg(w.hList, lvmDeleteAllItems, 0, 0)
+	w.visible = w.visible[:0]
 	for i, e := range w.st.entries {
-		lvSetItemText(w.hList, i, 0, e.Name)
-		lvSetItemText(w.hList, i, 1, e.Path)
-		lvSetItemText(w.hList, i, 2, statusText(e.Valid))
+		if w.filter != "" && e.SysTag != w.filter {
+			continue
+		}
+		row := len(w.visible)
+		lvSetItemText(w.hList, row, 0, e.Name)
+		lvSetItemText(w.hList, row, 1, e.tagColumnText())
+		lvSetItemText(w.hList, row, 2, e.Path)
+		lvSetItemText(w.hList, row, 3, statusText(e.Valid))
+		w.visible = append(w.visible, i)
 	}
 	sendMsg(w.hList, wmSetRedraw, 1, 0)
 	w.updateStatus()
@@ -342,18 +387,22 @@ func (w *mainWindow) reloadList() {
 }
 
 func (w *mainWindow) updateStatus() {
-	text := fmt.Sprintf("共 %d 项，%d 项失效", len(w.st.entries), w.st.InvalidCount())
+	text := fmt.Sprintf("共 %d 项，%d 项失效，%d 项待完善",
+		len(w.st.entries), w.st.InvalidCount(), w.st.countBySysTag("todo"))
+	if w.filter != "" {
+		text += fmt.Sprintf("，筛选「%s」显示 %d 项", sysTagLabel(w.filter), len(w.visible))
+	}
 	sendMsg(w.hStatus, sbSetText, 0, uintptr(unsafe.Pointer(mustUTF16(text))))
 }
 
-// updateButtonStates 单选一行后 启动/打开目录/PowerShell/移除 才可用。
+// updateButtonStates 单选一行后 启动/打开目录/PowerShell/打标/移除 才可用。
 func (w *mainWindow) updateButtonStates() {
 	enable := lvSelected(w.hList) >= 0
 	var flag uintptr
 	if enable {
 		flag = 1
 	}
-	for _, id := range []int{idcLaunch, idcOpenDir, idcPowerSh, idcMdDoc, idcRemove} {
+	for _, id := range []int{idcLaunch, idcOpenDir, idcPowerSh, idcMdDoc, idcTag, idcRemove} {
 		sendMsg(w.hToolbar, tbEnableButton, uintptr(id), flag)
 	}
 }
@@ -365,7 +414,12 @@ func (w *mainWindow) save() {
 	}
 }
 
-func (w *mainWindow) onCommand(id int) {
+// onCommand code 是 WM_COMMAND 的 HIWORD：0 = 菜单/按钮，cbnSelchange = 筛选下拉。
+func (w *mainWindow) onCommand(id, code int) {
+	if id == idFilter && code == cbnSelchange {
+		w.onFilterChanged()
+		return
+	}
 	switch id {
 	case idcAddExe:
 		w.addExeByPicker()
@@ -379,6 +433,8 @@ func (w *mainWindow) onCommand(id int) {
 		w.shellSelected()
 	case idcMdDoc:
 		w.showMdDoc()
+	case idcTag:
+		w.tagSelected()
 	case idcRemove:
 		w.removeSelected()
 	case idcClean:
@@ -393,12 +449,32 @@ func (w *mainWindow) onCommand(id int) {
 	}
 }
 
+// onFilterChanged 筛选下拉选项 → filter key；下标 0 是"全部"。
+func (w *mainWindow) onFilterChanged() {
+	sel := int(int32(sendMsg(w.hFilter, cbGetCurSel, 0, 0)))
+	if sel >= 1 && sel <= len(sysTagDefs) {
+		w.filter = sysTagDefs[sel-1].Key
+	} else {
+		w.filter = ""
+	}
+	w.reloadList()
+}
+
+// entryAtRow 列表行号（含筛选后的映射）→ 条目；越界返回 nil。
+func (w *mainWindow) entryAtRow(row int) *Entry {
+	if row < 0 || row >= len(w.visible) {
+		return nil
+	}
+	return &w.st.entries[w.visible[row]]
+}
+
+// selectedEntry 返回 store 下标与条目；筛选时列表行号经 visible 映射。
 func (w *mainWindow) selectedEntry() (int, *Entry) {
 	sel := lvSelected(w.hList)
-	if sel < 0 || sel >= len(w.st.entries) {
-		return -1, nil
+	if e := w.entryAtRow(sel); e != nil {
+		return w.visible[sel], e
 	}
-	return sel, &w.st.entries[sel]
+	return -1, nil
 }
 
 // ensureEntryValid 启动/打开前再校验一次，列表是旧状态时不至于启动到不存在的文件。
@@ -509,6 +585,22 @@ func (w *mainWindow) shellSelected() {
 	}
 }
 
+// tagSelected 打标当前选中条目：系统标签单选 + 用户标签自由文本。
+func (w *mainWindow) tagSelected() {
+	_, e := w.selectedEntry()
+	if e == nil {
+		return
+	}
+	sysTag, userTag, ok := runTagDialog(w, e)
+	if !ok {
+		return
+	}
+	e.SysTag = sysTag
+	e.UserTag = userTag
+	w.save()
+	w.reloadList()
+}
+
 func (w *mainWindow) removeSelected() {
 	sel, _ := w.selectedEntry()
 	if sel < 0 {
@@ -548,16 +640,30 @@ func (w *mainWindow) onNotify(lp uintptr) uintptr {
 	return 0
 }
 
-// customDraw 失效行整行红字。必须用指针而非拷贝：要写回 clrText 给控件读。
+// customDraw 失效行整行红字（优先级最高）；正常行的标签列按系统标签着色。
+// 必须用指针而非拷贝：要写回 clrText 给控件读。
 func (w *mainWindow) customDraw(lp uintptr) uintptr {
 	nm := (*nmlvCustomDraw)(ptrFromLparam(lp))
 	switch nm.nmcd.dwDrawStage {
 	case cddsPrepaint:
 		return cdrfNotifyItemDraw
 	case cddsItemPrepaint:
-		idx := int(nm.nmcd.dwItemSpec)
-		if idx >= 0 && idx < len(w.st.entries) && !w.st.entries[idx].Valid {
+		e := w.entryAtRow(int(nm.nmcd.dwItemSpec))
+		if e == nil {
+			return cdrfDoDefault
+		}
+		if !e.Valid {
 			nm.clrText = rgb(0xC0, 0x30, 0x30)
+			return cdrfDoDefault
+		}
+		// 返回值同 CDRF_NOTIFYSUBITEMDRAW：进入子项绘制阶段，才能只给标签列上色
+		return cdrfNotifyItemDraw
+	}
+	if nm.nmcd.dwDrawStage&cddsSubitem != 0 && nm.iSubItem == 1 {
+		if e := w.entryAtRow(int(nm.nmcd.dwItemSpec)); e != nil {
+			if c, ok := sysTagColor(e.SysTag); ok {
+				nm.clrText = c
+			}
 		}
 	}
 	return cdrfDoDefault
@@ -583,6 +689,7 @@ func (w *mainWindow) showContextMenu() {
 	appendMenu("打开目录", idcOpenDir, enable)
 	appendMenu("在此目录开 PowerShell", idcPowerSh, enable)
 	appendMenu("查看介绍", idcMdDoc, enable)
+	appendMenu("设置标签", idcTag, enable)
 	pAppendMenuW.Call(menu, mfSeparator, 0, 0)
 	appendMenu("移除", idcRemove, enable)
 

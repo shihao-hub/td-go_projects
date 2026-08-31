@@ -8,10 +8,14 @@ import (
 )
 
 // Entry 是一条受管理的 EXE 记录；Valid 为运行时状态，不落盘。
+// SysTag 至多一个系统标签（tags.go 的固定枚举，空 = 无）；
+// UserTag 至多一个用户标签（自由文本，描述语义）。
 type Entry struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
 	AddedAt string `json:"added_at"`
+	SysTag  string `json:"sys_tag,omitempty"`
+	UserTag string `json:"user_tag,omitempty"`
 	Valid   bool   `json:"-"`
 }
 
@@ -35,6 +39,8 @@ func newStore(entries []Entry) *store {
 		if s.containsPath(e.Path) {
 			continue
 		}
+		e.SysTag = sanitizeSysTag(e.SysTag)
+		e.UserTag = strings.TrimSpace(e.UserTag)
 		s.entries = append(s.entries, e)
 	}
 	return s
