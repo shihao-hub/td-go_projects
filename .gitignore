@@ -1,0 +1,7 @@
+# Go 构建产物不入库
+*.exe
+*.test
+*.out
+
+# AI 会话产物不入库
+.zcode/
