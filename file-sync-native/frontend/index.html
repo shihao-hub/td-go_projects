@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>File Sync</title>
+</head>
+<body>
+<header class="topbar">
+  <h1>File Sync</h1>
+  <div class="topbar-actions">
+    <button id="btn-settings" class="btn">设置</button>
+    <button id="btn-add" class="btn primary">+ 新建任务</button>
+  </div>
+</header>
+
+<main>
+  <div id="task-grid" class="task-grid"></div>
+  <div id="empty-state" class="empty" hidden>还没有同步任务，点击右上角「新建任务」开始</div>
+</main>
+
+<div id="modal-task" class="modal" hidden>
+  <div class="modal-box">
+    <h2 id="task-modal-title">新建任务</h2>
+    <form id="task-form">
+      <label>任务名称
+        <input name="name" placeholder="留空则按源目录路径自动命名（如 C-Users-shawn.zhang-myapp）">
+      </label>
+      <label>源目录
+        <div class="path-row">
+          <input name="source_path" required placeholder="C:\Projects\my-app">
+          <button type="button" class="btn browse" data-for="source_path">浏览</button>
+        </div>
+      </label>
+      <label>目标目录
+        <div class="path-row">
+          <input name="target_path" required placeholder="D:\Backup\my-app">
+          <button type="button" class="btn browse" data-for="target_path">浏览</button>
+        </div>
+      </label>
+      <label>忽略规则（gitignore 语法，每行一条）
+        <textarea name="ignore_rules" rows="5" placeholder="node_modules/&#10;*.log&#10;.git/&#10;dist/"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="modal-diff" class="modal" hidden>
+  <div class="modal-box wide">
+    <h2>差异预览 <span id="diff-task-name" class="muted"></span></h2>
+    <div id="diff-stats" class="diff-stats"></div>
+    <div class="diff-cols">
+      <div class="diff-col">
+        <h3 class="c-added">新增 <span id="count-added" class="count"></span></h3>
+        <ul id="diff-added" class="diff-list"></ul>
+      </div>
+      <div class="diff-col">
+        <h3 class="c-modified">修改 <span id="count-modified" class="count"></span></h3>
+        <ul id="diff-modified" class="diff-list"></ul>
+      </div>
+      <div class="diff-col">
+        <h3 class="c-deleted">删除 <span id="count-deleted" class="count"></span></h3>
+        <ul id="diff-deleted" class="diff-list"></ul>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn" data-close>关闭</button>
+      <button type="button" id="btn-diff-sync" class="btn primary">执行同步</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-delete" class="modal" hidden>
+  <div class="modal-box wide">
+    <h2>确认删除 <span id="delete-task-name" class="muted"></span></h2>
+    <div class="delete-warn">以下 <b id="delete-count">0</b> 个文件在源目录中已不存在。删除不可恢复；保留它们则目标目录会多出这些旧文件。</div>
+    <ul id="delete-list" class="diff-list tall"></ul>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="btn-delete-keep">保留这些文件</button>
+      <button type="button" class="btn danger" id="btn-delete-confirm">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-settings" class="modal" hidden>
+  <div class="modal-box">
+    <h2>设置</h2>
+    <form id="settings-form">
+      <label>默认备份根目录
+        <div class="path-row">
+          <input id="settings-backup-root" placeholder="D:\Backup">
+          <button type="button" class="btn" id="btn-browse-settings">浏览</button>
+        </div>
+      </label>
+      <div class="hint">新建任务时，目标目录默认填入「根目录\源目录完整路径」（路径中的 \ 换成 -，如 Backup\C-Users-shawn.zhang-.cache，超过 64 字符会截断并附加哈希后缀）；根目录留空则默认为源目录同级的「源目录名-sync」。任务名称留空时同样按源目录路径自动命名。</div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-close>取消</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toasts" class="toasts"></div>
+<script src="./src/main.js" type="module"></script>
+</body>
+</html>
