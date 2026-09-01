@@ -1,4 +1,4 @@
-package main
+package model
 
 import (
 	"os"
@@ -19,8 +19,8 @@ type Entry struct {
 	Valid   bool   `json:"-"`
 }
 
-type store struct {
-	entries []Entry
+type Store struct {
+	Entries []Entry
 }
 
 // samePath Windows 路径大小写不敏感，先 Clean 再比较。
@@ -28,9 +28,9 @@ func samePath(a, b string) bool {
 	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
-// newStore 载入时清洗路径并去重。注意 Clean("") 会得到 "."，空路径要先判。
-func newStore(entries []Entry) *store {
-	s := &store{}
+// NewStore 载入时清洗路径并去重。注意 Clean("") 会得到 "."，空路径要先判。
+func NewStore(entries []Entry) *Store {
+	s := &Store{}
 	for _, e := range entries {
 		if e.Path == "" {
 			continue
@@ -39,15 +39,15 @@ func newStore(entries []Entry) *store {
 		if s.containsPath(e.Path) {
 			continue
 		}
-		e.SysTag = sanitizeSysTag(e.SysTag)
+		e.SysTag = SanitizeSysTag(e.SysTag)
 		e.UserTag = strings.TrimSpace(e.UserTag)
-		s.entries = append(s.entries, e)
+		s.Entries = append(s.Entries, e)
 	}
 	return s
 }
 
-func (s *store) containsPath(path string) bool {
-	for _, e := range s.entries {
+func (s *Store) containsPath(path string) bool {
+	for _, e := range s.Entries {
 		if samePath(e.Path, path) {
 			return true
 		}
@@ -57,7 +57,7 @@ func (s *store) containsPath(path string) bool {
 
 // Add 添加记录；路径重复（大小写不敏感）时不添加并返回 false。
 // name 为空时取文件名（去 .exe 后缀）。
-func (s *store) Add(name, path string) bool {
+func (s *Store) Add(name, path string) bool {
 	if path == "" {
 		return false
 	}
@@ -66,48 +66,48 @@ func (s *store) Add(name, path string) bool {
 		return false
 	}
 	if name == "" {
-		name = exeBaseName(path)
+		name = ExeBaseName(path)
 	}
-	s.entries = append(s.entries, Entry{
+	s.Entries = append(s.Entries, Entry{
 		Name:    name,
 		Path:    path,
 		AddedAt: time.Now().Format(time.RFC3339),
-		Valid:   fileExists(path),
+		Valid:   FileExists(path),
 	})
 	return true
 }
 
-func (s *store) Remove(index int) {
-	if index < 0 || index >= len(s.entries) {
+func (s *Store) Remove(index int) {
+	if index < 0 || index >= len(s.Entries) {
 		return
 	}
-	s.entries = append(s.entries[:index], s.entries[index+1:]...)
+	s.Entries = append(s.Entries[:index], s.Entries[index+1:]...)
 }
 
 // RemoveInvalid 剔除所有失效条目，返回剔除数量。
-func (s *store) RemoveInvalid() int {
-	kept := s.entries[:0]
+func (s *Store) RemoveInvalid() int {
+	kept := s.Entries[:0]
 	n := 0
-	for _, e := range s.entries {
+	for _, e := range s.Entries {
 		if e.Valid {
 			kept = append(kept, e)
 		} else {
 			n++
 		}
 	}
-	s.entries = kept
+	s.Entries = kept
 	return n
 }
 
-func (s *store) RefreshValid() {
-	for i := range s.entries {
-		s.entries[i].Valid = fileExists(s.entries[i].Path)
+func (s *Store) RefreshValid() {
+	for i := range s.Entries {
+		s.Entries[i].Valid = FileExists(s.Entries[i].Path)
 	}
 }
 
-func (s *store) InvalidCount() int {
+func (s *Store) InvalidCount() int {
 	n := 0
-	for _, e := range s.entries {
+	for _, e := range s.Entries {
 		if !e.Valid {
 			n++
 		}
@@ -115,13 +115,13 @@ func (s *store) InvalidCount() int {
 	return n
 }
 
-func (s *store) Snapshot() []Entry {
-	out := make([]Entry, len(s.entries))
-	copy(out, s.entries)
+func (s *Store) Snapshot() []Entry {
+	out := make([]Entry, len(s.Entries))
+	copy(out, s.Entries)
 	return out
 }
 
-func fileExists(path string) bool {
+func FileExists(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && !fi.IsDir()
 }

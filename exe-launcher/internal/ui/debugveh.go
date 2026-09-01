@@ -1,9 +1,10 @@
-package main
+package ui
 
 // 诊断用 VEH：捕获未被处理的原生异常，把异常码/出错地址/所在模块写进日志。
 // 仅在设置 EXE_LAUNCHER_VEH=1 时启用，正式构建默认关闭。
 
 import (
+	"exe-launcher/internal/win32"
 	"log"
 	"os"
 	"strings"
@@ -12,9 +13,9 @@ import (
 )
 
 var (
-	procAddVectoredExceptionHandler = kernel32.NewProc("AddVectoredExceptionHandler")
-	procGetModuleHandleExW          = kernel32.NewProc("GetModuleHandleExW")
-	procGetModuleFileNameW          = kernel32.NewProc("GetModuleFileNameW")
+	procAddVectoredExceptionHandler = win32.Kernel32.NewProc("AddVectoredExceptionHandler")
+	procGetModuleHandleExW          = win32.Kernel32.NewProc("GetModuleHandleExW")
+	procGetModuleFileNameW          = win32.Kernel32.NewProc("GetModuleFileNameW")
 )
 
 // x64 EXCEPTION_RECORD 头部字段布局（只需要前 5 个字段）

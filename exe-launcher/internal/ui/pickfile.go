@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package ui
 
 // COM 文件/目录选择框（IFileDialog），自 zread-tray/pickfolder_windows.go 改造：
 // 选文件 + 过滤器；对话框有属主窗口，不再需要前台抢焦点辅助线程。
@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"syscall"
 	"unsafe"
+
+	"exe-launcher/internal/win32"
 )
 
 const (
@@ -137,7 +139,7 @@ func runFileDialog(o fileDialogOptions) (string, error) {
 	}
 
 	if o.title != "" {
-		comCall(dlg, dlgSetTitle, uintptr(unsafe.Pointer(mustUTF16(o.title))))
+		comCall(dlg, dlgSetTitle, uintptr(unsafe.Pointer(win32.MustUTF16(o.title))))
 	}
 
 	hr = comCall(dlg, dlgShow, o.owner)
@@ -162,14 +164,14 @@ func runFileDialog(o fileDialogOptions) (string, error) {
 	}
 	defer procCoTaskMemFree.Call(uintptr(unsafe.Pointer(pathPtr)))
 
-	return utf16PtrToString(pathPtr), nil
+	return win32.UTF16PtrToString(pathPtr), nil
 }
 
 // pickExeFile 选择单个 exe 文件。
 func pickExeFile(owner uintptr, defaultDir string) (string, error) {
 	specs := []comDlgFilterSpec{
-		{mustUTF16("程序 (*.exe)"), mustUTF16("*.exe")},
-		{mustUTF16("所有文件 (*.*)"), mustUTF16("*.*")},
+		{win32.MustUTF16("程序 (*.exe)"), win32.MustUTF16("*.exe")},
+		{win32.MustUTF16("所有文件 (*.*)"), win32.MustUTF16("*.*")},
 	}
 	return runFileDialog(fileDialogOptions{
 		owner:      owner,

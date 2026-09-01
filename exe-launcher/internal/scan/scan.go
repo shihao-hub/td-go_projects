@@ -1,4 +1,4 @@
-package main
+package scan
 
 import (
 	"io/fs"
@@ -26,9 +26,9 @@ func isNoiseDir(name string) bool {
 
 const scanMaxResults = 1000
 
-// scanDirExe 递归收集 root 下的 *.exe（大小写不敏感），跳过噪音目录，按路径排序。
+// ScanDirExe 递归收集 root 下的 *.exe（大小写不敏感），跳过噪音目录，按路径排序。
 // 单个子目录读不了就跳过，不让整体扫描失败。
-func scanDirExe(root string) ([]string, error) {
+func ScanDirExe(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -53,10 +53,4 @@ func scanDirExe(root string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
-}
-
-// exeBaseName 去掉目录和 .exe 后缀，作为条目默认名称。
-func exeBaseName(path string) string {
-	name := filepath.Base(path)
-	return strings.TrimSuffix(name, filepath.Ext(name))
 }

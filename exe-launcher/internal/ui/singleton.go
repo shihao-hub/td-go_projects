@@ -1,6 +1,7 @@
-package main
+package ui
 
 import (
+	"exe-launcher/internal/win32"
 	"log"
 	"syscall"
 	"unsafe"
@@ -16,7 +17,7 @@ var hMutex uintptr
 // acquireSingleInstance 返回 true 表示成功持有（首实例）；
 // false 表示已有实例在运行，此时顺带把第一实例窗口带到前台。
 func acquireSingleInstance() bool {
-	h, _, err := pCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(mustUTF16(mutexName))))
+	h, _, err := win32.CreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(win32.MustUTF16(mutexName))))
 	hMutex = h
 	if err == syscall.ERROR_ALREADY_EXISTS {
 		log.Printf("已检测到运行中的实例 (mutex=%s)", mutexName)
@@ -30,20 +31,20 @@ func acquireSingleInstance() bool {
 // activateExistingWindow 按窗口类名找到第一实例窗口，恢复可见（可能被隐藏到托盘
 // 或最小化）并置前台。第二实例刚被用户启动、持有前台权限，可合法转移给第一实例。
 func activateExistingWindow() {
-	hwnd, _, _ := pFindWindowW.Call(uintptr(unsafe.Pointer(mustUTF16(mainClassName))), 0)
+	hwnd, _, _ := win32.FindWindowW.Call(uintptr(unsafe.Pointer(win32.MustUTF16(mainClassName))), 0)
 	if hwnd == 0 {
 		log.Printf("未找到已有实例窗口 (class=%s)", mainClassName)
 		return
 	}
-	if vis, _, _ := pIsWindowVisible.Call(hwnd); vis == 0 {
+	if vis, _, _ := win32.IsWindowVisible.Call(hwnd); vis == 0 {
 		// 隐藏到托盘的窗口：先恢复可见（最小化态走还原，否则直接显示）
-		if ic, _, _ := pIsIconic.Call(hwnd); ic != 0 {
-			pShowWindow.Call(hwnd, swRestore)
+		if ic, _, _ := win32.IsIconic.Call(hwnd); ic != 0 {
+			win32.ShowWindow.Call(hwnd, win32.SW_RESTORE)
 		} else {
-			pShowWindow.Call(hwnd, swShow)
+			win32.ShowWindow.Call(hwnd, win32.SW_SHOW)
 		}
-	} else if ic, _, _ := pIsIconic.Call(hwnd); ic != 0 {
-		pShowWindow.Call(hwnd, swRestore)
+	} else if ic, _, _ := win32.IsIconic.Call(hwnd); ic != 0 {
+		win32.ShowWindow.Call(hwnd, win32.SW_RESTORE)
 	}
-	pSetForegroundWindow.Call(hwnd)
+	win32.SetForegroundWindow.Call(hwnd)
 }

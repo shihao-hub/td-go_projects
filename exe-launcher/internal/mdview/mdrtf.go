@@ -1,4 +1,4 @@
-package main
+package mdview
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 )
 
-// mdToRTF 把 markdown 子集转换为 RTF，供 RichEdit EM_STREAMIN 渲染。
+// MDToRTF 把 markdown 子集转换为 RTF，供 RichEdit EM_STREAMIN 渲染。
 // 支持子集：h1-h6 标题、粗体、斜体、行内代码、围栏代码块、无序/有序列表、
 // 引用块、分隔线、链接（蓝色文本 + 灰色 URL）。不支持表格/图片/嵌套结构。
 //
@@ -116,8 +116,8 @@ func headingRTF(level int, text string) string {
 	return fmt.Sprintf(`\pard\fs%d\b %s\b0\fs20\par`, fs, inlineRTF(text))
 }
 
-// mdToRTF 主入口：逐行状态机 + 行内解析。
-func mdToRTF(src string) string {
+// MDToRTF 主入口：逐行状态机 + 行内解析。
+func MDToRTF(src string) string {
 	var out strings.Builder
 	out.WriteString(rtfHeader)
 	inCode := false

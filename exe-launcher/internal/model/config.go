@@ -1,4 +1,4 @@
-package main
+package model
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 
 // config 落盘于 %AppData%\exe-launcher\config.json。
 // valid 是运行时状态（os.Stat 重算），不落盘。
-type config struct {
+type Config struct {
 	Entries     []Entry `json:"entries"`
 	LastScanDir string  `json:"last_scan_dir"`
 }
@@ -21,9 +21,9 @@ func configPath() (string, error) {
 	return filepath.Join(base, "exe-launcher", "config.json"), nil
 }
 
-// loadConfig 任何失败（无文件/损坏）都按空配置处理。
-func loadConfig() *config {
-	c := &config{}
+// LoadConfig 任何失败（无文件/损坏）都按空配置处理。
+func LoadConfig() *Config {
+	c := &Config{}
 	p, err := configPath()
 	if err != nil {
 		return c
@@ -36,7 +36,7 @@ func loadConfig() *config {
 	return c
 }
 
-func saveConfig(c *config) error {
+func SaveConfig(c *Config) error {
 	p, err := configPath()
 	if err != nil {
 		return err

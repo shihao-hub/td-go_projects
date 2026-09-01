@@ -1,4 +1,4 @@
-package main
+package ui
 
 import (
 	"log"
@@ -10,7 +10,7 @@ import (
 // 日志落在 %AppData%\exe-launcher\exe-launcher.log，追加写。
 // GUI 程序没有控制台，panic / 关键动作都必须落到这个文件才可定位。
 
-func initLogging() {
+func InitLogging() {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return
@@ -25,7 +25,7 @@ func initLogging() {
 	log.SetFlags(log.LstdFlags)
 }
 
-func logPath() string {
+func LogPath() string {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return ""
@@ -41,6 +41,6 @@ func recoverLog(what string) {
 	}
 }
 
-func logFatal(format string, args ...any) {
+func LogFatal(format string, args ...any) {
 	log.Printf("FATAL "+format, args...)
 }

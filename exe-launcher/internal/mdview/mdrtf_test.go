@@ -1,4 +1,4 @@
-package main
+package mdview
 
 import (
 	"strings"
@@ -60,10 +60,10 @@ func TestMdToRTFBlocks(t *testing.T) {
 		{"段落", "plain para", []string{`\pard\fs20 plain para\par`}},
 	}
 	for _, c := range cases {
-		got := mdToRTF(c.line + "\n")
+		got := MDToRTF(c.line + "\n")
 		for _, want := range c.contains {
 			if !strings.Contains(got, want) {
-				t.Errorf("%s: mdToRTF(%q) = %q, 缺少 %q", c.name, c.line, got, want)
+				t.Errorf("%s: MDToRTF(%q) = %q, 缺少 %q", c.name, c.line, got, want)
 			}
 		}
 	}
@@ -71,7 +71,7 @@ func TestMdToRTFBlocks(t *testing.T) {
 
 func TestMdToRTFCodeBlock(t *testing.T) {
 	in := "before\n```\nfmt.Println(42)\n```\nafter"
-	got := mdToRTF(in)
+	got := MDToRTF(in)
 	for _, want := range []string{
 		`\f1\fs19\highlight3 fmt.Println(42)\highlight0\f0\fs20\par`,
 		`\pard\fs20 before\par`,
@@ -85,7 +85,7 @@ func TestMdToRTFCodeBlock(t *testing.T) {
 
 func TestMdToRTFDocument(t *testing.T) {
 	in := "# Tool\n\nOne line intro.\n\n## Usage\n\n- `-list` list only\n- `-yes` skip confirm\n\n```\nexe -install\n```\n\n> Note: quoted text\n\n---\n\nTail **bold** end.\n"
-	got := mdToRTF(in)
+	got := MDToRTF(in)
 	for _, want := range []string{
 		`{\rtf1\ansi\deff0`,
 		`\fs36\b `,

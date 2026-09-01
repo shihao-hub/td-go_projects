@@ -1,6 +1,7 @@
-package main
+package ui
 
 import (
+	"exe-launcher/internal/win32"
 	"log"
 	"syscall"
 	"unsafe"
@@ -11,7 +12,7 @@ import (
 // explorer 重启后凭 TaskbarCreated 广播重挂图标。
 
 const (
-	wmAppTray  = wmApp + 1 // 托盘回调消息
+	wmAppTray  = win32.WM_APP + 1 // 托盘回调消息
 	trayIconID = 1
 
 	idTrayShow = 2001 // 托盘菜单：打开主窗口
@@ -26,23 +27,23 @@ var (
 
 // loadTrayIcon 从 exe 资源 #1 取小尺寸图标（托盘与窗口共用同一资源）。
 func loadTrayIcon() uintptr {
-	hInst, _, _ := pGetModuleHandleW.Call(0)
-	cx, _, _ := pGetSystemMetrics.Call(smCxsmIcon)
-	cy, _, _ := pGetSystemMetrics.Call(smCysmIcon)
-	h, _, _ := pLoadImageW.Call(hInst, trayIconID, imageIcon, cx, cy, lrDefaultColor)
+	hInst, _, _ := win32.GetModuleHandleW.Call(0)
+	cx, _, _ := win32.GetSystemMetrics.Call(win32.SM_CXSMICON)
+	cy, _, _ := win32.GetSystemMetrics.Call(win32.SM_CYSMICON)
+	h, _, _ := win32.LoadImageW.Call(hInst, trayIconID, win32.IMAGE_ICON, cx, cy, win32.LR_DEFAULTCOLOR)
 	return h
 }
 
-func trayNid(hwnd uintptr, tip string) notifyIconDataW {
-	nid := notifyIconDataW{
-		cbSize:           uint32(unsafe.Sizeof(notifyIconDataW{})),
-		hWnd:             hwnd,
-		uID:              trayIconID,
-		uFlags:           nifMessage | nifIcon | nifTip,
-		uCallbackMessage: wmAppTray,
-		hIcon:            hTrayIcon,
+func trayNid(hwnd uintptr, tip string) win32.NotifyIconDataW {
+	nid := win32.NotifyIconDataW{
+		CbSize:           uint32(unsafe.Sizeof(win32.NotifyIconDataW{})),
+		Hwnd:             hwnd,
+		UID:              trayIconID,
+		UFlags:           win32.NIF_MESSAGE | win32.NIF_ICON | win32.NIF_TIP,
+		UCallbackMessage: wmAppTray,
+		HIcon:            hTrayIcon,
 	}
-	copy(nid.szTip[:], utf16Encode(tip, len(nid.szTip)))
+	copy(nid.SzTip[:], utf16Encode(tip, len(nid.SzTip)))
 	return nid
 }
 
@@ -69,7 +70,7 @@ func trayInit(hwnd uintptr) bool {
 		return false
 	}
 	nid := trayNid(hwnd, mainTitle)
-	r, _, err := pShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&nid)))
+	r, _, err := win32.ShellNotifyIconW.Call(win32.NIM_ADD, uintptr(unsafe.Pointer(&nid)))
 	if r == 0 {
 		log.Printf("托盘图标注册失败: %v", err)
 		return false
@@ -77,7 +78,7 @@ func trayInit(hwnd uintptr) bool {
 	trayReady = true
 
 	// 记录 TaskbarCreated 广播消息 ID（explorer 重启 → 重挂图标）
-	if m, _, _ := pRegisterWindowMessageW.Call(uintptr(unsafe.Pointer(mustUTF16("TaskbarCreated")))); m != 0 {
+	if m, _, _ := win32.RegisterWindowMessageW.Call(uintptr(unsafe.Pointer(win32.MustUTF16("TaskbarCreated")))); m != 0 {
 		taskbarCreatedMsg = uint32(m)
 	}
 	log.Printf("托盘已注册 (icon=0x%X)", hTrayIcon)
@@ -90,7 +91,7 @@ func trayRemove(hwnd uintptr) {
 		return
 	}
 	nid := trayNid(hwnd, "")
-	pShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&nid)))
+	win32.ShellNotifyIconW.Call(win32.NIM_DELETE, uintptr(unsafe.Pointer(&nid)))
 	trayReady = false
 }
 
@@ -102,7 +103,7 @@ func trayReAdd(hwnd uintptr) {
 	trayRemove(hwnd)
 	trayReady = false
 	nid := trayNid(hwnd, mainTitle)
-	if h, _, _ := pShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&nid))); h != 0 {
+	if h, _, _ := win32.ShellNotifyIconW.Call(win32.NIM_ADD, uintptr(unsafe.Pointer(&nid))); h != 0 {
 		trayReady = true
 		log.Printf("托盘图标已重挂 (TaskbarCreated)")
 	}
@@ -111,42 +112,42 @@ func trayReAdd(hwnd uintptr) {
 // onTrayMessage 处理托盘回调：左键单击恢复窗口，右键弹菜单。
 func onTrayMessage(w *mainWindow, lParam uintptr) {
 	switch uint32(lParam) {
-	case wmLbuttonUp, wmLbuttonDbl:
+	case win32.WM_LBUTTONUP, win32.WM_LBUTTONDBLCLK:
 		w.showFromTray()
-	case wmRbuttonUp:
+	case win32.WM_RBUTTONUP:
 		w.showTrayMenu()
 	}
 }
 
 // showFromTray 恢复主窗口到前台。
 func (w *mainWindow) showFromTray() {
-	if vis, _, _ := pIsWindowVisible.Call(w.hwnd); vis == 0 {
-		if ic, _, _ := pIsIconic.Call(w.hwnd); ic != 0 {
-			pShowWindow.Call(w.hwnd, swRestore)
+	if vis, _, _ := win32.IsWindowVisible.Call(w.hwnd); vis == 0 {
+		if ic, _, _ := win32.IsIconic.Call(w.hwnd); ic != 0 {
+			win32.ShowWindow.Call(w.hwnd, win32.SW_RESTORE)
 		} else {
-			pShowWindow.Call(w.hwnd, swShow)
+			win32.ShowWindow.Call(w.hwnd, win32.SW_SHOW)
 		}
 	}
-	pSetForegroundWindow.Call(w.hwnd)
+	win32.SetForegroundWindow.Call(w.hwnd)
 }
 
 // showTrayMenu 托盘右键菜单：打开主窗口 / 退出。
 // 与列表右键菜单同一套弹菜单流程（前置 SetForegroundWindow + 后置 WM_NULL）。
 func (w *mainWindow) showTrayMenu() {
-	menu, _, _ := pCreatePopupMenu.Call()
+	menu, _, _ := win32.CreatePopupMenu.Call()
 	if menu == 0 {
 		return
 	}
-	defer pDestroyMenu.Call(menu)
+	defer win32.DestroyMenu.Call(menu)
 
-	pAppendMenuW.Call(menu, mfString, idTrayShow, uintptr(unsafe.Pointer(mustUTF16("打开主窗口"))))
-	pAppendMenuW.Call(menu, mfSeparator, 0, 0)
-	pAppendMenuW.Call(menu, mfString, idTrayQuit, uintptr(unsafe.Pointer(mustUTF16("退出"))))
+	win32.AppendMenuW.Call(menu, win32.MF_STRING, idTrayShow, uintptr(unsafe.Pointer(win32.MustUTF16("打开主窗口"))))
+	win32.AppendMenuW.Call(menu, win32.MF_SEPARATOR, 0, 0)
+	win32.AppendMenuW.Call(menu, win32.MF_STRING, idTrayQuit, uintptr(unsafe.Pointer(win32.MustUTF16("退出"))))
 
-	var pt point
-	pGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-	pSetForegroundWindow.Call(w.hwnd)
-	pTrackPopupMenu.Call(menu, tpmRightButton,
-		uintptr(uint32(pt.x)), uintptr(uint32(pt.y)), 0, w.hwnd, 0)
-	pPostMessageW.Call(w.hwnd, wmNull, 0, 0)
+	var pt win32.Point
+	win32.GetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+	win32.SetForegroundWindow.Call(w.hwnd)
+	win32.TrackPopupMenu.Call(menu, win32.TPM_RIGHTBUTTON,
+		uintptr(uint32(pt.X)), uintptr(uint32(pt.Y)), 0, w.hwnd, 0)
+	win32.PostMessageW.Call(w.hwnd, win32.WM_NULL, 0, 0)
 }

@@ -1,4 +1,4 @@
-package main
+package scan
 
 import (
 	"os"
@@ -26,7 +26,7 @@ func TestScanDirExe(t *testing.T) {
 	}
 	mk("readme.txt")
 
-	got, err := scanDirExe(root)
+	got, err := ScanDirExe(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,20 +49,6 @@ func TestIsNoiseDir(t *testing.T) {
 	for _, n := range []string{"dist", "src", "build"} {
 		if isNoiseDir(n) {
 			t.Errorf("%q 不应视为噪音目录", n)
-		}
-	}
-}
-
-func TestExeBaseName(t *testing.T) {
-	cases := map[string]string{
-		`C:\a\b\Foo.exe`: "Foo",
-		`C:\a\b\Foo.EXE`: "Foo",
-		"bar.exe":        "bar",
-		`D:\x\a.b.exe`:   "a.b",
-	}
-	for in, want := range cases {
-		if got := exeBaseName(in); got != want {
-			t.Errorf("exeBaseName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

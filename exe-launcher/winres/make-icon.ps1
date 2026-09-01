@@ -2,9 +2,9 @@
 #
 # 视觉：深靛蓝渐变圆角底 + 2x2 彩色圆角方块网格（应用启动器隐喻），
 # 右下角白色方块内嵌靛蓝播放三角，点出「启动」。16px 托盘尺寸下四色网格仍可辨。
-# 改完重新生成本图后，需再执行：
-#   go-winres make --arch amd64
-# 把各尺寸（16/32/48/256）打包进 rsrc_windows_amd64.syso 并重新 build.ps1。
+# 改完重新生成本图后，需再执行（在仓库根目录）：
+#   go-winres make --arch amd64 --out cmd\exe-launcher\rsrc
+# 把各尺寸（16/32/48/256）打包进 cmd\exe-launcher\rsrc_windows_amd64.syso 并重新 scripts\build.ps1。
 
 Add-Type -AssemblyName System.Drawing
 
