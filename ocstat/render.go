@@ -5,10 +5,8 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"text/tabwriter"
-	"time"
 )
 
 var effortOrder = map[string]int{"max": 0, "high": 1, "medium": 2, "low": 3, "default": 4}
@@ -23,17 +21,41 @@ func effortRank(v string) int {
 	return 6
 }
 
+// effortSortKey: 「default→max」这类合并展示取 → 后面的真实档位参与排序。
+func effortSortKey(v string) string {
+	if i := strings.Index(v, "→"); i >= 0 {
+		return v[i+len("→"):]
+	}
+	return v
+}
+
 func effortLess(a, b string) bool {
-	if effortRank(a) != effortRank(b) {
-		return effortRank(a) < effortRank(b)
+	ka, kb := effortSortKey(a), effortSortKey(b)
+	if effortRank(ka) != effortRank(kb) {
+		return effortRank(ka) < effortRank(kb)
 	}
 	return a < b
 }
 
-func render(w io.Writer, snap *dataSnapshot, opt options) {
+// resolveEffort 合并配置档位：variant 为 default/缺失且配置里写死了 effort
+// （options.reasoningEffort / effort）时展示为「default→max」；
+// 真实档位变体（max/low 等）本身就是档位，原样返回。
+func resolveEffort(cfg effortConfig, provider, model, variant string) string {
+	if variant != "" && variant != "default" {
+		return variant
+	}
+	if eff := cfg.lookup(provider, model); eff != "" {
+		return "default→" + eff
+	}
+	if variant == "" {
+		return "-"
+	}
+	return variant
+}
+
+func render(w io.Writer, snap *dataSnapshot) {
 	printHeader(w, snap)
 	printSummary(w, snap)
-	printDetail(w, snap, opt)
 }
 
 func printHeader(w io.Writer, snap *dataSnapshot) {
@@ -56,8 +78,11 @@ func printHeader(w io.Writer, snap *dataSnapshot) {
 	if snap.Mode == modeFull {
 		fmt.Fprintf(w, "（无实际消息 %d，有启动模型 %d）", snap.NoMsgCount, snap.StartupCount)
 	}
-	fmt.Fprintf(w, " · opencode 版本 %s · 数据 %s · 生成于 %s\n",
-		versionRange(snap.Versions), integrity, snap.Generated.Format("01-02 15:04:05"))
+	fmt.Fprintf(w, " · opencode 版本 %s · 数据 %s", versionRange(snap.Versions), integrity)
+	if snap.CfgMerged {
+		fmt.Fprint(w, " · 档位已合并配置")
+	}
+	fmt.Fprintf(w, " · 生成于 %s\n", snap.Generated.Format("01-02 15:04:05"))
 	if snap.Mode == modeBasic {
 		fmt.Fprintf(w, "⚠ %s\n", snap.Note)
 	}
@@ -94,7 +119,7 @@ func printSummary(w io.Writer, snap *dataSnapshot) {
 		if _, ok := groups[k]; !ok {
 			order = append(order, k)
 		}
-		v := m.effort()
+		v := resolveEffort(snap.EffortCfg, m.Provider, m.ID, m.Variant)
 		found := false
 		for i := range groups[k] {
 			if groups[k][i].effort == v {
@@ -134,140 +159,6 @@ func printSummary(w io.Writer, snap *dataSnapshot) {
 	fmt.Fprintf(tw, "合计\t\t\t%d\t100%%\n", total)
 	tw.Flush()
 	fmt.Fprintln(w)
-}
-
-func printDetail(w io.Writer, snap *dataSnapshot, opt options) {
-	list := snap.Sessions
-	if opt.switched {
-		var filtered []*sessionStat
-		for _, st := range list {
-			if st.Switched {
-				filtered = append(filtered, st)
-			}
-		}
-		list = filtered
-	}
-	if !opt.showAll && opt.limit > 0 && len(list) > opt.limit {
-		list = list[:opt.limit]
-	}
-
-	scope := "最近 " + strconv.Itoa(opt.limit)
-	if opt.showAll || opt.limit <= 0 {
-		scope = "全部"
-	}
-	if opt.switched {
-		scope += "，仅切换过的"
-	}
-	fmt.Fprintf(w, "── 会话明细（%s，⇄ = 切换过模型/档位）──\n", scope)
-	if len(list) == 0 {
-		fmt.Fprintln(w, "（无匹配会话）")
-		return
-	}
-
-	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "时间\t目录\tAGENT\t启动模型\t启动档\t当前档\t消息\t⇄\t用过的模型")
-	for _, st := range list {
-		mark := ""
-		if st.Switched {
-			mark = "⇄"
-		}
-		msgs := "-"
-		if snap.Mode == modeFull {
-			msgs = strconv.Itoa(st.MsgCount)
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			time.UnixMilli(st.Created).Format("01-02 15:04"),
-			shortDir(st.Dir),
-			orDash(st.Agent),
-			st.Startup.name(),
-			st.Startup.effort(),
-			st.Current.effort(),
-			msgs,
-			mark,
-			formatUsed(st.Used),
-		)
-	}
-	tw.Flush()
-	if snap.Mode == modeFull {
-		fmt.Fprintln(w, "注: opencode 内置模型（如 big-pickle 标题模型）不参与切换判定")
-	}
-}
-
-func shortDir(dir string) string {
-	if dir == "" {
-		return "-"
-	}
-	d := strings.ReplaceAll(dir, "\\", "/")
-	d = strings.TrimRight(d, "/")
-	if i := strings.LastIndex(d, "/"); i >= 0 {
-		d = d[i+1:]
-	}
-	if d == "" {
-		return "/"
-	}
-	if len(d) > 18 {
-		return d[:15] + "…"
-	}
-	return d
-}
-
-func formatUsed(used []modelSel) string {
-	if len(used) == 0 {
-		return "-"
-	}
-	type group struct {
-		p, m string
-		vars []string
-	}
-	var gs []*group
-	idx := map[[2]string]*group{}
-	for _, u := range used {
-		k := [2]string{u.Provider, u.ID}
-		if gr, ok := idx[k]; ok {
-			if u.Variant != "" && !containsStr(gr.vars, u.Variant) {
-				gr.vars = append(gr.vars, u.Variant)
-			}
-			continue
-		}
-		gr := &group{p: u.Provider, m: u.ID}
-		if u.Variant != "" {
-			gr.vars = append(gr.vars, u.Variant)
-		}
-		idx[k] = gr
-		gs = append(gs, gr)
-	}
-	var parts []string
-	for _, gr := range gs {
-		s := gr.p + "/" + gr.m
-		if len(gr.vars) > 0 {
-			vs := append([]string(nil), gr.vars...)
-			sort.SliceStable(vs, func(i, j int) bool { return effortLess(vs[i], vs[j]) })
-			s += "(" + strings.Join(vs, "/") + ")"
-		}
-		parts = append(parts, s)
-	}
-	out := strings.Join(parts, "; ")
-	if len(out) > 64 {
-		r := []rune(out)
-		return string(r[:61]) + "…"
-	}
-	return out
-}
-
-func containsStr(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }
 
 func humanSize(n int64) string {

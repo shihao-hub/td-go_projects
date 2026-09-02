@@ -26,28 +26,6 @@ type modelSel struct {
 	Variant  string `json:"variant"`
 }
 
-func (m *modelSel) name() string {
-	if m == nil {
-		return "-"
-	}
-	if m.Provider == "" {
-		return m.ID
-	}
-	return m.Provider + "/" + m.ID
-}
-
-func (m *modelSel) effort() string {
-	if m == nil || m.Variant == "" {
-		return "-"
-	}
-	return m.Variant
-}
-
-// opencode 内置模型（如 big-pickle 标题模型）不参与切换判定
-func (m modelSel) internal() bool {
-	return m.Provider == "opencode"
-}
-
 // 数据完整性分级
 const (
 	modeBroken = 0 // session 表/关键列缺失，无法统计
@@ -225,16 +203,11 @@ func copyFile(src, dst string) error {
 }
 
 type sessionStat struct {
-	ID       string
-	Dir      string
-	Agent    string
 	Version  string
 	Created  int64
 	MsgCount int
 	Startup  *modelSel
 	Current  *modelSel
-	Used     []modelSel
-	Switched bool
 }
 
 type dataSnapshot struct {
@@ -249,6 +222,8 @@ type dataSnapshot struct {
 	Sessions      []*sessionStat
 	NoMsgCount    int
 	StartupCount  int
+	EffortCfg     effortConfig
+	CfgMerged     bool
 }
 
 type eventEntry struct {
@@ -270,25 +245,23 @@ func (s *store) snapshot(ctx context.Context) (*dataSnapshot, error) {
 	if fi, err := os.Stat(s.path); err == nil {
 		snap.DBSize, snap.DBMod = fi.Size(), fi.ModTime()
 	}
+	snap.EffortCfg, snap.CfgMerged = loadEffortConfig()
 
 	stats := map[string]*sessionStat{}
 	verSet := map[string]bool{}
-	rows, err := s.db.QueryContext(ctx, "select id, directory, agent, version, model, time_created from session")
+	rows, err := s.db.QueryContext(ctx, "select id, model, version, time_created from session")
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var id, dir string
-		var agent, ver, model sql.NullString
+		var id string
+		var ver, model sql.NullString
 		var created int64
-		if err := rows.Scan(&id, &dir, &agent, &ver, &model, &created); err != nil {
+		if err := rows.Scan(&id, &model, &ver, &created); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		st := &sessionStat{ID: id, Dir: dir, Created: created, Current: parseModelJSON(model)}
-		if agent.Valid {
-			st.Agent = agent.String
-		}
+		st := &sessionStat{Created: created, Current: parseModelJSON(model)}
 		if ver.Valid {
 			st.Version = ver.String
 			verSet[ver.String] = true
@@ -327,8 +300,7 @@ func (s *store) snapshot(ctx context.Context) (*dataSnapshot, error) {
 }
 
 // enrichFull 用 message 表找到每个会话首条非 title 的 assistant 消息，
-// 再用 session.created/updated 事件时间线对齐出该时刻生效的模型+档位（已验证 235/235 吻合），
-// 同时汇总会话内出现过的 distinct 模型集合。
+// 再用 session.created/updated 事件时间线对齐出该时刻生效的模型+档位（已验证 235/235 吻合）。
 func enrichFull(ctx context.Context, db *sql.DB, stats map[string]*sessionStat) error {
 	type firstMsg struct {
 		t int64
@@ -411,15 +383,6 @@ func enrichFull(ctx context.Context, db *sql.DB, stats map[string]*sessionStat) 
 			}
 			st.Startup = hit
 		}
-		seen := map[modelSel]bool{}
-		for _, e := range tl {
-			if e.m.internal() || seen[e.m] {
-				continue
-			}
-			seen[e.m] = true
-			st.Used = append(st.Used, e.m)
-		}
-		st.Switched = len(st.Used) > 1
 	}
 	return nil
 }

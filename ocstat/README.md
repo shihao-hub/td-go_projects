@@ -15,9 +15,6 @@
 选项：
 
     -i 5s      watch 刷新间隔
-    -n 30      明细最近 N 条
-    -all       明细显示全部
-    -switched  只看切换过模型/档位的会话
     -db PATH   opencode.db 路径（默认 ~/.local/share/opencode/opencode.db，识别 OPENCODE_DATA）
 
 ## 数据口径
@@ -25,8 +22,8 @@
 - 数据源：`~/.local/share/opencode/opencode.db`（SQLite，只读打开 `mode=ro` + `busy_timeout 5s`，不打扰运行中的 opencode）
 - **启动模型+档位**：首条非 title 的 assistant 消息时间点，`session.created/updated` 事件时间线上生效的 `model`（含 `variant`）。已用真实库验证 235/235 与消息 modelID 吻合
 - **思考深度**：`model.variant`（max/high/medium/low/default，缺失显示 `-`），来自 cc-switch 等 variant 方案
-- **用过的模型**：会话事件时间线上出现过的 distinct 模型集合；>1 标记 ⇄
-- 注：`session.created` 初始 model 常是 opencode 内置 `big-pickle`（标题模型），不代表实际开工模型，故不直接采用；opencode 内置模型同样不参与切换判定
+- **配置档位合并**：variant 为 default/缺失且模型 options 里写死了档位（`reasoningEffort`/`effort`，如 zhipu-glm 的 max）时展示为 `default→max`，排序按解析后的真实档位。数据来自当前 `~/.config/opencode/` 配置，假设历史配置未变；头部有「档位已合并配置」标记
+- 注：`session.created` 初始 model 常是 opencode 内置 `big-pickle`（标题模型），不代表实际开工模型，故不直接采用
 
 ## opencode 升级改表结构怎么办
 

@@ -21,9 +21,6 @@ const version = "0.1.0"
 type options struct {
 	watch    bool
 	interval time.Duration
-	limit    int
-	showAll  bool
-	switched bool
 	dbPath   string
 }
 
@@ -44,9 +41,6 @@ func main() {
 	fs := flag.NewFlagSet("ocstat", flag.ExitOnError)
 	fs.Usage = func() { usage(fs) }
 	fs.DurationVar(&opt.interval, "i", 5*time.Second, "watch 模式刷新间隔")
-	fs.IntVar(&opt.limit, "n", 30, "明细展示最近 N 条会话")
-	fs.BoolVar(&opt.showAll, "all", false, "明细展示全部会话")
-	fs.BoolVar(&opt.switched, "switched", false, "只展示切换过模型/档位的会话")
 	fs.StringVar(&opt.dbPath, "db", defaultDBPath(), "opencode.db 路径")
 	fs.Parse(args)
 
@@ -80,7 +74,7 @@ func runOnce(opt options) error {
 	if err != nil {
 		return err
 	}
-	render(os.Stdout, snap, opt)
+	render(os.Stdout, snap)
 	return nil
 }
 
@@ -106,7 +100,7 @@ func runWatch(opt options) error {
 			fmt.Fprintf(os.Stdout, "错误: %v\n\n（保持监听，%s 后重试 · Ctrl+C 退出）\n", err, opt.interval)
 			return
 		}
-		render(os.Stdout, snap, opt)
+		render(os.Stdout, snap)
 		fmt.Printf("\n每 %s 刷新 · 本轮耗时 %dms · Ctrl+C 退出\n", opt.interval, time.Since(start).Milliseconds())
 	}
 
