@@ -1,9 +1,9 @@
 //go:build !windows
 
-package main
+package app
 
 import "log"
 
-func alertError(title, text string) {
+func AlertError(title, text string) {
 	log.Printf("%s: %s", title, text)
 }

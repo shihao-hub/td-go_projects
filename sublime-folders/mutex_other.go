@@ -1,5 +1,5 @@
 //go:build !windows
 
-package main
+package app
 
-func acquireSingleInstance() bool { return true }
+func AcquireSingleInstance() bool { return true }

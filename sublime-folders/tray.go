@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	_ "embed"
@@ -13,7 +13,7 @@ import (
 //go:embed assets/icon.ico
 var iconBytes []byte
 
-func runTray(st *store, interval time.Duration, retainDays int) {
+func RunTray(st *Store, interval time.Duration, retainDays int) {
 	systray.Run(func() {
 		systray.SetIcon(iconBytes)
 		systray.SetTooltip(fmt.Sprintf("sublime-folders · 每 %s 记录一次 Sublime 打开的目录", interval))
@@ -28,7 +28,7 @@ func runTray(st *store, interval time.Duration, retainDays int) {
 		mData := systray.AddMenuItem("打开数据目录", "记录库与日志所在目录")
 		mQuit := systray.AddMenuItem("退出", "退出 sublime-folders")
 
-		go captureLoop(st, interval, retainDays)
+		go CaptureLoop(st, interval, retainDays)
 
 		go func() {
 			for {
@@ -38,19 +38,19 @@ func runTray(st *store, interval time.Duration, retainDays int) {
 				case <-mLatest.ClickedCh:
 					snaps, err := st.latestN(10)
 					if err != nil {
-						alertError("sublime-folders", "查询记录失败: "+err.Error())
+						AlertError("sublime-folders", "查询记录失败: "+err.Error())
 						continue
 					}
 					showRecords("Sublime Text 目录记录 · 最新 10 条", "records-latest", snaps)
 				case <-mAll.ClickedCh:
 					snaps, err := st.all()
 					if err != nil {
-						alertError("sublime-folders", "查询记录失败: "+err.Error())
+						AlertError("sublime-folders", "查询记录失败: "+err.Error())
 						continue
 					}
 					showRecords("Sublime Text 目录记录 · 全部", "records-all", snaps)
 				case <-mData.ClickedCh:
-					if dir, err := dataDir(); err == nil {
+					if dir, err := DataDir(); err == nil {
 						_ = exec.Command("explorer", dir).Start()
 					}
 				case <-mQuit.ClickedCh:

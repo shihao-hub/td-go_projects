@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -23,16 +23,16 @@ func showText(name, header string, lines []string) {
 		b.WriteString("\r\n")
 	}
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		alertError("sublime-folders", "写入临时文件失败: "+err.Error())
+		AlertError("sublime-folders", "写入临时文件失败: "+err.Error())
 		return
 	}
 	_ = exec.Command("notepad", path).Start()
 }
 
 func showCurrent() {
-	folders, src, err := currentFolders()
+	folders, src, err := CurrentFolders()
 	if err != nil {
-		alertError("sublime-folders", "读取 Sublime 会话失败: "+err.Error())
+		AlertError("sublime-folders", "读取 Sublime 会话失败: "+err.Error())
 		return
 	}
 	lines := []string{

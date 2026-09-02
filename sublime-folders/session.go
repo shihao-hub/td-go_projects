@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"encoding/json"
@@ -14,17 +14,17 @@ const (
 	sessionName  = "Session.sublime_session"
 )
 
-type sessionFolder struct {
+type SessionFolder struct {
 	Path string `json:"path"`
 }
 
-type sessionWindow struct {
-	Folders []sessionFolder `json:"folders"`
+type SessionWindow struct {
+	Folders []SessionFolder `json:"folders"`
 	Project string          `json:"project"`
 }
 
-type sessionData struct {
-	Windows []sessionWindow `json:"windows"`
+type SessionData struct {
+	Windows []SessionWindow `json:"windows"`
 }
 
 func candidateSessionFiles() []string {
@@ -43,11 +43,11 @@ func candidateSessionFiles() []string {
 	return out
 }
 
-// loadAutoSession tries candidates in order: live Auto Save first, then
+// LoadAutoSession tries candidates in order: live Auto Save first, then
 // the exit-time snapshot, newest Sublime version dir first. A candidate
 // that fails to read or parse is skipped so a half-written Auto Save
 // file never breaks the run.
-func loadAutoSession() (*sessionData, string, error) {
+func LoadAutoSession() (*SessionData, string, error) {
 	var lastErr error
 	for _, c := range candidateSessionFiles() {
 		data, err := os.ReadFile(c)
@@ -55,7 +55,7 @@ func loadAutoSession() (*sessionData, string, error) {
 			lastErr = err
 			continue
 		}
-		var sess sessionData
+		var sess SessionData
 		if err := json.Unmarshal(data, &sess); err != nil {
 			lastErr = fmt.Errorf("%s: %w", c, err)
 			continue
@@ -68,10 +68,10 @@ func loadAutoSession() (*sessionData, string, error) {
 	return nil, "", lastErr
 }
 
-// currentFolders 返回全部窗口目录的合并去重排序列表。
+// CurrentFolders 返回全部窗口目录的合并去重排序列表。
 // 绑定了 .sublime-project 的窗口若会话里没有 folders，则回退读工程文件。
-func currentFolders() ([]string, string, error) {
-	sess, src, err := loadAutoSession()
+func CurrentFolders() ([]string, string, error) {
+	sess, src, err := LoadAutoSession()
 	if err != nil {
 		return nil, "", err
 	}
@@ -81,7 +81,7 @@ func currentFolders() ([]string, string, error) {
 		if len(folders) == 0 && w.Project != "" {
 			if data, err := os.ReadFile(w.Project); err == nil {
 				var proj struct {
-					Folders []sessionFolder `json:"folders"`
+					Folders []SessionFolder `json:"folders"`
 				}
 				if json.Unmarshal(data, &proj) == nil {
 					folders = proj.Folders

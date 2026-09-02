@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"database/sql"
@@ -17,12 +17,12 @@ type snapshot struct {
 	Folders []string
 }
 
-type store struct {
+type Store struct {
 	db *sql.DB
 }
 
-// dataDir 返回 %APPDATA%\sublime-folders，存放记录库与日志。
-func dataDir() (string, error) {
+// DataDir 返回 %APPDATA%\sublime-folders，存放记录库与日志。
+func DataDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -30,8 +30,8 @@ func dataDir() (string, error) {
 	return filepath.Join(base, "sublime-folders"), nil
 }
 
-func openStore() (*store, error) {
-	dir, err := dataDir()
+func OpenStore() (*Store, error) {
+	dir, err := DataDir()
 	if err != nil {
 		return nil, err
 	}
@@ -58,13 +58,13 @@ func openStore() (*store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &store{db: db}, nil
+	return &Store{db: db}, nil
 }
 
-func (s *store) Close() error { return s.db.Close() }
+func (s *Store) Close() error { return s.db.Close() }
 
 // lastSnapshotFolders 返回最新一条记录的 folders JSON；无记录时返回空串。
-func (s *store) lastSnapshotFolders() string {
+func (s *Store) lastSnapshotFolders() string {
 	var j string
 	if err := s.db.QueryRow(`SELECT folders FROM snapshot ORDER BY id DESC LIMIT 1`).Scan(&j); err != nil {
 		return ""
@@ -72,7 +72,7 @@ func (s *store) lastSnapshotFolders() string {
 	return j
 }
 
-func (s *store) insertSnapshot(folders []string) error {
+func (s *Store) insertSnapshot(folders []string) error {
 	j, err := json.Marshal(folders)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (s *store) insertSnapshot(folders []string) error {
 	return err
 }
 
-func (s *store) query(limit int64) ([]snapshot, error) {
+func (s *Store) query(limit int64) ([]snapshot, error) {
 	q := `SELECT id, ts, folders FROM snapshot ORDER BY id DESC`
 	var args []any
 	if limit > 0 {
@@ -109,11 +109,11 @@ func (s *store) query(limit int64) ([]snapshot, error) {
 	return out, rows.Err()
 }
 
-func (s *store) latestN(n int) ([]snapshot, error) { return s.query(int64(n)) }
-func (s *store) all() ([]snapshot, error)          { return s.query(0) }
+func (s *Store) latestN(n int) ([]snapshot, error) { return s.query(int64(n)) }
+func (s *Store) all() ([]snapshot, error)          { return s.query(0) }
 
 // prune 删除 retainDays 天前的记录，返回删除条数。
-func (s *store) prune(retainDays int) (int64, error) {
+func (s *Store) prune(retainDays int) (int64, error) {
 	cutoff := time.Now().AddDate(0, 0, -retainDays).Format("2006-01-02 15:04:05")
 	res, err := s.db.Exec(`DELETE FROM snapshot WHERE ts < ?`, cutoff)
 	if err != nil {
