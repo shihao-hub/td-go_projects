@@ -1,10 +1,20 @@
-# Go 构建产物不入库
+# Go 编译产物（二进制与插件）
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 测试与覆盖率产物
 *.test
 *.out
+coverage.*
+*.coverprofile
+profile.cov
 
-# AI 会话产物不入库
-.zcode/
+# 依赖目录
+vendor/
 
-# file-sync-native 运行缓存不入库
-file-sync-native/cache.gob
+# Go workspace 文件
+go.work
+go.work.sum
