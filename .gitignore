@@ -5,3 +5,6 @@
 
 # AI 会话产物不入库
 .zcode/
+
+# file-sync-native 运行缓存不入库
+file-sync-native/cache.gob
