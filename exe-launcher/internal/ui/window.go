@@ -24,6 +24,7 @@ const (
 	idcRefresh = 1008
 	idcMdDoc   = 1009
 	idcTag     = 1010
+	idcEditPath = 1011
 )
 
 // 控件 ID（WM_NOTIFY 里用 idFrom 区分来源）
@@ -204,7 +205,7 @@ func (w *mainWindow) createToolbar(hInst uintptr) {
 	win32.SendMsg(w.hToolbar, win32.WM_SETFONT, w.hFont, 1)
 	win32.SendMsg(w.hToolbar, win32.TB_BUTTONSTRUCTSIZE, unsafe.Sizeof(win32.TBButton{}), 0)
 
-	strs := win32.UTF16DoubleNull("添加 EXE", "扫描目录", "启动", "打开目录", "PowerShell", "介绍", "打标", "移除", "清理失效", "刷新")
+	strs := win32.UTF16DoubleNull("添加 EXE", "扫描目录", "启动", "打开目录", "PowerShell", "介绍", "打标", "改路径", "移除", "清理失效", "刷新")
 	base := win32.SendMsg(w.hToolbar, win32.TB_ADDSTRING, 0, uintptr(unsafe.Pointer(&strs[0])))
 
 	mk := func(id int, s uintptr) win32.TBButton {
@@ -226,9 +227,10 @@ func (w *mainWindow) createToolbar(hInst uintptr) {
 		mk(idcMdDoc, base+5),
 		mk(idcTag, base+6),
 		{FsStyle: win32.TBSTYLE_SEP},
-		mk(idcRemove, base+7),
-		mk(idcClean, base+8),
-		mk(idcRefresh, base+9),
+		mk(idcEditPath, base+7),
+		mk(idcRemove, base+8),
+		mk(idcClean, base+9),
+		mk(idcRefresh, base+10),
 	}
 	win32.SendMsg(w.hToolbar, win32.TB_ADDBUTTONS, uintptr(len(btns)), uintptr(unsafe.Pointer(&btns[0])))
 	win32.SendMsg(w.hToolbar, win32.TB_AUTOSIZE, 0, 0)
@@ -310,7 +312,13 @@ func (w *mainWindow) layout() {
 	if fy < 0 {
 		fy = 0
 	}
-	win32.MoveWindow.Call(w.hFilter, uintptr(cw-filterW), uintptr(fy), uintptr(filterW), uintptr(fh), 1)
+	// 工具栏未带 CCS_NOPARENTALIGN，每次 MoveWindow 都会自对齐到父窗口顶部并
+	// 断言 HWND_TOP、扩展成全宽，把筛选框压到下面：FLAT 空白区绘制透明但鼠标
+	// 命中不透明，表现为"全部"看得见点不着。必须用 SetWindowPos(HWND_TOP)
+	// 把筛选框重新抬到工具栏之上，每次布局都执行。
+	win32.SetWindowPos.Call(w.hFilter, win32.HWND_TOP,
+		uintptr(cw-filterW), uintptr(fy), uintptr(filterW), uintptr(fh),
+		win32.SWP_NOACTIVATE|win32.SWP_SHOWWINDOW)
 
 	win32.SendMsg(w.hStatus, win32.WM_SIZE, 0, win32.Makelparam(cw, ch))
 	sbH := win32.ClientHeight(w.hStatus)
@@ -399,14 +407,14 @@ func (w *mainWindow) updateStatus() {
 	win32.SendMsg(w.hStatus, win32.SB_SETTEXT, 0, uintptr(unsafe.Pointer(win32.MustUTF16(text))))
 }
 
-// updateButtonStates 单选一行后 启动/打开目录/PowerShell/打标/移除 才可用。
+// updateButtonStates 单选一行后 启动/打开目录/PowerShell/打标/改路径/移除 才可用。
 func (w *mainWindow) updateButtonStates() {
 	enable := win32.LvSelected(w.hList) >= 0
 	var flag uintptr
 	if enable {
 		flag = 1
 	}
-	for _, id := range []int{idcLaunch, idcOpenDir, idcPowerSh, idcMdDoc, idcTag, idcRemove} {
+	for _, id := range []int{idcLaunch, idcOpenDir, idcPowerSh, idcMdDoc, idcTag, idcEditPath, idcRemove} {
 		win32.SendMsg(w.hToolbar, win32.TB_ENABLEBUTTON, uintptr(id), flag)
 	}
 }
@@ -439,6 +447,8 @@ func (w *mainWindow) onCommand(id, code int) {
 		w.showMdDoc()
 	case idcTag:
 		w.tagSelected()
+	case idcEditPath:
+		w.editPathSelected()
 	case idcRemove:
 		w.removeSelected()
 	case idcClean:
@@ -493,7 +503,7 @@ func (w *mainWindow) ensureEntryValid(e *model.Entry) bool {
 }
 
 func (w *mainWindow) addExeByPicker() {
-	path, err := pickExeFile(w.hwnd, w.defaultPickDir())
+	path, err := pickExeFile(w.hwnd, w.defaultPickDir(), "选择 EXE")
 	if err != nil {
 		win32.MsgBox(w.hwnd, "打开文件选择框失败", err.Error(), win32.MB_ICONERROR)
 		return
@@ -605,6 +615,29 @@ func (w *mainWindow) tagSelected() {
 	w.reloadList()
 }
 
+// editPathSelected 只改选中条目的路径：文件选择框默认打开旧路径所在目录，
+// 标签与添加时间保留，名称跟随新文件名更新。
+func (w *mainWindow) editPathSelected() {
+	sel, e := w.selectedEntry()
+	if e == nil {
+		return
+	}
+	path, err := pickExeFile(w.hwnd, filepath.Dir(e.Path), "选择新的 EXE 路径")
+	if err != nil {
+		win32.MsgBox(w.hwnd, "打开文件选择框失败", err.Error(), win32.MB_ICONERROR)
+		return
+	}
+	if path == "" {
+		return
+	}
+	if !w.st.UpdatePath(sel, path) {
+		win32.MsgBox(w.hwnd, "已存在", "该 EXE 已在列表中：\n"+path, win32.MB_ICONINFO)
+		return
+	}
+	w.save()
+	w.reloadList()
+}
+
 func (w *mainWindow) removeSelected() {
 	sel, _ := w.selectedEntry()
 	if sel < 0 {
@@ -694,6 +727,7 @@ func (w *mainWindow) showContextMenu() {
 	appendMenu("在此目录开 PowerShell", idcPowerSh, enable)
 	appendMenu("查看介绍", idcMdDoc, enable)
 	appendMenu("设置标签", idcTag, enable)
+	appendMenu("修改路径", idcEditPath, enable)
 	win32.AppendMenuW.Call(menu, win32.MF_SEPARATOR, 0, 0)
 	appendMenu("移除", idcRemove, enable)
 

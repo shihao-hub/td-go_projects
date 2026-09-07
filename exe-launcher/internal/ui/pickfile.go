@@ -168,14 +168,14 @@ func runFileDialog(o fileDialogOptions) (string, error) {
 }
 
 // pickExeFile 选择单个 exe 文件。
-func pickExeFile(owner uintptr, defaultDir string) (string, error) {
+func pickExeFile(owner uintptr, defaultDir, title string) (string, error) {
 	specs := []comDlgFilterSpec{
 		{win32.MustUTF16("程序 (*.exe)"), win32.MustUTF16("*.exe")},
 		{win32.MustUTF16("所有文件 (*.*)"), win32.MustUTF16("*.*")},
 	}
 	return runFileDialog(fileDialogOptions{
 		owner:      owner,
-		title:      "选择 EXE",
+		title:      title,
 		fileTypes:  specs,
 		defaultDir: defaultDir,
 	})

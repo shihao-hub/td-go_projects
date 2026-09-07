@@ -77,6 +77,28 @@ func (s *Store) Add(name, path string) bool {
 	return true
 }
 
+// UpdatePath 只改第 index 条的路径并重算 Valid；名称跟随新文件名更新，
+// 标签与 AddedAt 原样保留。新路径与其他条目重复（大小写不敏感）返回 false；
+// 与旧路径相同视为无操作成功。
+func (s *Store) UpdatePath(index int, path string) bool {
+	if index < 0 || index >= len(s.Entries) || path == "" {
+		return false
+	}
+	path = filepath.Clean(path)
+	if samePath(s.Entries[index].Path, path) {
+		return true
+	}
+	for i := range s.Entries {
+		if i != index && samePath(s.Entries[i].Path, path) {
+			return false
+		}
+	}
+	s.Entries[index].Path = path
+	s.Entries[index].Name = ExeBaseName(path)
+	s.Entries[index].Valid = FileExists(path)
+	return true
+}
+
 func (s *Store) Remove(index int) {
 	if index < 0 || index >= len(s.Entries) {
 		return
