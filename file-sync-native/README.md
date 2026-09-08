@@ -31,8 +31,8 @@
 
 ## 用法
 
-```
-wails build          # 产出 build/bin/file-sync-native.exe
+```powershell
+.\build.ps1          # 等价于 wails build，产出 build/bin/file-sync-native.exe（需已安装 Wails CLI）
 ```
 
 双击运行：主窗口 + 托盘；关闭窗口最小化到托盘，托盘菜单「退出」结束进程。
