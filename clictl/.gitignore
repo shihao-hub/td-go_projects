@@ -1,0 +1,8 @@
+# 构建产物（锚定项目根，避免误伤 cmd/clictl/ 目录）
+/clictl.exe
+/clictl
+dist/
+
+# 测试
+*.test
+*.out
