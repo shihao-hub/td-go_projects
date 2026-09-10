@@ -1,4 +1,4 @@
-package cli
+﻿package cli
 
 import (
 	"errors"
@@ -17,7 +17,7 @@ var Version = "dev"
 
 var st *store.Store
 
-// mustStore 惰性打开数据库（version/usage 不触发），失败输出 JSON 错误
+// mustStore 惰性打开数据库（version/help 不触发），失败输出 JSON 错误
 func mustStore() *store.Store {
 	if st == nil {
 		s, err := store.Open()
@@ -37,8 +37,8 @@ func Run(args []string) int {
 		args = args[1:]
 	}
 	if len(args) == 0 {
-		Fail("usage", "用法: clictl <add|rm|set|list|info|run|version> [参数]，全局 --pretty 缩进输出")
-		return 1
+		EmitHelp()
+		return 0
 	}
 
 	cmd, rest := args[0], args[1:]
@@ -63,10 +63,33 @@ func Run(args []string) int {
 	case "version", "--version", "-v":
 		Emit(map[string]string{"version": Version})
 		return 0
+	case "help", "-h", "--help":
+		EmitHelp()
+		return 0
 	default:
-		Fail("unknown_command", "未知命令: "+cmd)
+		Fail("unknown_command", "未知命令: "+cmd+"，clictl help 查看用法")
 		return 1
 	}
+}
+
+// EmitHelp 输出帮助（也是 JSON，受 --pretty 影响）
+func EmitHelp() {
+	Emit(map[string]any{
+		"usage": "clictl <command> [args...]",
+		"global_flags": []map[string]string{
+			{"flag": "--pretty", "desc": "缩进 JSON 输出；可位于子命令前后，但 run 的透传段除外"},
+		},
+		"commands": []map[string]string{
+			{"cmd": "add <path> [--name N] [--desc D] [--meta JSON]", "desc": "注册 exe；name 默认=文件名去 .exe 小写化"},
+			{"cmd": "rm <name>", "desc": "删除注册（级联删其 launches）"},
+			{"cmd": "set <name> --meta JSON", "desc": "整体替换 meta（传 {} 清空）"},
+			{"cmd": "list [--status active|invalid]", "desc": "全部工具，launch_count 降序"},
+			{"cmd": "info <name>", "desc": "详情 + 最近 10 条启动 + 累计耗时"},
+			{"cmd": "run <name> [args...]", "desc": "透传启动；退出码=子进程码，未注册/失效=127"},
+			{"cmd": "version", "desc": "版本号"},
+			{"cmd": "help", "desc": "本帮助"},
+		},
+	})
 }
 
 func cmdAdd(args []string) int {
@@ -75,9 +98,8 @@ func cmdAdd(args []string) int {
 	desc := fs.String("desc", "", "描述")
 	meta := fs.String("meta", "", `扩展属性 JSON，如 {"source":"cargo","tags":["dev"]}`)
 	flags, positional := splitFlags(args, map[string]bool{"name": true, "desc": true, "meta": true})
-	if err := fs.Parse(flags); err != nil {
-		Fail("bad_args", "add: "+err.Error())
-		return 1
+	if !parseFlags(fs, flags) {
+		return 0
 	}
 	if len(positional) != 1 {
 		Fail("bad_args", "用法: clictl add <path> [--name N] [--desc D] [--meta JSON]")
@@ -142,9 +164,8 @@ func cmdSet(args []string) int {
 	fs := newFlagSet("set")
 	meta := fs.String("meta", "", "扩展属性 JSON（整体替换，传 {} 清空）")
 	flags, positional := splitFlags(args, map[string]bool{"meta": true})
-	if err := fs.Parse(flags); err != nil {
-		Fail("bad_args", "set: "+err.Error())
-		return 1
+	if !parseFlags(fs, flags) {
+		return 0
 	}
 	if len(positional) != 1 || strings.TrimSpace(*meta) == "" {
 		Fail("bad_args", "用法: clictl set <name> --meta JSON")
@@ -163,9 +184,8 @@ func cmdList(args []string) int {
 	fs := newFlagSet("list")
 	status := fs.String("status", "", "按状态过滤: active | invalid")
 	flags, _ := splitFlags(args, map[string]bool{"status": true})
-	if err := fs.Parse(flags); err != nil {
-		Fail("bad_args", "list: "+err.Error())
-		return 1
+	if !parseFlags(fs, flags) {
+		return 0
 	}
 	if *status != "" && *status != store.StatusActive && *status != store.StatusInvalid {
 		Fail("bad_args", "--status 仅支持 active | invalid")
@@ -258,6 +278,21 @@ func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // 默认 usage 输出丢弃，统一走 JSON 错误
 	return fs
+}
+
+// parseFlags 解析 flag 段；遇 -h/--help（flag.ErrHelp）输出整体帮助，
+// 其余解析错误输出 bad_args（Fail 内部已退出进程）。返回 false 表示已处理完毕，
+// 调用方直接以退出码 0 返回（只有 help 路径会真正走到这里）。
+func parseFlags(fs *flag.FlagSet, flags []string) bool {
+	if err := fs.Parse(flags); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			EmitHelp()
+			return false
+		}
+		Fail("bad_args", fs.Name()+": "+err.Error())
+		return false
+	}
+	return true
 }
 
 // splitFlags 把 args 拆成 (flag 段, 位置参数段)，绕开 Go flag

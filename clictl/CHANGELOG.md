@@ -13,3 +13,4 @@
 - meta 扩展属性：source/tags 白名单校验，序列化后 ≤ 4KB 硬限
 - status 实时刷新：list/info/run 触碰时现场 os.Stat 并回写
 - `scripts/build.ps1` 构建脚本（-ldflags 版本注入）
+- `help` / `-h` / `--help` 帮助命令（JSON 输出）；无参数时输出帮助；子命令级 `-h` 同样生效

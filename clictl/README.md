@@ -20,8 +20,9 @@ Windows 单文件 CLI 工具注册器/启动器：注册任意 exe，`clictl run
 | `clictl info <name>` | 详情 + 最近 10 条启动 + 累计耗时 | 0 / 1 |
 | `clictl run <name> [args...]` | 透传启动 | =子进程码 / 127 |
 | `clictl --version` | 版本号（JSON） | 0 |
+| `clictl help`（或 `-h`/`--help`，或无参数） | 帮助（也是 JSON） | 0 |
 
-- 全局 `--pretty`：缩进 JSON 供人读；默认紧凑单行
+- 全局 `--pretty`：缩进 JSON 供人读；默认紧凑单行（注意：`run` 透传段的 `--pretty` 属于子进程，不会被 clictl 消费）
 - 管理命令错误 JSON 走 stdout；`run` 的前置错误（未注册/文件失效）JSON 走 **stderr**，stdout 只属于子进程
 
 ## meta 白名单
