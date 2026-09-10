@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -33,10 +34,19 @@ func FailStderr(code, msg string, exitCode int) {
 }
 
 func marshal(payload any) ([]byte, error) {
+	// 默认 Marshal 会把 < > & 转义成 \u003c 等（防 HTML XSS），
+	// CLI 输出无此需求，用 Encoder 关闭 HTML 转义
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
 	if Pretty {
-		return json.MarshalIndent(payload, "", "  ")
+		enc.SetIndent("", "  ")
 	}
-	return json.Marshal(payload)
+	if err := enc.Encode(payload); err != nil {
+		return nil, err
+	}
+	// Encode 自带换行，writeJSON 里 Fprintln 会再加一层，这里去掉
+	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
 func writeJSON(payload map[string]any) {
