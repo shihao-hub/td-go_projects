@@ -21,8 +21,9 @@ uv run --project <项目目录> -- <命令名> <exe 收到的所有参数>
 # 1. 编译通用件（产出 python-launcher-go\launcher.exe）
 .\build.ps1
 
-# 2a. 一键部署：拷贝并改名到兄弟项目目录（..\zedhub\zedhub.exe）
-.\build.ps1 zedhub
+# 2a. 交互式复制：把已构建的 launcher.exe 复制到任意指定目录，按提示选名字
+#     （[1] 目标目录名 / [2] 自定义 / [3] launcher.exe；目标已存在时询问覆盖）
+go -C .\scripts\copy_launcher\ run . D:\tools\zedhub
 
 # 2b. 或手工部署：把 launcher.exe 拷到目标项目根目录，改名为命令名
 ```
