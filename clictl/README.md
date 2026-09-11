@@ -42,4 +42,4 @@ Windows 单文件 CLI 工具注册器/启动器：注册任意 exe，`clictl run
 ./scripts/build.ps1 -Version 1.0.0   # 产出单文件 clictl.exe，版本号注入
 ```
 
-依赖 `modernc.org/sqlite`（纯 Go 无 CGO）。完整设计见 `PLAN.md`，使用文档见父仓 `docs/go_projects/clictl/clictl.md`。
+依赖 `modernc.org/sqlite`（纯 Go 无 CGO）。完整设计见 `PLAN.md`，使用文档见父仓 `docs/go_projects/clictl/clictl.md`；其他 CLI 项目想复用本 JSON 输出模式，参考父仓 `docs/go_projects/clictl/cli-json-pattern.md`。
