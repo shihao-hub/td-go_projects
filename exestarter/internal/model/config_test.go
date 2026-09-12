@@ -141,3 +141,45 @@ func TestStoreRemove(t *testing.T) {
 		t.Fatalf("Remove 后剩余不符: %+v", s.Entries)
 	}
 }
+
+func TestStoreUpdatePath(t *testing.T) {
+	dir := t.TempDir()
+	newExe := filepath.Join(dir, "renamed.exe")
+	if err := os.WriteFile(newExe, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore([]Entry{
+		{Name: "old", Path: `C:\gone\old.exe`, AddedAt: "2026-01-01", SysTag: "todo", UserTag: "常用"},
+		{Name: "other", Path: `C:\x\other.exe`},
+	})
+
+	// 名称跟随新文件名，标签与 AddedAt 原样保留
+	if !s.UpdatePath(0, newExe) {
+		t.Fatal("UpdatePath 应成功")
+	}
+	e := s.Entries[0]
+	if e.Name != "renamed" {
+		t.Errorf("名称应跟随新文件名 = %q, want renamed", e.Name)
+	}
+	if e.AddedAt != "2026-01-01" || e.SysTag != "todo" || e.UserTag != "常用" {
+		t.Errorf("标签与添加时间应保留: %+v", e)
+	}
+	if !e.Valid {
+		t.Error("存在的文件应重算为有效")
+	}
+
+	// 与其他条目路径重复（大小写不敏感）返回 false
+	if s.UpdatePath(0, `c:\x\OTHER.exe`) {
+		t.Error("与其他条目重复的路径应失败")
+	}
+
+	// 与旧路径相同视为无操作成功
+	if !s.UpdatePath(0, newExe) {
+		t.Error("同路径应视为无操作成功")
+	}
+
+	// 越界 / 空路径返回 false
+	if s.UpdatePath(9, newExe) || s.UpdatePath(0, "") {
+		t.Error("越界或空路径应失败")
+	}
+}

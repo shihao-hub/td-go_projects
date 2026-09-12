@@ -21,9 +21,11 @@ func TestScanDirExe(t *testing.T) {
 	mk("top.exe")
 	mk("sub/nested.EXE")
 	mk("dist/DemoApp/DemoApp.exe")
-	for _, d := range []string{".git", "node_modules", ".venv", "venv", "env", "__pycache__", ".idea", ".vscode"} {
+	for _, d := range []string{".git", "node_modules", ".venv", "venv", "env", "__pycache__", ".idea", ".vscode", "target"} {
 		mk(d + "/x.exe")
 	}
+	// Rust cargo 产物：target 深层路径整体跳过
+	mk("target/debug/build/num-traits-ec2185e8c36de04/build-script-build.exe")
 	mk("readme.txt")
 
 	got, err := ScanDirExe(root)
@@ -41,7 +43,7 @@ func TestScanDirExe(t *testing.T) {
 }
 
 func TestIsNoiseDir(t *testing.T) {
-	for _, n := range []string{".git", ".GIT", "Node_Modules", ".VENV"} {
+	for _, n := range []string{".git", ".GIT", "Node_Modules", ".VENV", "target", "Target"} {
 		if !isNoiseDir(n) {
 			t.Errorf("%q 应为噪音目录", n)
 		}

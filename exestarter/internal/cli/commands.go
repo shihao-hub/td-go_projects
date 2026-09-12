@@ -48,6 +48,10 @@ func Run(args []string) int {
 		return cmdRemove(rest)
 	case "prune":
 		return cmdPrune(rest)
+	case "tag":
+		return cmdTag(rest)
+	case "update":
+		return cmdUpdate(rest)
 	case "run":
 		return cmdRun(rest)
 	case "open":
@@ -79,6 +83,8 @@ func EmitHelp() {
 			{"cmd": "add <path> [--name N] [--systag K] [--usertag T]", "desc": "注册单个 exe；--systag: todo|verify|broken|stable"},
 			{"cmd": "remove <name>", "desc": "按 name 删除注册"},
 			{"cmd": "prune", "desc": "清理全部失效条目（文件已不存在）"},
+			{"cmd": "tag <name> [--systag K] [--usertag T]", "desc": "设置标签；传了才更新，传空串清除，未传保持原值；--systag: todo|verify|broken|stable"},
+			{"cmd": "update <name> --path P", "desc": "改路径（exe 搬家）；名称跟随新文件名，标签与添加时间保留"},
 			{"cmd": "run <name> [args...]", "desc": "前台透传启动；退出码=子进程码，未注册/失效=127"},
 			{"cmd": "open <name>", "desc": "资源管理器中定位该 exe"},
 			{"cmd": "shell <name>", "desc": "在该 exe 目录下开新 PowerShell 窗口"},
@@ -86,7 +92,7 @@ func EmitHelp() {
 			{"cmd": "help", "desc": "本帮助"},
 		},
 		"notes": []string{
-			"条目配置与 GUI 版共享 UserConfigDir/exe-launcher/config.json",
+			"条目配置位于 UserConfigDir/exestarter/config.json",
 			"run 是透传命令：stdout 属于子进程，错误 JSON 走 stderr",
 		},
 	})
@@ -304,6 +310,101 @@ func cmdPrune(args []string) int {
 	removed := s.RemoveInvalid()
 	mustSave(s)
 	Emit(map[string]any{"removed": removed, "remaining": len(s.Snapshot())})
+	return 0
+}
+
+// cmdTag 给已有条目设置标签。fs.Visit 区分"显式传入"与"未传"：
+// 传了才更新，传空串 = 清除该标签，未传的保持原值。
+func cmdTag(args []string) int {
+	fs := newFlagSet("tag")
+	fs.String("systag", "", "系统标签: todo|verify|broken|stable（传空串清除）")
+	fs.String("usertag", "", "用户标签（自由文本，传空串清除）")
+	flags, positional := splitFlags(args, map[string]bool{"systag": true, "usertag": true}, nil)
+	if !parseFlags(fs, flags) {
+		return 0
+	}
+	if len(positional) != 1 {
+		Fail("bad_args", "用法: exestarter tag <name> [--systag K] [--usertag T]")
+		return 1
+	}
+
+	s := mustLoad()
+	idx, _, ok := findEntry(s, positional[0])
+	if !ok {
+		for _, x := range s.Snapshot() {
+			if x.Name == positional[0] {
+				Fail("conflict", "存在多个同名条目 "+positional[0]+"，请手改配置文件区分")
+				return 1
+			}
+		}
+		Fail("not_found", "未注册: "+positional[0])
+		return 1
+	}
+
+	entries := s.Snapshot()
+	e := &entries[idx]
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "systag":
+			if f.Value.String() != "" && model.SysTagLabel(f.Value.String()) == "" {
+				Fail("bad_args", "非法系统标签 "+f.Value.String()+"，可选: todo|verify|broken|stable")
+			}
+			e.SysTag = model.SanitizeSysTag(f.Value.String())
+		case "usertag":
+			e.UserTag = strings.TrimSpace(f.Value.String())
+		}
+	})
+	mustSave(model.NewStore(entries))
+	Emit(e)
+	return 0
+}
+
+// cmdUpdate 改路径（exe 搬家后只更新路径）。UpdatePath 内部查重
+// （大小写不敏感 Clean 后比较），名称跟随新文件名，标签与 AddedAt 保留。
+func cmdUpdate(args []string) int {
+	fs := newFlagSet("update")
+	path := fs.String("path", "", "新 exe 路径")
+	flags, positional := splitFlags(args, map[string]bool{"path": true}, nil)
+	if !parseFlags(fs, flags) {
+		return 0
+	}
+	if len(positional) != 1 || *path == "" {
+		Fail("bad_args", "用法: exestarter update <name> --path P")
+		return 1
+	}
+	if strings.ToLower(filepath.Ext(*path)) != ".exe" {
+		Fail("bad_args", "仅支持 .exe 文件: "+*path)
+		return 1
+	}
+	abs, err := filepath.Abs(*path)
+	if err != nil {
+		Fail("bad_args", "路径无效: "+err.Error())
+		return 1
+	}
+	if !model.FileExists(abs) {
+		Fail("file_not_found", "文件不存在: "+abs)
+		return 1
+	}
+
+	s := mustLoad()
+	idx, _, ok := findEntry(s, positional[0])
+	if !ok {
+		for _, x := range s.Snapshot() {
+			if x.Name == positional[0] {
+				Fail("conflict", "存在多个同名条目 "+positional[0]+"，请手改配置文件区分")
+				return 1
+			}
+		}
+		Fail("not_found", "未注册: "+positional[0])
+		return 1
+	}
+	if !s.UpdatePath(idx, abs) {
+		Fail("conflict", "该路径已注册: "+abs)
+		return 1
+	}
+	mustSave(s)
+	e := s.Snapshot()[idx]
+	Emit(&e)
 	return 0
 }
 

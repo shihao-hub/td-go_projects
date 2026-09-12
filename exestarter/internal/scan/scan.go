@@ -10,14 +10,15 @@ import (
 // 噪音目录：依赖缓存/版本库/IDE 配置，里面即使有 exe 也不是想管理的产物。
 // 注意保留 dist/：PyStand 等打包产物通常在 dist 下。
 var noiseDirs = map[string]bool{
-	".git":         true,
-	".idea":        true,
-	".vscode":      true,
-	"__pycache__":  true,
+	".git":        true,
+	".idea":       true,
+	".vscode":     true,
+	"__pycache__": true,
 	"node_modules": true,
-	".venv":        true,
-	"venv":         true,
-	"env":          true,
+	"target":      true, // Rust cargo 构建目录（build-script-build.exe 等再生产物）
+	".venv":       true,
+	"venv":        true,
+	"env":         true,
 }
 
 func isNoiseDir(name string) bool {

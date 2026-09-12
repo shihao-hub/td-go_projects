@@ -12,6 +12,8 @@ exestarter list [--status valid|invalid] [--tag T]          # 条目清单
 exestarter add <path> [--name N] [--systag K] [--usertag T] # 注册单个（systag: todo|verify|broken|stable）
 exestarter remove <name>                                    # 删除注册
 exestarter prune                                            # 清理失效条目
+exestarter tag <name> [--systag K] [--usertag T]            # 设置标签（传了才更新，空串清除，未传保持原值）
+exestarter update <name> --path P                           # 改路径（名称跟随新文件名，标签与添加时间保留）
 exestarter run <name> [args...]                             # 前台透传启动（退出码=子进程码，未注册/失效=127）
 exestarter open <name>                                      # 资源管理器定位文件
 exestarter shell <name>                                     # exe 目录开新 PowerShell 窗口
@@ -20,7 +22,7 @@ exestarter help | version
 
 ## 行为说明
 
-- **条目配置与 GUI 版共享** `UserConfigDir/exe-launcher/config.json`，两边互通
+- **条目配置**位于 `UserConfigDir/exestarter/config.json`
 - 系统标签是状态语义（todo/verify/broken/stable），用户标签是自由文本，每条各至多一个
 - `run` 是透传命令：stdout 只属于子进程，错误 JSON 走 stderr（与 clictl run 一致）
 - `open` / `shell` 为管理命令：新窗口独立存活，CLI 立即返回 JSON
@@ -35,5 +37,5 @@ go build ./cmd/exestarter
 
 ## 与 exe-launcher / clictl 的关系
 
-- exe-launcher（Win32 GUI 版）已归档至父仓 `.archived/go_projects/exe-launcher`，由本项目替代；条目配置仍共享 `UserConfigDir/exe-launcher/config.json`
+- exe-launcher（Win32 GUI 版）已归档至父仓 `.archived/go_projects/exe-launcher`，由本项目替代；条目配置位于 `UserConfigDir/exestarter/config.json`（与旧版 exe-launcher 目录不互通）
 - clictl 是"注册 + 启动记账"的通用 CLI；exestarter 聚焦 exe 收藏场景（扫描批量导入、状态标签、定位/开终端）
