@@ -4,7 +4,7 @@
 
 ## 需求背景
 
-将 python-launcher-go 目录的 launcher.exe 复制到指定目录下
+将 pythonlauncher 目录的 launcher.exe 复制到指定目录下
 
 ## 需求分析
 
@@ -26,7 +26,7 @@ func copyLauncherExe(dst string) error
 ## 用法
 
 ```powershell
-# 在 python-launcher-go 目录下，目标目录为任意已存在目录
+# 在 pythonlauncher 目录下，目标目录为任意已存在目录
 go -C .\scripts\copy_launcher\ run . D:\tools\zedhub
 # 交互选择名字后 → 复制 launcher.exe 到 D:\tools\zedhub\<所选名字>.exe
 ```

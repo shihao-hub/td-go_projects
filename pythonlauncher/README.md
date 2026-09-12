@@ -1,4 +1,4 @@
-# python-launcher-go
+# pythonlauncher
 
 通用 uv 项目启动器：一个 Go 编写的小 exe，拷进任何 uv 管理的 Python 项目、按规则改名后，执行它就等于执行 `uv run`，参数与退出码原样透传，调用体验与直接运行命令完全一致。
 
@@ -18,7 +18,7 @@ uv run --project <项目目录> -- <命令名> <exe 收到的所有参数>
 ## 使用方法
 
 ```powershell
-# 1. 编译通用件（产出 python-launcher-go\launcher.exe）
+# 1. 编译通用件（产出 pythonlauncher\launcher.exe）
 .\build.ps1
 
 # 2a. 交互式复制：把已构建的 launcher.exe 复制到任意指定目录，按提示选名字

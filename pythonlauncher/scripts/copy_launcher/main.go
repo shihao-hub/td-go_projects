@@ -15,7 +15,7 @@ func fail(format string, args ...any) {
 	os.Exit(1)
 }
 
-// projectRoot 基于本文件源码路径定位项目根：main.go → copy_launcher → scripts → python-launcher-go。
+// projectRoot 基于本文件源码路径定位项目根：main.go → copy_launcher → scripts → pythonlauncher。
 // go run 下 os.Executable() 指向临时构建目录、CWD 随调用方式变化（go -C 时是脚本目录），
 // 源码绝对路径是唯一稳定锚点。
 func projectRoot() (string, error) {
