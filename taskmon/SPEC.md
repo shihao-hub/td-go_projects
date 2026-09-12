@@ -1,4 +1,4 @@
-# taskmon-go 复刻规格说明书
+# taskmon 复刻规格说明书
 
 | 项 | 内容 |
 |---|---|
@@ -67,7 +67,7 @@
 
 ```mermaid
 flowchart LR
-    subgraph taskmon-go
+    subgraph taskmon
         collect[采集器<br/>执行 tasklist + CSV 解析] --> group[分组器<br/>按进程名分组 + 两级排序]
         group --> render[渲染器<br/>生成整帧文本（纯函数）]
         render --> viewport[视口/主循环<br/>光标·滚动·展开状态·定时器]
@@ -528,7 +528,7 @@ rows = lines[offset : offset+body]，不足 body 行则补空行至 body 行
 | 期 | 路径 | 说明 |
 |---|---|---|
 | **第一期（本规格范围）** | **exe 同级目录** `./logs/taskmon.log`（`os.Executable()` 所在目录 + `logs`） | 开发阶段方便查看；建议支持环境变量 `TASKMON_LOG_DIR` 覆盖，便于测试与 `go run` 场景 |
-| 第二期 | `%LOCALAPPDATA%\taskmon-go\logs\taskmon.log`（取不到 `LOCALAPPDATA` 时回退系统临时目录） | 与 TS 版目录隔离，避免互写；随 exe 分发给最终用户 |
+| 第二期 | `%LOCALAPPDATA%\taskmon\logs\taskmon.log`（取不到 `LOCALAPPDATA` 时回退系统临时目录） | 与 TS 版目录隔离，避免互写；随 exe 分发给最终用户 |
 
 轮转规则：**单文件 2MB 触发轮转，最多保留 5 个旧文件**。按日轮转为可选增强，不作硬性要求。日志目录不存在时自动创建。
 
@@ -591,8 +591,8 @@ TUI 模式下任一轮采集成功即清除错误状态、恢复正常帧；错�
 ### 12.1 目录结构建议
 
 ```
-taskmon-go/
-├── go.mod                    // module taskmon-go，Go 1.22+
+taskmon/
+├── go.mod                    // module taskmon，Go 1.22+
 ├── main.go                   // 入口：CLI 解析、版本、模式分派（TUI / 单帧）
 └── internal/
     ├── collect/              // tasklist 执行 + CSV/内存字段解析（4 章）
@@ -612,10 +612,10 @@ var version = "dev"   // 包级变量，构建时注入；go run 直跑恒为 de
 构建命令：
 
 ```
-go build -trimpath -ldflags "-s -w -X main.version=<版本>" -o release/taskmon-go-v<版本>.exe .
+go build -trimpath -ldflags "-s -w -X main.version=<版本>" -o release/taskmon-v<版本>.exe .
 ```
 
-**版本号唯一来源是构建命令（或 CI / git tag）**，源码中不得出现第二处手写版本号；发版流程：改版本 → 提交 → 打 tag `taskmon-go/v<版本>` → 构建。产物是**单文件免安装 exe（约 3–5MB）**，无需运行时依赖。
+**版本号唯一来源是构建命令（或 CI / git tag）**，源码中不得出现第二处手写版本号；发版流程：改版本 → 提交 → 打 tag `taskmon/v<版本>` → 构建。产物是**单文件免安装 exe（约 3–5MB）**，无需运行时依赖。
 
 ### 12.3 测试建议
 
@@ -681,7 +681,7 @@ go build -trimpath -ldflags "-s -w -X main.version=<版本>" -o release/taskmon-
 | 4 | `a` | 全部展开 ↔ 全部收起 |
 | 5 | 空格 / `r` | 立即刷新（时间戳更新） |
 | 6 | `q` / `Ctrl+C` | 清屏，输出 `taskmon 已退出`，终端状态完全恢复（回显、光标可见） |
-| 7 | `--once`、`--once -e`、`taskmon-go > out.txt` | 各输出一帧快照退出；`-e` 版含成员行；退出码 0 |
+| 7 | `--once`、`--once -e`、`taskmon > out.txt` | 各输出一帧快照退出；`-e` 版含成员行；退出码 0 |
 | 8 | `-i 1` | 刷新节奏约 1s |
 | 9 | `-t 5` | 只显示前 5 组，摘要含「前 5 组」 |
 | 10 | `-e` 启动 | 首帧即全展开 |
@@ -705,4 +705,4 @@ go build -trimpath -ldflags "-s -w -X main.version=<版本>" -o release/taskmon-
 | 期 | 内容 | 验收 |
 |---|---|---|
 | **第一期（本规格全部范围）** | tasklist 数据源 + 三模式 + 完整 TUI 交互 + exe 同级日志 + 单文件 exe 构建 | 13 章验收清单全过 |
-| 第二期 | ① 数据源切换 gopsutil 直读系统 API：消除子进程开销/超时不确定性与 OEM 编码问题，**需先对照验证内存口径**（工作集 vs 专项内存）与排序结果的差异并记录；② 日志迁移 `%LOCALAPPDATA%\taskmon-go\logs`（回退临时目录） | 数据与 tasklist 版本抽样对比报告；日志落新目录 |
+| 第二期 | ① 数据源切换 gopsutil 直读系统 API：消除子进程开销/超时不确定性与 OEM 编码问题，**需先对照验证内存口径**（工作集 vs 专项内存）与排序结果的差异并记录；② 日志迁移 `%LOCALAPPDATA%\taskmon\logs`（回退临时目录） | 数据与 tasklist 版本抽样对比报告；日志落新目录 |
