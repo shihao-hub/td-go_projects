@@ -5,6 +5,9 @@
 *.so
 *.dylib
 
+# 发布校验和产物
+SHA256SUMS.txt
+
 # 测试与覆盖率产物
 *.test
 *.out
