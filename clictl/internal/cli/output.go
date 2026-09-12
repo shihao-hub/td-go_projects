@@ -19,14 +19,30 @@ func Emit(data any) {
 // Fail 输出错误包络到 stdout 并以退出码 1 结束（管理命令错误也走 stdout，
 // stdout 永远是合法 JSON）
 func Fail(code, msg string) {
-	writeJSON(map[string]any{"ok": false, "error": map[string]string{"code": code, "message": msg}})
-	os.Exit(1)
+	FailExit(code, msg, 1)
+}
+
+// FailExit 输出错误包络到 stdout 并以指定退出码结束。
+// start/stop 前置失败（未注册/失效）需保持与 run 一致的 127，但错误走 stdout
+// （它们是管理型命令，stdout 无子进程归属问题）。suggestions 同 FailStderr
+func FailExit(code, msg string, exitCode int, suggestions ...string) {
+	errObj := map[string]any{"code": code, "message": msg}
+	if len(suggestions) > 0 {
+		errObj["suggestions"] = suggestions
+	}
+	writeJSON(map[string]any{"ok": false, "error": errObj})
+	os.Exit(exitCode)
 }
 
 // FailStderr 错误 JSON 走 stderr 并以指定退出码结束（clictl run 前置校验专用，
-// 不污染 stdout——run 的 stdout 只属于子进程）
-func FailStderr(code, msg string, exitCode int) {
-	b, err := marshal(map[string]any{"ok": false, "error": map[string]string{"code": code, "message": msg}})
+// 不污染 stdout——run 的 stdout 只属于子进程）。
+// suggestions 为可选的相似名提示（未注册工具时），非空时输出 error.suggestions 字段
+func FailStderr(code, msg string, exitCode int, suggestions ...string) {
+	errObj := map[string]any{"code": code, "message": msg}
+	if len(suggestions) > 0 {
+		errObj["suggestions"] = suggestions
+	}
+	b, err := marshal(map[string]any{"ok": false, "error": errObj})
 	if err == nil {
 		fmt.Fprintln(os.Stderr, string(b))
 	}

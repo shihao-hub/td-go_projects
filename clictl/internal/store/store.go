@@ -13,8 +13,9 @@ import (
 	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动，免 CGO
 )
 
-// timeFmt 时间存储格式：UTC + 固定 9 位纳秒，保证字符串排序即时间排序（RFC3339 兼容）
-const timeFmt = "2006-01-02T15:04:05.000000000Z"
+// TimeFmt 时间存储格式：UTC + 固定 9 位纳秒，保证字符串排序即时间排序（RFC3339 兼容）。
+// 导出供 runner 复用（start 输出 started_at 需与库内格式一致）
+const TimeFmt = "2006-01-02T15:04:05.000000000Z"
 
 // 工具状态
 const (
@@ -36,13 +37,15 @@ type Tool struct {
 	LastLaunch  string          `json:"last_launch,omitempty"` // 从未启动则省略
 }
 
-// Launch 一次启动记录；DurationMs/ExitCode 为 NULL（未正常结束）时输出 null
+// Launch 一次启动记录；DurationMs/ExitCode/PID 为 NULL 时输出 null。
+// PID 仅 start（后台启动）写入；run 记录恒 NULL（前台闭环无需 PID）。
 type Launch struct {
 	ID         int64  `json:"id"`
 	ToolID     int64  `json:"tool_id"`
 	StartedAt  string `json:"started_at"`
 	DurationMs *int64 `json:"duration_ms"`
 	ExitCode   *int   `json:"exit_code"`
+	PID        *int   `json:"pid"`
 }
 
 // 领域错误
@@ -69,7 +72,8 @@ CREATE TABLE IF NOT EXISTS launches (
   tool_id     INTEGER NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
   started_at  TEXT NOT NULL,
   duration_ms INTEGER,
-  exit_code   INTEGER
+  exit_code   INTEGER,
+  pid         INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_launches_tool
   ON launches(tool_id, started_at DESC);
@@ -116,7 +120,44 @@ func Open() (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("初始化表结构失败: %w", err)
 	}
+	// 存量库补列迁移：CREATE TABLE IF NOT EXISTS 不会给旧表加新列。
+	// 对应 docs/go_projects/clictl/migrations/001_v1.2.0_add_launches_pid.sql
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("迁移表结构失败: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate 存量库补列。目前仅一处：launches.pid（v1.2.0，start 后台启动记录 PID）。
+// 后续表结构变更一律：schema 常量（新库）+ 此处 ALTER（老库）+ migrations 存档，三者同步
+func migrate(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(launches)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hasPID := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "pid" {
+			hasPID = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasPID {
+		_, err := db.Exec(`ALTER TABLE launches ADD COLUMN pid INTEGER`)
+		return err
+	}
+	return nil
 }
 
 // Close 关闭数据库
@@ -147,7 +188,7 @@ func (s *Store) AddTool(name, path, desc string, meta json.RawMessage) (Tool, er
 	_, err = s.db.Exec(
 		`INSERT INTO tools (name, path, description, status, meta, added_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
-		NormalizeName(name), abs, desc, StatusActive, metaVal, time.Now().UTC().Format(timeFmt),
+		NormalizeName(name), abs, desc, StatusActive, metaVal, time.Now().UTC().Format(TimeFmt),
 	)
 	if err != nil {
 		msg := err.Error()
@@ -267,7 +308,7 @@ func (s *Store) ListTools(status string) ([]Tool, error) {
 func (s *Store) InsertLaunch(toolID int64, startedAt time.Time) (int64, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO launches (tool_id, started_at) VALUES (?, ?)`,
-		toolID, startedAt.UTC().Format(timeFmt),
+		toolID, startedAt.UTC().Format(TimeFmt),
 	)
 	if err != nil {
 		return 0, err
@@ -281,10 +322,26 @@ func (s *Store) FinishLaunch(id int64, durMs int64, exitCode int) error {
 	return err
 }
 
+// SetLaunchPID 回写启动记录的子进程 PID（start 后台启动专用）
+func (s *Store) SetLaunchPID(id int64, pid int) error {
+	_, err := s.db.Exec(`UPDATE launches SET pid = ? WHERE id = ?`, pid, id)
+	return err
+}
+
+const launchCols = `id, tool_id, started_at, duration_ms, exit_code, pid`
+
+func scanLaunch(sc scanner) (Launch, error) {
+	var l Launch
+	if err := sc.Scan(&l.ID, &l.ToolID, &l.StartedAt, &l.DurationMs, &l.ExitCode, &l.PID); err != nil {
+		return Launch{}, err
+	}
+	return l, nil
+}
+
 // RecentLaunches 最近 n 条启动记录（新→旧）
 func (s *Store) RecentLaunches(toolID int64, n int) ([]Launch, error) {
 	rows, err := s.db.Query(
-		`SELECT id, tool_id, started_at, duration_ms, exit_code
+		`SELECT `+launchCols+`
 		 FROM launches WHERE tool_id = ?
 		 ORDER BY started_at DESC, id DESC LIMIT ?`, toolID, n,
 	)
@@ -295,8 +352,34 @@ func (s *Store) RecentLaunches(toolID int64, n int) ([]Launch, error) {
 
 	launches := []Launch{}
 	for rows.Next() {
-		var l Launch
-		if err := rows.Scan(&l.ID, &l.ToolID, &l.StartedAt, &l.DurationMs, &l.ExitCode); err != nil {
+		l, err := scanLaunch(rows)
+		if err != nil {
+			return nil, err
+		}
+		launches = append(launches, l)
+	}
+	return launches, rows.Err()
+}
+
+// UnfinishedStarts 该工具所有未闭环的后台启动记录
+// （pid 非空且 duration_ms 为空，即 start 拉起后从未回写结束），旧→新排序。
+// 是否仍在运行由调用方现场探活判定（pid 可能已被系统回收复用）
+func (s *Store) UnfinishedStarts(toolID int64) ([]Launch, error) {
+	rows, err := s.db.Query(
+		`SELECT `+launchCols+`
+		 FROM launches
+		 WHERE tool_id = ? AND pid IS NOT NULL AND duration_ms IS NULL
+		 ORDER BY started_at ASC, id ASC`, toolID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	launches := []Launch{}
+	for rows.Next() {
+		l, err := scanLaunch(rows)
+		if err != nil {
 			return nil, err
 		}
 		launches = append(launches, l)

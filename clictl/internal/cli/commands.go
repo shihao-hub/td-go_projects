@@ -42,8 +42,8 @@ func Run(args []string) int {
 	}
 
 	cmd, rest := args[0], args[1:]
-	if cmd != "run" {
-		// run 的剩余参数全部透传给子进程，不能剥离 --pretty
+	// run/start 的剩余参数全部透传给子进程，不能剥离 --pretty
+	if cmd != "run" && cmd != "start" {
 		rest = stripPretty(rest)
 	}
 
@@ -60,6 +60,12 @@ func Run(args []string) int {
 		return cmdInfo(rest)
 	case "run":
 		return cmdRun(rest)
+	case "start":
+		return cmdStart(rest)
+	case "stop":
+		return cmdStop(rest)
+	case "completion":
+		return cmdCompletion(rest)
 	case "version", "--version", "-v":
 		Emit(map[string]string{"version": Version})
 		return 0
@@ -83,9 +89,13 @@ func EmitHelp() {
 			{"cmd": "add <path> [--name N] [--desc D] [--meta JSON]", "desc": "注册 exe；name 默认=文件名去 .exe 小写化"},
 			{"cmd": "rm <name>", "desc": "删除注册（级联删其 launches）"},
 			{"cmd": "set <name> --meta JSON", "desc": "整体替换 meta（传 {} 清空）"},
-			{"cmd": "list [--status active|invalid]", "desc": "全部工具，launch_count 降序"},
-			{"cmd": "info <name>", "desc": "详情 + 最近 10 条启动 + 累计耗时"},
-			{"cmd": "run <name> [args...]", "desc": "透传启动；退出码=子进程码，未注册/失效=127"},
+			{"cmd": "list [--status active|invalid] [--running]", "desc": "全部工具，launch_count 降序；--running 只看后台活实例"},
+			{"cmd": "info <name>", "desc": "详情 + 最近 10 条启动 + 累计耗时 + 后台运行状态"},
+			{"cmd": "run <name> [args...]", "desc": "前台透传启动（要看输出、等结果的用它）；退出码=子进程码，未注册/失效=127；未注册时附相似名 suggestions"},
+			{"cmd": "start <name> [args...]", "desc": "后台分离启动（GUI/托盘/服务类），立即返回并输出 pid；未注册/失效=127"},
+			{"cmd": "stop <name>", "desc": "终止该工具全部后台活实例（taskkill 树杀）并闭环记录"},
+			{"cmd": "completion powershell [--install|--uninstall]", "desc": "PowerShell Tab 补全脚本；--install 写入 $PROFILE，--uninstall 移除"},
+			{"cmd": "completion names", "desc": "全部工具名，每行一个（供补全脚本消费，raw 输出）"},
 			{"cmd": "version", "desc": "版本号"},
 			{"cmd": "help", "desc": "本帮助"},
 		},
@@ -180,9 +190,17 @@ func cmdSet(args []string) int {
 	return 0
 }
 
+// runningTool list --running 的输出形状：工具详情 + 活实例信息
+type runningTool struct {
+	store.Tool
+	RunningPIDs []int  `json:"running_pids"`
+	LastStartAt string `json:"last_start"` // 最新一条活记录的启动时间
+}
+
 func cmdList(args []string) int {
 	fs := newFlagSet("list")
 	status := fs.String("status", "", "按状态过滤: active | invalid")
+	running := fs.Bool("running", false, "只列出有后台活实例的工具")
 	flags, _ := splitFlags(args, map[string]bool{"status": true})
 	if !parseFlags(fs, flags) {
 		return 0
@@ -191,12 +209,41 @@ func cmdList(args []string) int {
 		Fail("bad_args", "--status 仅支持 active | invalid")
 		return 1
 	}
-	tools, err := mustStore().ListTools(*status)
+	if *running && *status != "" {
+		Fail("bad_args", "--running 与 --status 互斥")
+		return 1
+	}
+
+	s := mustStore()
+	tools, err := s.ListTools(*status)
 	if err != nil {
 		failFromErr("list", err)
 		return 1
 	}
-	Emit(tools)
+	if !*running {
+		Emit(tools)
+		return 0
+	}
+
+	// --running：逐工具探活过滤（开销为每工具一次 UnfinishedStarts 查询 + 数次 Win32 探活）
+	out := []runningTool{}
+	for _, t := range tools {
+		unfinished, err := s.UnfinishedStarts(t.ID)
+		if err != nil {
+			failFromErr("list", err)
+			return 1
+		}
+		alive := runner.FilterAlive(unfinished, t.Path)
+		if len(alive) == 0 {
+			continue
+		}
+		pids := make([]int, 0, len(alive))
+		for _, l := range alive {
+			pids = append(pids, *l.PID)
+		}
+		out = append(out, runningTool{Tool: t, RunningPIDs: pids, LastStartAt: alive[len(alive)-1].StartedAt})
+	}
+	Emit(out)
 	return 0
 }
 
@@ -221,11 +268,25 @@ func cmdInfo(args []string) int {
 		failFromErr("info", err)
 		return 1
 	}
+	unfinished, err := s.UnfinishedStarts(tool.ID)
+	if err != nil {
+		failFromErr("info", err)
+		return 1
+	}
+	alive := runner.FilterAlive(unfinished, tool.Path)
+	runningPIDs := make([]int, 0, len(alive))
+	for _, l := range alive {
+		runningPIDs = append(runningPIDs, *l.PID)
+	}
 	Emit(map[string]any{
 		"tool":              tool,
 		"recent_launches":   launches,
 		"finished_count":    finished,
 		"total_duration_ms": totalMs,
+		"running": map[string]any{
+			"alive": len(alive) > 0,
+			"pids":  runningPIDs,
+		},
 	})
 	return 0
 }
@@ -239,13 +300,55 @@ func cmdRun(args []string) int {
 	if err != nil {
 		var re *runner.RunError
 		if errors.As(err, &re) {
-			FailStderr(re.Code, re.Message, re.ExitCode)
+			FailStderr(re.Code, re.Message, re.ExitCode, re.Suggestions...)
 			return re.ExitCode
 		}
 		FailStderr("internal", err.Error(), 1)
 		return 1
 	}
 	return code
+}
+
+func cmdStart(args []string) int {
+	if len(args) < 1 {
+		Fail("bad_args", "用法: clictl start <name> [args...]")
+		return 1
+	}
+	res, err := runner.Start(mustStore(), store.NormalizeName(args[0]), args[1:])
+	if err != nil {
+		var re *runner.RunError
+		if errors.As(err, &re) {
+			FailExit(re.Code, re.Message, re.ExitCode, re.Suggestions...)
+			return re.ExitCode
+		}
+		FailExit("internal", err.Error(), 1)
+		return 1
+	}
+	Emit(res)
+	return 0
+}
+
+func cmdStop(args []string) int {
+	if len(args) != 1 {
+		Fail("bad_args", "用法: clictl stop <name>")
+		return 1
+	}
+	res, err := runner.Stop(mustStore(), store.NormalizeName(args[0]))
+	if err != nil {
+		var re *runner.RunError
+		if errors.As(err, &re) {
+			FailExit(re.Code, re.Message, re.ExitCode, re.Suggestions...)
+			return re.ExitCode
+		}
+		FailExit("internal", err.Error(), 1)
+		return 1
+	}
+	Emit(res)
+	// 全杀成功 = 0；有杀后仍存活的实例 = 1
+	if len(res.Failed) > 0 {
+		return 1
+	}
+	return 0
 }
 
 // failFromErr 把 store 领域错误映射为统一的 JSON 错误码

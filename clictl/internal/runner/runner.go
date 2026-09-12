@@ -2,7 +2,6 @@
 package runner
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -12,11 +11,13 @@ import (
 )
 
 // RunError run 前置阶段失败（未注册/文件失效/启动失败），
-// 由调用方以 stderr JSON 输出并按 ExitCode 退出
+// 由调用方以 stderr JSON 输出并按 ExitCode 退出。
+// Suggestions 为未注册时的相似名提示（可选，空则不输出该字段）
 type RunError struct {
-	Code     string
-	Message  string
-	ExitCode int
+	Code        string
+	Message     string
+	ExitCode    int
+	Suggestions []string
 }
 
 func (e *RunError) Error() string { return e.Message }
@@ -24,19 +25,9 @@ func (e *RunError) Error() string { return e.Message }
 // Run 透传启动：stdin/stdout/stderr 与退出码全部直通，不经任何 shell 包裹。
 // 子进程启动成功后总是返回其退出码；前置失败返回 *RunError。
 func Run(st *store.Store, name string, args []string) (int, error) {
-	tool, err := st.GetTool(name)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return 0, &RunError{Code: "not_found", Message: "未注册的工具: " + name, ExitCode: 127}
-		}
-		return 0, &RunError{Code: "db_error", Message: err.Error(), ExitCode: 1}
-	}
-
-	// 现场校验文件有效性（GetTool 已回写 status，这里再兜底一次失效回写）
-	fi, statErr := os.Stat(tool.Path)
-	if statErr != nil || fi.IsDir() {
-		_ = st.RefreshStatus(tool.ID, false)
-		return 0, &RunError{Code: "invalid", Message: "文件已失效: " + tool.Path, ExitCode: 127}
+	tool, rerr := lookup(st, name)
+	if rerr != nil {
+		return 0, rerr
 	}
 
 	start := time.Now()

@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS launches (
   tool_id     INTEGER NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
   started_at  TEXT NOT NULL,          -- RFC3339
   duration_ms INTEGER,                -- NULL = 未正常结束
-  exit_code   INTEGER
+  exit_code   INTEGER,
+  pid         INTEGER                 -- v1.2.0：仅 start 写入；run 记录恒 NULL；未闭环 start = pid 非空且 duration 为空
 );
 CREATE INDEX IF NOT EXISTS idx_launches_tool
   ON launches(tool_id, started_at DESC);
@@ -94,9 +95,11 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 | `clictl add <path> [--name N] [--desc D] [--meta JSON]` | 注册；name 默认=文件名去 `.exe` 小写化；meta 过白名单校验 | 0 / 1(conflict/meta_invalid) |
 | `clictl rm <name>` | 删除注册（级联删其 launches） | 0 / 1(not_found) |
 | `clictl set <name> --meta JSON` | 整体替换 meta（同过白名单校验） | 0 / 1(not_found/meta_invalid) |
-| `clictl list [--status active|invalid]` | 全部工具，按 launch_count 降序、name 升序；可按状态过滤 | 0 |
-| `clictl info <name>` | 详情 + 最近 10 条启动 + 累计耗时 | 0 / 1(not_found) |
+| `clictl list [--status active|invalid] [--running]` | 全部工具，按 launch_count 降序、name 升序；可按状态过滤；`--running` 只看后台活实例（附 running_pids，与 --status 互斥） | 0 |
+| `clictl info <name>` | 详情 + 最近 10 条启动 + 累计耗时 + 后台运行状态（running.alive/pids） | 0 / 1(not_found) |
 | `clictl run <name> [args...]` | **透传启动**：stdin/stdout/stderr/退出码全部直通 | =子进程码 / 127(未注册) |
+| `clictl start <name> [args...]` | **后台分离启动**（DETACHED）：点火即走返回 pid；已有活实例附 already_running；未注册/失效=127（错误 JSON 走 stdout） | 0 / 127 |
+| `clictl stop <name>` | 全量终止后台活实例（taskkill /T /F 树杀）+ 杀后复探确认 + 闭环记录（exit_code=1 强杀约定值） | 0 / 1(有杀失败) |
 | `clictl --version` | 版本号（也是 JSON） | 0 |
 
 - 全局 `--pretty`：缩进 JSON 供人读；默认紧凑单行
@@ -123,10 +126,13 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - 规则：name 统一 `strings.ToLower` 后比较/存储；path `filepath.Clean` 后去重；meta 写入前必须过 `ValidateMeta`，读出后原样透传不做二次解释
 - **status 刷新策略**：add 时初始 `active`；之后每次 list/info/run 触碰到该工具都现场 `os.Stat`——JSON 输出的 status 永远是实时结论，且与落库值不一致时同步回写（写入频率低，无需异步）
 
-**runner**（`internal/runner/runner.go`）
+**runner**（`internal/runner/`）
 
-- 职责：透传启动 + 记账
-- 流程：`GetTool(name)` → `os.Stat` 校验（失效→stderr JSON + 退出 127）→ `InsertLaunch(now)` → `exec.Command(path, args...)`，`Stdin/Stdout/Stderr = os.Std*` **不经任何 shell 包裹** → `signal.Notify` 忽略父进程 Ctrl+C（子进程同控制台组自然收到并退出）→ `Wait` → `FinishLaunch` → `os.Exit(子进程退出码)`
+- 职责：透传启动 + 后台启动 + 探活 + 停止 + 记账
+- `Run` 流程：`lookup(name)`（查注册 + 现场校验 + 相似名建议，run/start/stop 共用）→ `InsertLaunch(now)` → `exec.Command(path, args...)`，`Stdin/Stdout/Stderr = os.Std*` **不经任何 shell 包裹** → `signal.Notify` 忽略父进程 Ctrl+C（子进程同控制台组自然收到并退出）→ `Wait` → `FinishLaunch` → `os.Exit(子进程退出码)`
+- `Start` 流程：`lookup` → 探活已有实例（already_running 提示）→ `InsertLaunch` → `exec.Command` + `SysProcAttr{DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP}`（无控制台不闪黑框，与 clictl 生命周期解耦）→ `SetLaunchPID(pid)` → 立即返回，永不闭环
+- `Stop` 流程：`lookup` → `UnfinishedStarts` → `FilterAlive`（三重探活）→ 逐个 `taskkill /PID x /T /F`（树杀子进程）→ 复探确认 → `FinishLaunch(dur, 1)`（强杀约定值）
+- `Alive(pid, expectPath)` 探活三重校验：OpenProcess 存在性（只认 ERROR_ACCESS_DENIED 为"存在但权限不足"，INVALID_PARAMETER 判死）+ GetExitCodeProcess != STILL_ACTIVE(259) 判已退出（进程退出后若有外部句柄引用，进程对象不销毁，OpenProcess 仍成功——必须查终止态）+ QueryFullProcessImageName 路径比对（防 PID 回收复用）
 - Ctrl+C 场景：父进程吞掉信号等子进程死，回写 duration/exit_code 后再退，记录不丢
 
 **cli**（`internal/cli/`）
@@ -176,11 +182,40 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - `clictl --version` 输出 JSON 版本号
 - 全部命令 JSON 输出格式一致
 
+### Phase 4：智能提示（v1.1.0）
+
+- [x] 9. 相似名建议：`internal/runner/suggest.go`（前缀 > 子串 > Levenshtein，纯标准库）+ 表驱动单测；`run` 未注册时 stderr 错误附 `suggestions` 字段（仅 run，退出码仍 127）
+- [x] 10. `completion` 子命令：`powershell` 输出补全脚本（raw 文本例外）；`--install`/`--uninstall` 写入/移除 `$PROFILE`（conda-init 风格标记区块、幂等、Get-Command 守卫）；`names` 输出全部工具名
+- [x] 11. 补全脚本行为：只绑定 clictl 命令名；第 1 位置补全子命令名；run/rm/info/set 后第 1 位置补全工具名（排除光标处正在输入的 wordToComplete）；run 透传段无候选；try/catch 静默失败
+
+验收标准：
+
+- `clictl run zedub` → suggestions=["zedhub"]，exit 127
+- `go test ./...` 通过（12+ 用例）
+- PS 5.1：脚本语法/注册/11 个位置判定用例通过；install/uninstall 幂等；带 profile 会话启动无报错
+
+### Phase 5：后台启动 + PID 探活 + 全量停止（v1.2.0）
+
+- [x] 12. store：launches 加 `pid` 列（新库 schema 自带 / 存量库 Open 时 PRAGMA 检测 + ALTER 自动迁移，SQL 存档父仓 migrations/）；`Launch` 加 PID 字段；`SetLaunchPID` / `UnfinishedStarts`
+- [x] 13. runner：`start.go`（DETACHED 分离启动 + already_running）、`alive.go`（三重探活）+ 表驱动单测、`stop.go`（taskkill /T /F 全量树杀 + 复探确认 + 闭环回写 exit_code=1）、run/start/stop 共用 `lookup`
+- [x] 14. cli：`start`/`stop` 子命令（错误走 stdout、未注册/失效=127）；`list --running`（与 --status 互斥）；`info` 加 running 字段；help 更新；补全纳入 start/stop
+- [x] 15. 文档：README / CHANGELOG / 父仓镜像使用指南 / 父仓 migrations 存档；build 1.2.0
+
+验收标准（已全部实测通过）：
+
+- 存量库（无 pid 列）升级：自动加列、旧数据完好
+- `start` 立即返回 pid；二次 start 附 already_running=true
+- `list --running` 显示 running_pids；`info` running.alive 正确
+- `stop` 全杀（多实例一次清空）、复探确认、记录闭环（duration + exit_code=1）；无实例时 already_stopped
+- `run` 行为零回归（透传/退出码/前置错误走 stderr）
+- 探活单测：真实路径比对、已退出进程判死、PID 复用路径不匹配判死
+
 ## 技术依赖
 
 | 依赖 | 用途 | 理由 |
 |---|---|---|
 | modernc.org/sqlite | SQLite 驱动 | **纯 Go 无 CGO**：Windows 下无需 gcc，交叉编译不受限；本工具写入频率极低，性能足够 |
+| golang.org/x/sys/windows | Win32 探活 API（OpenProcess/QueryFullProcessImageName） | 原为 sqlite 传递依赖，v1.2.0 提升为直接依赖，零新增体积 |
 | 标准库 flag / os/exec / os/signal / encoding/json / database/sql | 其余全部 | 零 CLI 框架，单二进制最小化 |
 
 ## 关键技术点
@@ -201,12 +236,18 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 ## 注意事项
 
 - `%AppData%` 取不到回退 `~/.clictl/`；DB 损坏时输出 JSON 错误而非 panic
-- run 前置校验失败绝不向 stdout 写管理 JSON，保住"run 的 stdout 只属于子进程"约定
+- run/start 前置校验失败绝不向 stdout 写管理 JSON（run 场景），保住"run 的 stdout 只属于子进程"约定；start/stop 是管理命令，错误 JSON 走 stdout 但退出码保持 127（与 run 跨命令一致）
 - meta 是 TEXT 存 JSON 字符串（SQLite 无 JSONB），不建基于 meta 的 SQL 查询——所有 meta 检索/过滤都在应用层做，避免 JSON 查询性能陷阱
 - 版本号唯一来源 = 构建命令 `-ldflags -X`（taskmon-go 同款约定）
 - 本项目属 go_projects 子仓（monorepo），不单独 `git init`；提交格式 `clictl:<type>: <subject>`
+- `completion powershell|names` 输出 raw 文本是 JSON 约定例外：消费者是 shell 补全脚本，输出即协议（同 run stdout 例外先例）；`--install`/`--uninstall` 动作型命令仍输出 JSON
+- 补全脚本（内嵌 Go raw string）禁止使用反引号；升级脚本时旧安装块由 `$PROFILE` 安装行动态拉取最新版，无需重新 install
+- 表结构变更三同步：schema 常量（新库）+ `migrate()` ALTER（存量库）+ 父仓 `docs/go_projects/clictl/migrations/` SQL 存档，缺一不可
+- start 面向 GUI/托盘/服务类：DETACHED 无控制台，console 程序无输出能力（要看输出用 run）；Win11 商店化 stub（notepad/mspaint）自退出后真实进程 PID 与记录不符，属已知局限
+- 探活已知局限：进程退出码恰为 259（STILL_ACTIVE 哨兵值）会误判为存活；SysWOW64/System32 路径重定向会误判为已退出；概率极低，接受
+- stop 的 taskkill /T 树杀依赖父子快照，极端竞态（PID 复用窗口）可能波及无关子进程——与 taskkill 本身行为一致，接受
 
 ---
-**最后更新：** 2026-09-11
+**最后更新：** 2026-09-12
 **作者：** Claude & User
-**版本：** v1.2（v1.1 计划定稿；v1.2 全部任务执行完毕）
+**版本：** v1.5（v1.4 = Phase 5 后台启动/探活/停止，发布为 1.2.0）
