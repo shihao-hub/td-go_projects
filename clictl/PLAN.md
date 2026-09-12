@@ -238,7 +238,7 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - `%AppData%` 取不到回退 `~/.clictl/`；DB 损坏时输出 JSON 错误而非 panic
 - run/start 前置校验失败绝不向 stdout 写管理 JSON（run 场景），保住"run 的 stdout 只属于子进程"约定；start/stop 是管理命令，错误 JSON 走 stdout 但退出码保持 127（与 run 跨命令一致）
 - meta 是 TEXT 存 JSON 字符串（SQLite 无 JSONB），不建基于 meta 的 SQL 查询——所有 meta 检索/过滤都在应用层做，避免 JSON 查询性能陷阱
-- 版本号唯一来源 = 构建命令 `-ldflags -X`（taskmon-go 同款约定）
+- 版本号唯一来源 = 构建命令 `-ldflags -X`（taskmon 同款约定）
 - 本项目属 go_projects 子仓（monorepo），不单独 `git init`；提交格式 `clictl:<type>: <subject>`
 - `completion powershell|names` 输出 raw 文本是 JSON 约定例外：消费者是 shell 补全脚本，输出即协议（同 run stdout 例外先例）；`--install`/`--uninstall` 动作型命令仍输出 JSON
 - 补全脚本（内嵌 Go raw string）禁止使用反引号；升级脚本时旧安装块由 `$PROFILE` 安装行动态拉取最新版，无需重新 install
