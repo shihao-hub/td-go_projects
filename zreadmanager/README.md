@@ -35,4 +35,4 @@ go build ./cmd/zreadmanager
 
 ## 与 zread-tray 的关系
 
-zread-tray 保留在仓库中（GUI 版），二者不共享运行状态：zreadmanager 有独立的 pidfile 与配置目录。
+zread-tray（GUI 版）已归档至父仓 `.archived/go_projects/zread-tray`，由本项目替代；二者不共享运行状态：zreadmanager 有独立的 pidfile 与配置目录。
