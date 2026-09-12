@@ -10,7 +10,7 @@ import (
 
 // psCompletionScript PowerShell 补全脚本（PS 5.1+ 兼容）。
 // 约束：脚本内不得使用反引号（Go raw string 语法定界符）。
-// 行为：只绑定 clictl 命令名；第 1 位置补全子命令名；run/start/stop/rm/info/set
+// 行为：只绑定 clictl 命令名；第 1 位置补全子命令名；run/start/stop/rm/info/set/cp
 // 后的第 1 位置补全工具名；run/start 第 2 参数起为子进程透传段，不产生候选；
 // 跳过 --pretty 等 flag 计位；内部 try/catch 静默失败，绝不打扰 Tab 体验。
 const psCompletionScript = `# clictl PowerShell 补全（由 'clictl completion powershell' 生成，请勿手改）
@@ -24,12 +24,12 @@ Register-ArgumentCompleter -Native -CommandName clictl -ScriptBlock {
             $elems = @($elems | Select-Object -First ($elems.Count - 1))
         }
         if ($elems.Count -eq 0) {
-            'add','rm','set','list','info','run','start','stop','version','help','completion' |
+            'add','rm','set','list','info','run','start','stop','cp','version','help','completion' |
                 Where-Object { $_ -like "$wordToComplete*" }
             return
         }
         $sub = "$($elems[0])"
-        if (@('run','start','stop','rm','info','set') -contains $sub -and $elems.Count -eq 1) {
+        if (@('run','start','stop','rm','info','set','cp') -contains $sub -and $elems.Count -eq 1) {
             & clictl completion names 2>$null | Where-Object { $_ -like "$wordToComplete*" }
         }
     } catch { }

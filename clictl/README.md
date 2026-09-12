@@ -10,7 +10,7 @@ Windows 单文件 CLI 工具注册器/启动器：注册任意 exe，`clictl run
 - **PID 探活**：OpenProcess 存在性 + 终止态 + exe 路径比对三重校验（防 PID 回收复用误判）；`list --running` / `info` 现场探活
 - **智能提示**：`run`/`start` 未注册名时附相似名建议（前缀/子串/编辑距离）；PowerShell 中 Tab 补全子命令与工具名
 - **启动记账**：启动次数、上次启动时间、耗时、退出码、后台实例 PID
-- **SQLite 存储**：`%AppData%\clictl\clictl.db`（取不到回退 `~/.clictl/`），WAL 模式，多实例并发安全
+- **SQLite 存储**：`%APPDATA%\language_projects\clictl\clictl.db`（取不到 APPDATA 回退 `~/.language_projects/clictl/`），WAL 模式，多实例并发安全
 
 ## run vs start
 
@@ -35,6 +35,7 @@ Windows 单文件 CLI 工具注册器/启动器：注册任意 exe，`clictl run
 | `clictl run <name> [args...]` | 前台透传启动；未注册时 stderr 错误附相似名 `suggestions` | =子进程码 / 127 |
 | `clictl start <name> [args...]` | 后台分离启动，输出 pid；已有活实例时附 `already_running`（不拦截） | 0 / 127 |
 | `clictl stop <name>` | 全量终止该工具后台活实例（taskkill /T /F 树杀）并闭环记录 | 0（无活实例 also 0）/ 1（有杀失败） |
+| `clictl cp <name> <dest_dir> [--force]` | 复制已注册 exe 到目标目录（目录须已存在）；目标同名文件默认拒绝，需 `--force` 覆盖 | 0 / 1 |
 | `clictl completion powershell [--install\|--uninstall]` | PowerShell 补全脚本；`--install` 写入 `$PROFILE`，`--uninstall` 移除 | 0 / 1 |
 | `clictl completion names` | 全部工具名，每行一个（供补全脚本消费） | 0 |
 | `clictl --version` | 版本号（JSON） | 0 |

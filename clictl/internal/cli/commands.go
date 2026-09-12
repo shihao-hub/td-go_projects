@@ -3,6 +3,7 @@
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -64,6 +65,8 @@ func Run(args []string) int {
 		return cmdStart(rest)
 	case "stop":
 		return cmdStop(rest)
+	case "cp":
+		return cmdCp(rest)
 	case "completion":
 		return cmdCompletion(rest)
 	case "version", "--version", "-v":
@@ -94,6 +97,7 @@ func EmitHelp() {
 			{"cmd": "run <name> [args...]", "desc": "前台透传启动（要看输出、等结果的用它）；退出码=子进程码，未注册/失效=127；未注册时附相似名 suggestions"},
 			{"cmd": "start <name> [args...]", "desc": "后台分离启动（GUI/托盘/服务类），立即返回并输出 pid；未注册/失效=127"},
 			{"cmd": "stop <name>", "desc": "终止该工具全部后台活实例（taskkill 树杀）并闭环记录"},
+			{"cmd": "cp <name> <dest_dir> [--force]", "desc": "复制已注册 exe 到目标目录；目录须已存在，目标同名文件需 --force 覆盖"},
 			{"cmd": "completion powershell [--install|--uninstall]", "desc": "PowerShell Tab 补全脚本；--install 写入 $PROFILE，--uninstall 移除"},
 			{"cmd": "completion names", "desc": "全部工具名，每行一个（供补全脚本消费，raw 输出）"},
 			{"cmd": "version", "desc": "版本号"},
@@ -349,6 +353,88 @@ func cmdStop(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// cmdCp 把已注册的 exe 复制到指定目录。目标目录必须已存在（不自动创建）；
+// 目标同名文件默认拒绝覆盖，--force 强制。--force 是布尔 flag，不走
+// splitFlags（其约定所有 flag 带值），参照 --pretty 先例手动剥离，可位于任意位置。
+func cmdCp(args []string) int {
+	force := false
+	rest := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--force" {
+			force = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+	if len(rest) != 2 {
+		Fail("bad_args", "用法: clictl cp <name> <dest_dir> [--force]")
+		return 1
+	}
+
+	tool, err := mustStore().GetTool(store.NormalizeName(rest[0]))
+	if err != nil {
+		failFromErr("cp", err)
+		return 1
+	}
+	if tool.Status != store.StatusActive {
+		Fail("file_not_found", "源文件已失效: "+tool.Path)
+		return 1
+	}
+
+	destDir := rest[1]
+	if fi, err := os.Stat(destDir); err != nil || !fi.IsDir() {
+		Fail("dest_not_found", "目标目录不存在: "+destDir)
+		return 1
+	}
+
+	dest := filepath.Join(destDir, filepath.Base(tool.Path))
+	if destFi, err := os.Stat(dest); err == nil {
+		// 源=目标（同文件/同路径）时复制会截断损坏源文件，--force 也不允许
+		if srcFi, err := os.Stat(tool.Path); err == nil && os.SameFile(srcFi, destFi) {
+			Fail("same_path", "源与目标是同一文件: "+dest)
+			return 1
+		}
+		if !force {
+			Fail("dest_exists", "目标已存在: "+dest+"（覆盖需 --force）")
+			return 1
+		}
+	}
+
+	if err := copyFile(tool.Path, dest); err != nil {
+		Fail("copy_failed", err.Error())
+		return 1
+	}
+	Emit(map[string]any{
+		"name":       tool.Name,
+		"src":        tool.Path,
+		"dest":       dest,
+		"size_bytes": tool.SizeBytes,
+	})
+	return 0
+}
+
+// copyFile 流式复制文件内容（exe 可达数百 MB，不整读进内存）；
+// 显式 Close 捕获落盘错误，defer Close 仅兜底异常路径
+func copyFile(src, dest string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("打开源文件失败: %w", err)
+	}
+	defer in.Close()
+	out, err := os.Create(dest)
+	if err != nil {
+		return fmt.Errorf("创建目标文件失败: %w", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return fmt.Errorf("复制内容失败: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("写入目标文件失败: %w", err)
+	}
+	return nil
 }
 
 // failFromErr 把 store 领域错误映射为统一的 JSON 错误码
