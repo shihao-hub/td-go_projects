@@ -36,4 +36,4 @@ go build ./cmd/quickaskd   # 后端守护
 
 ## 与 aiquick 的关系
 
-aiquick 保留在仓库中（GUI 版），二者共享后端数据与协议；aiquickd 与 quickaskd 二进制独立但数据目录相同。
+aiquick（fyne GUI 版）已归档至父仓 `.archived/go_projects/aiquick`，由本项目替代；后端数据与协议同源，预设与 LLM 配置仍共享 `%APPDATA%\aiquick\`。
