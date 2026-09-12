@@ -31,4 +31,4 @@ go build ./cmd/filesync
 
 ## 与 file-sync-native 的关系
 
-file-sync-native 保留在仓库中（GUI 版），二者通过共享配置与缓存互通：GUI 里建的任务 CLI 可直接跑。
+file-sync-native（Wails GUI 版）已归档至父仓 `.archived/go_projects/file-sync-native`，由本项目替代；任务配置与哈希缓存仍在 `~/.file-sync/` 共享，GUI 时期建的任务 CLI 可直接跑。
