@@ -41,7 +41,7 @@ Windows 单文件 CLI 工具注册器/启动器：注册任意 exe，`clictl run
 | `clictl --version` | 版本号（JSON） | 0 |
 | `clictl help`（或 `-h`/`--help`，或无参数） | 帮助（也是 JSON） | 0 |
 
-- 全局 `--pretty`：缩进 JSON 供人读；默认紧凑单行（注意：`run`/`start` 透传段的 `--pretty` 属于子进程，不会被 clictl 消费）
+- 全局 `--pretty`：缩进 JSON 供人读；全局 `--ascii`：非 ASCII 转义为 `\uXXXX`（PS 5.1 管道等编码不可靠环境用，下游 JSON 解析自动还原）；默认紧凑单行中文原文（注意：`run`/`start` 透传段的 `--pretty`/`--ascii` 属于子进程，不会被 clictl 消费）
 - 管理命令错误 JSON 走 stdout；`run` 的前置错误（未注册/文件失效）JSON 走 **stderr**，stdout 只属于子进程；`start`/`stop` 前置错误走 stdout 且保持 127（跨命令一致）
 - `completion` 的 `powershell`/`names` 输出 **raw 文本而非 JSON 包络**（消费者是 shell 补全脚本，输出即协议，同 `run` stdout 例外先例）；`--install`/`--uninstall` 为动作型命令仍输出 JSON
 
@@ -78,6 +78,7 @@ clictl completion powershell --uninstall  # 卸载
 
 - 补全器只绑定 `clictl` 命令名，不影响其他工具；内部 try/catch 静默失败，绝不打扰 Tab 体验
 - `--install` 写入的安装行带 `Get-Command clictl` 守卫，clictl 不在 PATH 的会话中自动跳过，不污染 shell 启动
+- `--install` 安装块自带两行 UTF-8 编码固化（`$OutputEncoding` / `[Console]::OutputEncoding`，修 PS 5.1 原生 exe 间管道中文变 `?`，新会话免 `--ascii`）；旧版 3 行块重跑 `--install` 自动升级为 5 行标准块（返回 `upgraded:true`）；已知副作用：固化后该会话中 ping 等 GBK 老工具输出乱码
 
 ## 构建
 

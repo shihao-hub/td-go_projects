@@ -41,7 +41,27 @@ const (
 	installEnd   = "# <<< clictl completion <<<"
 	// 守卫：clictl 不在 PATH 的会话（如定向环境）也不污染 shell 启动
 	psInstallLine = "if (Get-Command clictl -ErrorAction SilentlyContinue) { clictl completion powershell | Out-String | Invoke-Expression }"
+	// 编码固化行 1：$OutputEncoding 管 PS 写下游原生进程 stdin 的重编码
+	// （PS 5.1 默认 ASCII，原生 exe 间管道中文变 ? 的直接元凶）
+	psUtf8OutLine = "$OutputEncoding = [System.Text.Encoding]::UTF8"
+	// 编码固化行 2：[Console]::OutputEncoding 管 PS 解码上游原生进程 stdout
+	// （中文系统默认 OEM 936/GBK，不设则 UTF-8 输出先被误解码一次）
+	psUtf8ConsoleLine = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8"
 )
+
+// psBlockLines 标准安装块的全部行（追加与升级重写共用同一来源）。
+// 编码行必须位于 installLine 之前：安装行动态拉取补全脚本，Out-String 的
+// 解码依赖 [Console]::OutputEncoding 已就位；编码行在 Get-Command 守卫外
+// 无条件执行（即使 clictl 不在 PATH，管道编码固化也生效）
+func psBlockLines() []string {
+	return []string{
+		installBegin,
+		psUtf8OutLine,
+		psUtf8ConsoleLine,
+		psInstallLine,
+		installEnd,
+	}
+}
 
 // cmdCompletion 补全子命令：
 //
@@ -121,7 +141,13 @@ func psProfilePath() (string, error) {
 	return filepath.Join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"), nil
 }
 
-// psInstall 把补全安装块写入 $PROFILE（幂等：已有标记则跳过）
+// psInstall 把补全安装块写入 $PROFILE，幂等三态：
+//   - 无块 → 追加标准块（installed:true, already:false）
+//   - 有块且已含编码固化行 → 跳过（already:true）
+//   - 有块但缺编码行（旧版安装）→ 整块重写为标准块（upgraded:true），
+//     兑现"旧安装块免重装自动升级"承诺
+//
+// 标记不完整（缺 begin/end，用户手改过）时不重写，维持现状按已安装处理
 func psInstall() int {
 	profile, err := psProfilePath()
 	if err != nil {
@@ -132,27 +158,68 @@ func psInstall() int {
 	if b, err := os.ReadFile(profile); err == nil {
 		content = string(b)
 	}
-	if strings.Contains(content, installBegin) {
+	if !strings.Contains(content, installBegin) {
+		if err := os.MkdirAll(filepath.Dir(profile), 0o755); err != nil {
+			Fail("internal", "创建 $PROFILE 目录失败: "+err.Error())
+			return 1
+		}
+		var sb strings.Builder
+		sb.WriteString(content)
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			sb.WriteString("\r\n")
+		}
+		for _, line := range psBlockLines() {
+			sb.WriteString(line + "\r\n")
+		}
+		if err := os.WriteFile(profile, []byte(sb.String()), 0o644); err != nil {
+			Fail("internal", "写入 $PROFILE 失败: "+err.Error())
+			return 1
+		}
+		Emit(map[string]any{"installed": true, "already": false, "profile": profile})
+		return 0
+	}
+
+	// 有 begin 标记：按行定位完整块（TrimSpace 比较，容忍 CRLF）
+	lines := strings.Split(content, "\n")
+	beginIdx, endIdx := -1, -1
+	for i, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == installBegin && beginIdx == -1 {
+			beginIdx = i
+			continue
+		}
+		if t == installEnd && beginIdx != -1 {
+			endIdx = i
+			break
+		}
+	}
+	hasUtf8 := false
+	if beginIdx != -1 && endIdx != -1 {
+		for _, line := range lines[beginIdx : endIdx+1] {
+			if strings.TrimSpace(line) == psUtf8OutLine {
+				hasUtf8 = true
+				break
+			}
+		}
+	}
+	// 块完整且已含编码行，或块不完整（不动用户手改过的 profile）：均按已安装处理
+	if hasUtf8 || endIdx == -1 {
 		Emit(map[string]any{"installed": true, "already": true, "profile": profile})
 		return 0
 	}
-	if err := os.MkdirAll(filepath.Dir(profile), 0o755); err != nil {
-		Fail("internal", "创建 $PROFILE 目录失败: "+err.Error())
-		return 1
+
+	// 旧安装块：整块替换为标准块（块内行用 CRLF，其余行原样保留字节）
+	out := make([]string, 0, len(lines)+2)
+	out = append(out, lines[:beginIdx]...)
+	for _, line := range psBlockLines() {
+		out = append(out, line+"\r")
 	}
-	var sb strings.Builder
-	sb.WriteString(content)
-	if content != "" && !strings.HasSuffix(content, "\n") {
-		sb.WriteString("\r\n")
-	}
-	sb.WriteString(installBegin + "\r\n")
-	sb.WriteString(psInstallLine + "\r\n")
-	sb.WriteString(installEnd + "\r\n")
-	if err := os.WriteFile(profile, []byte(sb.String()), 0o644); err != nil {
+	out = append(out, lines[endIdx+1:]...)
+	if err := os.WriteFile(profile, []byte(strings.Join(out, "\n")), 0o644); err != nil {
 		Fail("internal", "写入 $PROFILE 失败: "+err.Error())
 		return 1
 	}
-	Emit(map[string]any{"installed": true, "already": false, "profile": profile})
+	Emit(map[string]any{"installed": true, "already": false, "upgraded": true, "profile": profile})
 	return 0
 }
 

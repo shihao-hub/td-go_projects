@@ -32,9 +32,9 @@ func mustStore() *store.Store {
 
 // Run 分发子命令，返回进程退出码
 func Run(args []string) int {
-	// 子命令名之前的全局 --pretty
-	for len(args) > 0 && args[0] == "--pretty" {
-		Pretty = true
+	// 子命令名之前的全局 flag（--pretty / --ascii）
+	for len(args) > 0 && isGlobalFlag(args[0]) {
+		setGlobalFlag(args[0])
 		args = args[1:]
 	}
 	if len(args) == 0 {
@@ -43,9 +43,9 @@ func Run(args []string) int {
 	}
 
 	cmd, rest := args[0], args[1:]
-	// run/start 的剩余参数全部透传给子进程，不能剥离 --pretty
+	// run/start 的剩余参数全部透传给子进程，不能剥离全局 flag
 	if cmd != "run" && cmd != "start" {
-		rest = stripPretty(rest)
+		rest = stripGlobalFlags(rest)
 	}
 
 	switch cmd {
@@ -87,6 +87,7 @@ func EmitHelp() {
 		"usage": "clictl <command> [args...]",
 		"global_flags": []map[string]string{
 			{"flag": "--pretty", "desc": "缩进 JSON 输出；可位于子命令前后，但 run 的透传段除外"},
+			{"flag": "--ascii", "desc": "非 ASCII 转义为 \\uXXXX（PS 5.1 管道等编码不可靠环境用，下游 JSON.parse 自动还原）；位置规则同 --pretty，run 透传段除外"},
 		},
 		"commands": []map[string]string{
 			{"cmd": "add <path> [--name N] [--desc D] [--meta JSON]", "desc": "注册 exe；name 默认=文件名去 .exe 小写化"},
@@ -509,11 +510,28 @@ func splitFlags(args []string, known map[string]bool) (flags []string, positiona
 	return flags, positional
 }
 
-func stripPretty(args []string) []string {
+// isGlobalFlag 判断 a 是否 clictl 全局布尔 flag（可位于子命令前后，
+// run/start 透传段除外）
+func isGlobalFlag(a string) bool {
+	return a == "--pretty" || a == "--ascii"
+}
+
+// setGlobalFlag 按名置位全局 flag（与 isGlobalFlag 配对使用）
+func setGlobalFlag(a string) {
+	switch a {
+	case "--pretty":
+		Pretty = true
+	case "--ascii":
+		Ascii = true
+	}
+}
+
+// stripGlobalFlags 过滤掉 args 中的全局 flag 并置位对应开关
+func stripGlobalFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	for _, a := range args {
-		if a == "--pretty" {
-			Pretty = true
+		if isGlobalFlag(a) {
+			setGlobalFlag(a)
 			continue
 		}
 		out = append(out, a)

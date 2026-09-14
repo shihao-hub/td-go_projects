@@ -2,6 +2,16 @@
 
 本文件记录 clictl 的版本变更。格式参考 Keep a Changelog，版本号遵循语义化版本。
 
+## [1.4.0] - 2026-09-13
+
+### Added
+
+- `--ascii` 全局开关：JSON 输出中非 ASCII 字符转义为 `\uXXXX`（BMP 外拆代理对，小写十六进制对齐 Go json 风格），产物全 ASCII 免疫 PS 5.1 管道重编码（`$OutputEncoding` 默认 ASCII 是中文变 `?` 的元凶），下游 JSON 解析自动还原；位置规则同 `--pretty`（`run`/`start` 透传段除外，透传段的 `--ascii` 属于子进程）；stdout 与 stderr 两个 JSON 出口在 marshal 单点同时覆盖；默认关闭，不加开关输出仍为 UTF-8 原文
+- `completion powershell --install` 安装块固化编码：新增 `$OutputEncoding` 与 `[Console]::OutputEncoding` 两行 UTF8 设置（位于安装行之前、Get-Command 守卫之外无条件执行），新开 PS 5.1 会话中原生 exe 间管道免 `--ascii` 直接可用
+- 旧版 3 行安装块重跑 `--install` 自动升级为 5 行标准块（返回 `upgraded:true`），免卸载重装；标记不完整时保守不动；`--uninstall` removed 计数 3→5
+- 已知副作用：profile 固化后 `[Console]::OutputEncoding=UTF8` 会使 ping 等 GBK 老工具在该会话输出乱码（仅该会话）
+- 单元测试：escapeNonASCII 边界（纯 ASCII 快扫 / 中文 / 代理对 / U+007F 不转 / U+0080 / U+FFFF / U+10000 / 无效字节）、marshal 集成（默认中文原样、Ascii 全 ASCII 且 Unmarshal 还原、Pretty+Ascii 组合）、stripGlobalFlags 剥离与置位
+
 ## [1.3.0] - 2026-09-12
 
 ### Added

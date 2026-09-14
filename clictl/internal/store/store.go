@@ -89,16 +89,17 @@ type Store struct{ db *sql.DB }
 
 type scanner interface{ Scan(dest ...any) error }
 
-// dbPath 数据库路径：%AppData%\clictl\clictl.db，取不到回退 ~/.clictl/
+// dbPath 数据库路径：%AppData%\language_projects\clictl\clictl.db，
+// 取不到 AppData 回退 ~/.language_projects/clictl/
 func dbPath() (string, error) {
 	if appData := os.Getenv("AppData"); appData != "" {
-		return filepath.Join(appData, "clictl", "clictl.db"), nil
+		return filepath.Join(appData, "language_projects", "clictl", "clictl.db"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("无法定位数据目录: %w", err)
 	}
-	return filepath.Join(home, ".clictl", "clictl.db"), nil
+	return filepath.Join(home, ".language_projects", "clictl", "clictl.db"), nil
 }
 
 // Open 打开数据库（WAL + busy_timeout=2s + 外键约束）并完成建表迁移
