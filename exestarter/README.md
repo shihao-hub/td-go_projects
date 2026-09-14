@@ -22,7 +22,7 @@ exestarter help | version
 
 ## 行为说明
 
-- **条目配置**位于 `UserConfigDir/exestarter/config.json`
+- **条目配置**位于 `%APPDATA%\language_projects\exestarter\config.json`（取不到 APPDATA 回退 `~/.language_projects/exestarter/`）
 - 系统标签是状态语义（todo/verify/broken/stable），用户标签是自由文本，每条各至多一个
 - `run` 是透传命令：stdout 只属于子进程，错误 JSON 走 stderr（与 clictl run 一致）
 - `open` / `shell` 为管理命令：新窗口独立存活，CLI 立即返回 JSON
@@ -37,5 +37,5 @@ go build ./cmd/exestarter
 
 ## 与 exe-launcher / clictl 的关系
 
-- exe-launcher（Win32 GUI 版）已归档至父仓 `.archived/go_projects/exe-launcher`，由本项目替代；条目配置位于 `UserConfigDir/exestarter/config.json`（与旧版 exe-launcher 目录不互通）
+- exe-launcher（Win32 GUI 版）已归档至父仓 `.archived/go_projects/exe-launcher`，由本项目替代；条目配置位于 `%APPDATA%\language_projects\exestarter\config.json`（与旧版 exe-launcher 目录不互通）
 - clictl 是"注册 + 启动记账"的通用 CLI；exestarter 聚焦 exe 收藏场景（扫描批量导入、状态标签、定位/开终端）

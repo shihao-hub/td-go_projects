@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-// config 落盘于 %AppData%\exestarter\config.json。
+// config 落盘于 %AppData%\language_projects\exestarter\config.json。
 // valid 是运行时状态（os.Stat 重算），不落盘。
 type Config struct {
 	Entries     []Entry `json:"entries"`
@@ -14,11 +14,14 @@ type Config struct {
 }
 
 func configPath() (string, error) {
-	base, err := os.UserConfigDir()
+	if appData := os.Getenv("AppData"); appData != "" {
+		return filepath.Join(appData, "language_projects", "exestarter", "config.json"), nil
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "exestarter", "config.json"), nil
+	return filepath.Join(home, ".language_projects", "exestarter", "config.json"), nil
 }
 
 // LoadConfig 任何失败（无文件/损坏）都按空配置处理。
