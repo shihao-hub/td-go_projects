@@ -44,13 +44,16 @@ func (e *AlreadyRunningError) Error() string {
 	return fmt.Sprintf("已有活实例 pid=%d dir=%s，先 stop 或 restart", e.Cur.Pid, e.Cur.Dir)
 }
 
-// pidfilePath pidfile 位置：UserConfigDir/zreadmanager/running.json
+// pidfilePath pidfile 位置：%APPDATA%\language_projects\zreadmanager\running.json
 func pidfilePath() (string, error) {
-	base, err := os.UserConfigDir()
+	if appData := os.Getenv("AppData"); appData != "" {
+		return filepath.Join(appData, "language_projects", "zreadmanager", "running.json"), nil
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "zreadmanager", "running.json"), nil
+	return filepath.Join(home, ".language_projects", "zreadmanager", "running.json"), nil
 }
 
 func loadRunning() (Running, bool) {

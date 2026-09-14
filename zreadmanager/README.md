@@ -17,14 +17,14 @@ zreadmanager help                                                 # JSON 帮助
 - stdout 永远是合法 JSON（`{"ok":true,"data":...}`），`--pretty` 缩进供人读
 - `start` 已有活实例 → `conflict`；未装 zread → `not_found`
 - `stop` 无活实例幂等返回 `stopped=false`，不算失败
-- 跨进程实例定位：pidfile（`UserConfigDir/zreadmanager/running.json`）记录 PID + 进程创建时间，探活双校验防 PID 复用误杀
+- 跨进程实例定位：pidfile（`%APPDATA%\language_projects\zreadmanager\running.json`）记录 PID + 进程创建时间，探活双校验防 PID 复用误杀
 
 ## 数据文件
 
 | 路径 | 用途 |
 |---|---|
-| `UserConfigDir/zreadmanager/running.json` | 活实例记录（pid/dir/参数/创建时间） |
-| `UserConfigDir/zreadmanager/config.json` | 上次工作区（last_dir） |
+| `%APPDATA%\language_projects\zreadmanager\running.json` | 活实例记录（pid/dir/参数/创建时间） |
+| `%APPDATA%\language_projects\zreadmanager\config.json` | 上次工作区（last_dir） |
 | `TempDir/zreadmanager.log` | zread browse 子进程输出日志 |
 
 ## 构建

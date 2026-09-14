@@ -1,4 +1,4 @@
-// Package store 管理 zreadmanager 的本地配置（UserConfigDir/zreadmanager/config.json）。
+// Package store 管理 zreadmanager 的本地配置（%APPDATA%\language_projects\zreadmanager\config.json）。
 // 目前只记 last_dir：start 不带 --dir 时回退到上次工作区。
 package store
 
@@ -14,11 +14,14 @@ type Config struct {
 }
 
 func configPath() (string, error) {
-	base, err := os.UserConfigDir()
+	if appData := os.Getenv("AppData"); appData != "" {
+		return filepath.Join(appData, "language_projects", "zreadmanager", "config.json"), nil
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "zreadmanager", "config.json"), nil
+	return filepath.Join(home, ".language_projects", "zreadmanager", "config.json"), nil
 }
 
 // Load 读配置（无文件/损坏都返回零值，不报错）
