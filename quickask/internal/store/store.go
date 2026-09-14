@@ -1,5 +1,5 @@
 // Package store 负责 quickaskd 的本地持久化：config.json 与 presets.json。
-// 位于 %APPDATA%\aiquick\（与 GUI 版 aiquick 共享数据），写入采用 临时文件+重命名 保证原子性。
+// 位于 %APPDATA%\language_projects\quickask\，写入采用 临时文件+重命名 保证原子性。
 package store
 
 import (
@@ -18,13 +18,17 @@ import (
 // ErrNotFound 目标预设不存在。
 var ErrNotFound = errors.New("preset not found")
 
-// DefaultDir 返回默认数据目录 %APPDATA%\aiquick。
+// DefaultDir 返回默认数据目录 %APPDATA%\language_projects\quickask，
+// 取不到 AppData 回退 ~/.language_projects/quickask。
 func DefaultDir() (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("user config dir: %w", err)
+	if appData := os.Getenv("AppData"); appData != "" {
+		return filepath.Join(appData, "language_projects", "quickask"), nil
 	}
-	return filepath.Join(base, "aiquick"), nil
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("定位数据目录失败: %w", err)
+	}
+	return filepath.Join(home, ".language_projects", "quickask"), nil
 }
 
 func defaultConfig() api.Config {

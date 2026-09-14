@@ -20,7 +20,7 @@ quickask help
 
 ## 行为说明
 
-- **与 GUI 版共享数据**：预设与 LLM 配置同用 `%APPDATA%\aiquick\`（config.json + presets.json），两边互通
+- **数据独立**：预设与 LLM 配置存于 `%APPDATA%\language_projects\quickask\`（config.json + presets.json），取不到 APPDATA 回退 `~/.language_projects/quickask/`；与已归档 GUI 版 aiquick 的 `%APPDATA%\aiquick\` 不互通
 - **ask / preset 是流式命令**（对齐 clictl run 的透传豁免）：stdout 属于流式应答文本，错误 JSON 走 stderr；`--json` 切换为 JSONL 事件流（`{"event":"chunk","text":"..."}` … `{"event":"done","text":"全文"}`）供机器消费
 - **presets / config 是管理命令**：stdout 永远是 JSON 包络，`--pretty` 缩进（需放在子命令前）
 - 后端 quickaskd 由 CLI 自动拉起（exe 同目录 / cwd / bin 查找，环境变量 `QUICKASK_BACKEND` 可指定），本次调用结束即退出
@@ -36,4 +36,4 @@ go build ./cmd/quickaskd   # 后端守护
 
 ## 与 aiquick 的关系
 
-aiquick（fyne GUI 版）已归档至父仓 `.archived/go_projects/aiquick`，由本项目替代；后端数据与协议同源，预设与 LLM 配置仍共享 `%APPDATA%\aiquick\`。
+aiquick（fyne GUI 版）已归档至父仓 `.archived/go_projects/aiquick`，由本项目替代；后端数据与协议同源，数据文件已按仓库规范迁至 `%APPDATA%\language_projects\quickask\`，与 GUI 版不再互通。
