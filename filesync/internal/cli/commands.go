@@ -294,22 +294,22 @@ func renderProgress(p models.SyncProgress) {
 	}
 }
 
-// hashCachePath 全局共享哈希缓存（与 GUI 版同一文件，方案 A：跨任务共享）
+// hashCachePath 全局共享哈希缓存（数据目录下，跨任务共享）
 func hashCachePath() string {
-	home, err := os.UserHomeDir()
+	dir, err := config.DataDir()
 	if err != nil {
 		return "hash-cache.gob"
 	}
-	return filepath.Join(home, ".file-sync", "hash-cache.gob")
+	return filepath.Join(dir, "hash-cache.gob")
 }
 
-// syncLogPath CLI 版独立日志文件（与 GUI 版同目录不同名）
+// syncLogPath CLI 版独立日志文件（数据目录下）
 func syncLogPath() string {
-	home, err := os.UserHomeDir()
+	dir, err := config.DataDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(home, ".file-sync", "filesync.log")
+	return filepath.Join(dir, "filesync.log")
 }
 
 func noExtraArgs(name string, args []string) bool {

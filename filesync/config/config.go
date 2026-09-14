@@ -10,7 +10,7 @@ import (
 	"filesync/models"
 )
 
-// Config 与旧版 file-sync 共享 ~/.file-sync/config.json，任务配置互通。
+// Config 任务配置，落盘于数据目录（%APPDATA%\language_projects\filesync\config.json）。
 type Config struct {
 	mu         stdsync.Mutex
 	path       string
@@ -18,12 +18,26 @@ type Config struct {
 	Tasks      []*models.SyncTask `json:"tasks"`
 }
 
-func DefaultPath() (string, error) {
+// DataDir 统一数据目录：%APPDATA%\language_projects\filesync\，
+// 取不到 AppData 回退 ~/.language_projects/filesync/。
+// config / hash-cache / 日志三类文件都在这里。
+func DataDir() (string, error) {
+	if appData := os.Getenv("AppData"); appData != "" {
+		return filepath.Join(appData, "language_projects", "filesync"), nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".file-sync", "config.json"), nil
+	return filepath.Join(home, ".language_projects", "filesync"), nil
+}
+
+func DefaultPath() (string, error) {
+	dir, err := DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.json"), nil
 }
 
 func Load(path string) (*Config, error) {

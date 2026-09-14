@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync/atomic"
+
+	"filesync/config"
 )
 
 const maxSize = 10 * 1024 * 1024
@@ -20,11 +22,11 @@ func init() {
 
 func Init(path string) error {
 	if path == "" {
-		home, err := os.UserHomeDir()
+		dir, err := config.DataDir()
 		if err != nil {
 			return err
 		}
-		path = filepath.Join(home, ".file-sync", "filesync.log")
+		path = filepath.Join(dir, "filesync.log")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err

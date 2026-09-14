@@ -16,7 +16,7 @@ filesync help                                          # JSON 帮助
 
 ## 行为说明
 
-- **任务配置与 GUI 版共享** `~/.file-sync/config.json`，哈希缓存共享 `~/.file-sync/hash-cache.gob`
+- **数据目录**：任务配置 `config.json`、哈希缓存 `hash-cache.gob`、日志 `filesync.log` 统一存于 `%APPDATA%\language_projects\filesync\`（取不到 APPDATA 回退 `~/.language_projects/filesync/`），与已归档 GUI 版的 `~/.file-sync/` 不互通
 - **三级判定快速同步**：目标缺失/size 不同 → 复制；size+mtime 同 → 零读取跳过；size 同 mtime 异 → 双侧哈希比对（缓存感知）。`--force` 全量内容校验
 - **删除默认拒绝**（脚本安全）：待删清单见结果 `diff.deleted`，确认后 `--yes` 执行；`--dry-run` 只算差异不落盘
 - **进度走 stderr**（单行刷新），stdout 只输出最终 JSON 结果；`--pretty` 缩进供人读
@@ -31,4 +31,4 @@ go build ./cmd/filesync
 
 ## 与 file-sync-native 的关系
 
-file-sync-native（Wails GUI 版）已归档至父仓 `.archived/go_projects/file-sync-native`，由本项目替代；任务配置与哈希缓存仍在 `~/.file-sync/` 共享，GUI 时期建的任务 CLI 可直接跑。
+file-sync-native（Wails GUI 版）已归档至父仓 `.archived/go_projects/file-sync-native`，由本项目替代；数据文件已按仓库规范迁至 `%APPDATA%\language_projects\filesync\`，与 GUI 版 `~/.file-sync/` 不再互通（旧数据可自行拷贝迁移）。
