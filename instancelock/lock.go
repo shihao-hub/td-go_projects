@@ -33,13 +33,26 @@ type Entry struct {
 }
 
 func PathOf(key string) string {
-	dir, err := os.UserCacheDir()
+	dir, err := dataDir()
 	if err != nil || dir == "" {
 		dir = os.TempDir()
 	}
 	sum := sha256.Sum256([]byte(key))
 	h := hex.EncodeToString(sum[:])[:12]
-	return filepath.Join(dir, "instancelock", sanitize(key)+"-"+h+".lock")
+	return filepath.Join(dir, sanitize(key)+"-"+h+".lock")
+}
+
+// dataDir 锁文件目录：%APPDATA%\language_projects\instancelock\，
+// 取不到 AppData 回退 ~/.language_projects/instancelock/，再失败由调用方回退临时目录。
+func dataDir() (string, error) {
+	if appData := os.Getenv("AppData"); appData != "" {
+		return filepath.Join(appData, "language_projects", "instancelock"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".language_projects", "instancelock"), nil
 }
 
 func sanitize(key string) string {

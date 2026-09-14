@@ -46,7 +46,7 @@ stdout 恒为 JSON 包络: {"ok":true,"data":...} / {"ok":false,"error":{"code",
   2. 读到子进程 stdout 的 JSON 行 data.held=true -> 继续启动；读到退出码 3 -> 宿主自行退出
   3. 宿主无论正常退出、崩溃还是被 kill，锁均由操作系统兜底释放，不会死锁
 
-锁文件: <用户缓存目录>/instancelock/<key前缀>-<hash12>.lock（Windows 为 %LOCALAPPDATA%）
+锁文件: %APPDATA%\language_projects\instancelock\<key前缀>-<hash12>.lock
 key 建议带命名空间，如 com.company.appname`
 
 // run 命令入口，返回进程退出码
