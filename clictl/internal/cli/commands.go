@@ -1,33 +1,38 @@
-﻿package cli
+package cli
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
+	"os/signal"
 	"strings"
 
+	"clictl/internal/mcp"
 	"clictl/internal/runner"
+	"clictl/internal/service"
 	"clictl/internal/store"
 )
 
 // Version 版本号，唯一来源是构建命令 -ldflags -X 注入
 var Version = "dev"
 
-var st *store.Store
+var svc *service.Service
 
-// mustStore 惰性打开数据库（version/help 不触发），失败输出 JSON 错误
-func mustStore() *store.Store {
-	if st == nil {
-		s, err := store.Open()
+// mustService 惰性打开业务服务（version/help/completion 脚本输出不触发），
+// 失败输出 JSON 错误
+func mustService() *service.Service {
+	if svc == nil {
+		s, err := service.Open()
 		if err != nil {
 			Fail("db_error", "打开数据库失败: "+err.Error())
 		}
-		st = s
+		svc = s
 	}
-	return st
+	return svc
 }
 
 // Run 分发子命令，返回进程退出码
@@ -43,7 +48,7 @@ func Run(args []string) int {
 	}
 
 	cmd, rest := args[0], args[1:]
-	// run/start 的剩余参数全部透传给子进程，不能剥离全局 flag
+	// run/start 的剩余参数全部透传给子进程，不能剥离全局 flag，其他的都给剥离掉
 	if cmd != "run" && cmd != "start" {
 		rest = stripGlobalFlags(rest)
 	}
@@ -69,6 +74,10 @@ func Run(args []string) int {
 		return cmdCp(rest)
 	case "completion":
 		return cmdCompletion(rest)
+	case "mcp":
+		return cmdMcp(rest)
+	case "schema":
+		return cmdSchema(rest)
 	case "version", "--version", "-v":
 		Emit(map[string]string{"version": Version})
 		return 0
@@ -79,6 +88,64 @@ func Run(args []string) int {
 		Fail("unknown_command", "未知命令: "+cmd+"，clictl help 查看用法")
 		return 1
 	}
+}
+
+// cmdMcp 启动 stdio MCP server（常驻；协议 stdout 只走 SDK 通道，
+// 日志全部 stderr）。不解析 flag——参数只属于 MCP 客户端的 stdin/stdout 对话。
+func cmdMcp(args []string) int {
+	if len(args) > 0 {
+		fmt.Fprintln(os.Stderr, "clictl mcp 不接受参数（MCP 客户端经 stdin/stdout 对话）")
+		return 1
+	}
+	mcp.Version = Version
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := mcp.Run(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "mcp server 异常退出: "+err.Error())
+		return 1
+	}
+	return 0
+}
+
+// cmdSchema 导出与 tools/list 同源的工具定义（含 JSON Schema），离线检查用；
+// 与 help 一样不打开业务数据库。
+func cmdSchema(args []string) int {
+	if len(args) > 0 {
+		Fail("bad_args", "用法: clictl schema")
+		return 1
+	}
+	tools, err := mcp.Schema(context.Background())
+	if err != nil {
+		Fail("internal", "导出工具定义失败: "+err.Error())
+		return 1
+	}
+	Emit(map[string]any{
+		"name":    "clictl",
+		"version": Version,
+		"tools":   tools,
+	})
+	return 0
+}
+
+// failService 把 service.Error 按输出去向输出并退出：
+// toStderr=true 走 stderr（run 类前置失败），false 走 stdout（管理命令与
+// start/stop——stdout 无子进程归属问题但退出码须保持 127）。
+// ExitCode 尊重 service.Error（127 等），未指定默认 1。
+func failService(err error, toStderr bool) int {
+	var se *service.Error
+	if !errors.As(err, &se) {
+		se = &service.Error{Code: "internal", Message: err.Error()}
+	}
+	code := se.ExitCode
+	if code == 0 {
+		code = 1
+	}
+	if toStderr {
+		FailStderr(se.Code, se.Message, code, se.Suggestions...)
+	} else {
+		FailExit(se.Code, se.Message, code, se.Suggestions...)
+	}
+	return code
 }
 
 // EmitHelp 输出帮助（也是 JSON，受 --pretty 影响）
@@ -101,6 +168,8 @@ func EmitHelp() {
 			{"cmd": "cp <name> <dest_dir> [--force]", "desc": "复制已注册 exe 到目标目录；目录须已存在，目标同名文件需 --force 覆盖"},
 			{"cmd": "completion powershell [--install|--uninstall]", "desc": "PowerShell Tab 补全脚本；--install 写入 $PROFILE，--uninstall 移除"},
 			{"cmd": "completion names", "desc": "全部工具名，每行一个（供补全脚本消费，raw 输出）"},
+			{"cmd": "mcp", "desc": "启动 stdio MCP server（GUI/AI 客户端对话通道；不解析参数，日志走 stderr）"},
+			{"cmd": "schema", "desc": "导出 MCP 工具定义（含 JSON Schema），与 tools/list 同源；离线检查用"},
 			{"cmd": "version", "desc": "版本号"},
 			{"cmd": "help", "desc": "本帮助"},
 		},
@@ -120,40 +189,9 @@ func cmdAdd(args []string) int {
 		Fail("bad_args", "用法: clictl add <path> [--name N] [--desc D] [--meta JSON]")
 		return 1
 	}
-	path := positional[0]
-	// v1 仅管理 .exe（.cmd/.bat shim 二期）
-	if strings.ToLower(filepath.Ext(path)) != ".exe" {
-		Fail("not_exe", "v1 仅支持注册 .exe 文件: "+path)
-		return 1
-	}
-	abs, err := filepath.Abs(path)
+	tool, err := mustService().Add(positional[0], *name, *desc, json.RawMessage(*meta))
 	if err != nil {
-		Fail("bad_args", "路径无效: "+err.Error())
-		return 1
-	}
-	if fi, err := os.Stat(abs); err != nil || fi.IsDir() {
-		Fail("file_not_found", "文件不存在: "+abs)
-		return 1
-	}
-
-	finalName := store.NormalizeName(*name)
-	if finalName == "" {
-		base := filepath.Base(abs)
-		finalName = store.NormalizeName(strings.TrimSuffix(base, filepath.Ext(base)))
-	}
-	if finalName == "" || strings.ContainsAny(finalName, " \t/\\") {
-		Fail("bad_args", "非法的 name: "+*name)
-		return 1
-	}
-
-	var metaRaw []byte
-	if strings.TrimSpace(*meta) != "" {
-		metaRaw = []byte(*meta)
-	}
-
-	tool, err := mustStore().AddTool(finalName, abs, *desc, metaRaw)
-	if err != nil {
-		failFromErr("add", err)
+		failService(err, false)
 		return 1
 	}
 	Emit(tool)
@@ -165,13 +203,12 @@ func cmdRm(args []string) int {
 		Fail("bad_args", "用法: clictl rm <name>")
 		return 1
 	}
-	name := store.NormalizeName(args[0])
-	n, err := mustStore().RemoveTool(name)
+	res, err := mustService().Remove(args[0])
 	if err != nil {
-		failFromErr("rm", err)
+		failService(err, false)
 		return 1
 	}
-	Emit(map[string]any{"removed": n, "name": name})
+	Emit(res)
 	return 0
 }
 
@@ -186,20 +223,13 @@ func cmdSet(args []string) int {
 		Fail("bad_args", "用法: clictl set <name> --meta JSON")
 		return 1
 	}
-	tool, err := mustStore().SetMeta(store.NormalizeName(positional[0]), []byte(*meta))
+	tool, err := mustService().SetMeta(positional[0], json.RawMessage(*meta))
 	if err != nil {
-		failFromErr("set", err)
+		failService(err, false)
 		return 1
 	}
 	Emit(tool)
 	return 0
-}
-
-// runningTool list --running 的输出形状：工具详情 + 活实例信息
-type runningTool struct {
-	store.Tool
-	RunningPIDs []int  `json:"running_pids"`
-	LastStartAt string `json:"last_start"` // 最新一条活记录的启动时间
 }
 
 func cmdList(args []string) int {
@@ -210,45 +240,23 @@ func cmdList(args []string) int {
 	if !parseFlags(fs, flags) {
 		return 0
 	}
-	if *status != "" && *status != store.StatusActive && *status != store.StatusInvalid {
-		Fail("bad_args", "--status 仅支持 active | invalid")
-		return 1
-	}
-	if *running && *status != "" {
-		Fail("bad_args", "--running 与 --status 互斥")
-		return 1
-	}
-
-	s := mustStore()
-	tools, err := s.ListTools(*status)
-	if err != nil {
-		failFromErr("list", err)
-		return 1
-	}
-	if !*running {
-		Emit(tools)
-		return 0
-	}
-
-	// --running：逐工具探活过滤（开销为每工具一次 UnfinishedStarts 查询 + 数次 Win32 探活）
-	out := []runningTool{}
-	for _, t := range tools {
-		unfinished, err := s.UnfinishedStarts(t.ID)
-		if err != nil {
-			failFromErr("list", err)
+	svc := mustService()
+	var res any
+	var err error
+	if *running {
+		if *status != "" {
+			Fail("bad_args", "--running 与 --status 互斥")
 			return 1
 		}
-		alive := runner.FilterAlive(unfinished, t.Path)
-		if len(alive) == 0 {
-			continue
-		}
-		pids := make([]int, 0, len(alive))
-		for _, l := range alive {
-			pids = append(pids, *l.PID)
-		}
-		out = append(out, runningTool{Tool: t, RunningPIDs: pids, LastStartAt: alive[len(alive)-1].StartedAt})
+		res, err = svc.ListRunning()
+	} else {
+		res, err = svc.ListTools(*status)
 	}
-	Emit(out)
+	if err != nil {
+		failService(err, false)
+		return 1
+	}
+	Emit(res)
 	return 0
 }
 
@@ -257,42 +265,12 @@ func cmdInfo(args []string) int {
 		Fail("bad_args", "用法: clictl info <name>")
 		return 1
 	}
-	s := mustStore()
-	tool, err := s.GetTool(store.NormalizeName(args[0]))
+	res, err := mustService().Info(args[0])
 	if err != nil {
-		failFromErr("info", err)
+		failService(err, false)
 		return 1
 	}
-	launches, err := s.RecentLaunches(tool.ID, 10)
-	if err != nil {
-		failFromErr("info", err)
-		return 1
-	}
-	finished, totalMs, err := s.TotalDuration(tool.ID)
-	if err != nil {
-		failFromErr("info", err)
-		return 1
-	}
-	unfinished, err := s.UnfinishedStarts(tool.ID)
-	if err != nil {
-		failFromErr("info", err)
-		return 1
-	}
-	alive := runner.FilterAlive(unfinished, tool.Path)
-	runningPIDs := make([]int, 0, len(alive))
-	for _, l := range alive {
-		runningPIDs = append(runningPIDs, *l.PID)
-	}
-	Emit(map[string]any{
-		"tool":              tool,
-		"recent_launches":   launches,
-		"finished_count":    finished,
-		"total_duration_ms": totalMs,
-		"running": map[string]any{
-			"alive": len(alive) > 0,
-			"pids":  runningPIDs,
-		},
-	})
+	Emit(res)
 	return 0
 }
 
@@ -301,7 +279,7 @@ func cmdRun(args []string) int {
 		FailStderr("bad_args", "用法: clictl run <name> [args...]", 1)
 		return 1
 	}
-	code, err := runner.Run(mustStore(), store.NormalizeName(args[0]), args[1:])
+	code, err := runner.Run(mustService().Store(), store.NormalizeName(args[0]), args[1:])
 	if err != nil {
 		var re *runner.RunError
 		if errors.As(err, &re) {
@@ -319,14 +297,9 @@ func cmdStart(args []string) int {
 		Fail("bad_args", "用法: clictl start <name> [args...]")
 		return 1
 	}
-	res, err := runner.Start(mustStore(), store.NormalizeName(args[0]), args[1:])
+	res, err := mustService().Start(args[0], args[1:])
 	if err != nil {
-		var re *runner.RunError
-		if errors.As(err, &re) {
-			FailExit(re.Code, re.Message, re.ExitCode, re.Suggestions...)
-			return re.ExitCode
-		}
-		FailExit("internal", err.Error(), 1)
+		failService(err, false)
 		return 1
 	}
 	Emit(res)
@@ -338,14 +311,9 @@ func cmdStop(args []string) int {
 		Fail("bad_args", "用法: clictl stop <name>")
 		return 1
 	}
-	res, err := runner.Stop(mustStore(), store.NormalizeName(args[0]))
+	res, err := mustService().Stop(args[0])
 	if err != nil {
-		var re *runner.RunError
-		if errors.As(err, &re) {
-			FailExit(re.Code, re.Message, re.ExitCode, re.Suggestions...)
-			return re.ExitCode
-		}
-		FailExit("internal", err.Error(), 1)
+		failService(err, false)
 		return 1
 	}
 	Emit(res)
@@ -356,8 +324,7 @@ func cmdStop(args []string) int {
 	return 0
 }
 
-// cmdCp 把已注册的 exe 复制到指定目录。目标目录必须已存在（不自动创建）；
-// 目标同名文件默认拒绝覆盖，--force 强制。--force 是布尔 flag，不走
+// cmdCp 把已注册的 exe 复制到指定目录。--force 是布尔 flag，不走
 // splitFlags（其约定所有 flag 带值），参照 --pretty 先例手动剥离，可位于任意位置。
 func cmdCp(args []string) int {
 	force := false
@@ -373,96 +340,17 @@ func cmdCp(args []string) int {
 		Fail("bad_args", "用法: clictl cp <name> <dest_dir> [--force]")
 		return 1
 	}
-
-	tool, err := mustStore().GetTool(store.NormalizeName(rest[0]))
+	res, err := mustService().Cp(rest[0], rest[1], force)
 	if err != nil {
-		failFromErr("cp", err)
+		failService(err, false)
 		return 1
 	}
-	if tool.Status != store.StatusActive {
-		Fail("file_not_found", "源文件已失效: "+tool.Path)
-		return 1
-	}
-
-	destDir := rest[1]
-	if fi, err := os.Stat(destDir); err != nil || !fi.IsDir() {
-		Fail("dest_not_found", "目标目录不存在: "+destDir)
-		return 1
-	}
-
-	dest := filepath.Join(destDir, filepath.Base(tool.Path))
-	if destFi, err := os.Stat(dest); err == nil {
-		// 源=目标（同文件/同路径）时复制会截断损坏源文件，--force 也不允许
-		if srcFi, err := os.Stat(tool.Path); err == nil && os.SameFile(srcFi, destFi) {
-			Fail("same_path", "源与目标是同一文件: "+dest)
-			return 1
-		}
-		if !force {
-			Fail("dest_exists", "目标已存在: "+dest+"（覆盖需 --force）")
-			return 1
-		}
-	}
-
-	if err := copyFile(tool.Path, dest); err != nil {
-		Fail("copy_failed", err.Error())
-		return 1
-	}
-	Emit(map[string]any{
-		"name":       tool.Name,
-		"src":        tool.Path,
-		"dest":       dest,
-		"size_bytes": tool.SizeBytes,
-	})
+	Emit(res)
 	return 0
 }
 
-// copyFile 流式复制文件内容（exe 可达数百 MB，不整读进内存）；
-// 显式 Close 捕获落盘错误，defer Close 仅兜底异常路径
-func copyFile(src, dest string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("打开源文件失败: %w", err)
-	}
-	defer in.Close()
-	out, err := os.Create(dest)
-	if err != nil {
-		return fmt.Errorf("创建目标文件失败: %w", err)
-	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
-		return fmt.Errorf("复制内容失败: %w", err)
-	}
-	if err := out.Close(); err != nil {
-		return fmt.Errorf("写入目标文件失败: %w", err)
-	}
-	return nil
-}
-
-// failFromErr 把 store 领域错误映射为统一的 JSON 错误码
-func failFromErr(prefix string, err error) {
-	var metaErr *store.MetaError
-	if errors.As(err, &metaErr) {
-		Fail(metaErr.Code, metaErr.Message)
-		return
-	}
-	var confErr *store.ConflictError
-	if errors.As(err, &confErr) {
-		switch confErr.Field {
-		case "name":
-			Fail("conflict", "该 name 已被其他工具使用")
-		case "path":
-			Fail("conflict", "该 exe 路径已注册为其他工具")
-		default:
-			Fail("conflict", "唯一性冲突: "+confErr.Field)
-		}
-		return
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		Fail("not_found", prefix+": 未找到该工具")
-		return
-	}
-	Fail("internal", prefix+": "+err.Error())
-}
+// failFromErr 已随服务层抽取移至 internal/service.wrapErr；
+// CLI 层统一走 failService。
 
 func newFlagSet(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)

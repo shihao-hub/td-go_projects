@@ -5,6 +5,7 @@ Windows 单文件 CLI 工具注册器/启动器：注册任意 exe，`clictl run
 ## 特性
 
 - **管理命令永远输出 JSON**：`{"ok":true,"data":...}` / `{"ok":false,"error":{"code":"...","message":"..."}}`（CLI/GUI 分离思想，未来 GUI/AI 客户端零成本接入）
+- **MCP server（`clictl mcp`）**：标准 MCP stdio 协议通道，把注册/启动/执行暴露为带 JSON Schema 的 MCP 工具（`clictl.list` / `clictl.run` 等 10 个），GUI 前端（tooldeck）与 AI 客户端零适配接入；`clictl schema` 可离线导出与 `tools/list` 同源的工具定义。`clictl.run` 为非交互执行：stdin 关闭、输出各保留 1 MiB（超限截断标记）、超时/取消终止整棵进程树（Windows Job Object）
 - **前台透传启动（run）**：stdin/stdout/stderr/退出码全部直通子进程，不经任何 shell 包裹，管理数据不混入 stdout；父进程吞掉 Ctrl+C，等子进程退出回写记录后再退，记录不丢
 - **后台分离启动（start）**：GUI/托盘/服务类工具点火即走，DETACHED 无控制台不闪黑框，记录 PID 供探活；`stop` 全量树杀
 - **PID 探活**：OpenProcess 存在性 + 终止态 + exe 路径比对三重校验（防 PID 回收复用误判）；`list --running` / `info` 现场探活
@@ -38,6 +39,8 @@ Windows 单文件 CLI 工具注册器/启动器：注册任意 exe，`clictl run
 | `clictl cp <name> <dest_dir> [--force]` | 复制已注册 exe 到目标目录（目录须已存在）；目标同名文件默认拒绝，需 `--force` 覆盖 | 0 / 1 |
 | `clictl completion powershell [--install\|--uninstall]` | PowerShell 补全脚本；`--install` 写入 `$PROFILE`，`--uninstall` 移除 | 0 / 1 |
 | `clictl completion names` | 全部工具名，每行一个（供补全脚本消费） | 0 |
+| `clictl mcp` | 启动 stdio MCP server（GUI/AI 客户端对话通道；不解析参数，日志走 stderr） | 0 / 1 |
+| `clictl schema` | 导出 MCP 工具定义（含 JSON Schema，与 tools/list 同源） | 0 / 1 |
 | `clictl --version` | 版本号（JSON） | 0 |
 | `clictl help`（或 `-h`/`--help`，或无参数） | 帮助（也是 JSON） | 0 |
 

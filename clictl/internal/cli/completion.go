@@ -101,13 +101,13 @@ func cmdCompletion(args []string) int {
 	}
 
 	if target == "names" {
-		tools, err := mustStore().ListTools("")
+		names, err := mustService().Names()
 		if err != nil {
-			failFromErr("completion", err)
+			failService(err, false)
 			return 1
 		}
-		for _, t := range tools {
-			fmt.Println(t.Name)
+		for _, n := range names {
+			fmt.Println(n)
 		}
 		return 0
 	}

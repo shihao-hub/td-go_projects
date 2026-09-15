@@ -17,10 +17,10 @@ type KilledProcess struct {
 
 // StopResult stop 命令的 JSON 输出形状
 type StopResult struct {
-	Name          string         `json:"name"`
-	Killed        []KilledProcess `json:"killed"`                  // 已确认终止（含进程树）
-	Failed        []KilledProcess `json:"failed"`                  // 杀后复探仍存活（taskkill 失败或权限不足）
-	AlreadyStopped bool           `json:"already_stopped"`         // 无存活实例（killed/failed 均空）
+	Name           string          `json:"name"`
+	Killed         []KilledProcess `json:"killed"`          // 已确认终止（含进程树）
+	Failed         []KilledProcess `json:"failed"`          // 杀后复探仍存活（taskkill 失败或权限不足）
+	AlreadyStopped bool            `json:"already_stopped"` // 无存活实例（killed/failed 均空）
 }
 
 // Stop 全杀：终止该工具全部存活的后台实例。

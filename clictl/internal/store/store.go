@@ -29,8 +29,8 @@ type Tool struct {
 	Name        string          `json:"name"`
 	Path        string          `json:"path"`
 	Description string          `json:"description"`
-	Status      string          `json:"status"`                // active / invalid，输出前现场 stat 刷新
-	Meta        json.RawMessage `json:"meta,omitempty"`        // 白名单约束的扩展字段，空则省略
+	Status      string          `json:"status"`         // active / invalid，输出前现场 stat 刷新
+	Meta        json.RawMessage `json:"meta,omitempty"` // 白名单约束的扩展字段，空则省略
 	AddedAt     string          `json:"added_at"`
 	SizeBytes   int64           `json:"size_bytes"`            // 运行时 stat
 	LaunchCount int64           `json:"launch_count"`          // JOIN launches 统计
@@ -252,7 +252,7 @@ func (s *Store) RefreshStatus(id int64, valid bool) error {
 
 // GetTool 按名查询；输出前现场校验文件状态并回写
 func (s *Store) GetTool(name string) (Tool, error) {
-	t, err := scanTool(s.db.QueryRow(toolSelect + ` WHERE t.name = ?`, NormalizeName(name)))
+	t, err := scanTool(s.db.QueryRow(toolSelect+` WHERE t.name = ?`, NormalizeName(name)))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Tool{}, ErrNotFound
@@ -454,8 +454,8 @@ func (s *Store) syncAllStatuses() error {
 
 func scanTool(sc scanner) (Tool, error) {
 	var (
-		t         Tool
-		meta      sql.NullString
+		t          Tool
+		meta       sql.NullString
 		lastLaunch sql.NullString
 	)
 	err := sc.Scan(&t.ID, &t.Name, &t.Path, &t.Description, &t.Status, &meta, &t.AddedAt, &t.LaunchCount, &lastLaunch)
