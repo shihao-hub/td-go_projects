@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>liteconf 控制台</title>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>liteconf 控制台</h1>
+  <button id="btn-new" type="button">新建配置</button>
+</header>
+
+<div id="error-banner" class="hidden" role="alert"></div>
+
+<main>
+  <section id="list-view" class="hidden"></section>
+
+  <section id="editor-view" class="hidden">
+    <p><a href="#/">← 返回列表</a></p>
+    <h2 id="editor-title"></h2>
+    <p id="editor-version"></p>
+
+    <div id="not-found" class="hidden"></div>
+
+    <div id="editor-body">
+      <div class="mode-switch">
+        <button id="btn-mode-text" type="button">JSON 文本</button>
+        <button id="btn-mode-table" type="button">键值表</button>
+      </div>
+
+      <div id="text-pane">
+        <textarea id="json-text" rows="24" spellcheck="false"></textarea>
+        <div class="editor-actions">
+          <button id="btn-format" type="button">格式化</button>
+          <button id="btn-save" type="button">保存</button>
+          <span id="editor-status"></span>
+        </div>
+      </div>
+
+      <div id="table-pane" class="hidden">
+        <table id="kv-table">
+          <thead>
+            <tr><th>键路径</th><th>值（数组/复杂值为 JSON 片段）</th></tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+        <div class="editor-actions">
+          <button id="btn-save-table" type="button">保存</button>
+          <span id="table-status"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog id="new-dialog">
+  <h3>新建配置</h3>
+  <div id="new-error" class="dialog-error hidden"></div>
+  <label>app <input id="new-app" type="text" placeholder="如 taskmon"></label>
+  <label>env <input id="new-env" type="text" placeholder="如 dev"></label>
+  <label>初始 JSON <textarea id="new-json" rows="8" spellcheck="false">{}</textarea></label>
+  <div class="dialog-actions">
+    <button id="btn-new-cancel" type="button">取消</button>
+    <button id="btn-new-submit" type="button">创建</button>
+  </div>
+</dialog>
+</body>
+</html>

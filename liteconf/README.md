@@ -12,6 +12,7 @@
 - **外部编辑检测**：绕过 API 直接改文件，server 周期扫描（默认 5s）自动感知并广播
 - **原子写入**：临时文件 + rename，失败不留半截配置
 - **SDK 容错**：断线指数退避自动重连，故障期间继续读最后一份可用配置
+- **内嵌 Web 控制台**：浏览器访问 `/ui/` 即可完成配置浏览、查看、双模式编辑（JSON 文本 / 键值表）与新建，静态资源经 `go:embed` 随二进制分发
 - **零依赖**：server 与 SDK 均只用标准库，`go build` 即得单文件二进制
 
 ## 快速开始
@@ -23,6 +24,8 @@ cd go_projects\liteconf
 .\scripts\build.ps1              # 产物 build/liteconf-server.exe
 .\build\liteconf-server.exe      # 默认监听 :8646
 ```
+
+启动后浏览器打开 <http://localhost:8646/ui/> 即为 Web 控制台（`/ui` 会自动 301 到 `/ui/`）。
 
 启动参数：
 
@@ -55,6 +58,10 @@ Bruno collection 位于父仓库 `docs/go_projects/liteconf/brunos/`（OpenColle
 | GET | `/api/watch/{app}/{env}?version=N[&timeout=S]` | 长轮询；版本已更新立即返回，相等则挂起（默认 30s，上限 120s），变更即唤醒 |
 
 统一响应包络 `{"code":"...","message":"...","data":...}`；错误码：`not_found`（404）、`invalid_name`（400，app/env 需满足 `[a-zA-Z0-9_-]+`）、`invalid_json`（400，body 非法 JSON 或非顶层对象）。
+
+### Web 控制台
+
+`GET /ui/` 托管内嵌的静态控制台页面（HTML/JS/CSS 经 `go:embed` 编译进二进制，无外部文件依赖，响应均带 `Cache-Control: no-cache`）。控制台只做渲染与交互，全部业务操作（列表/读取/写入/新建）通过上述 `/api/*` 接口完成。
 
 ## 新模块接入指南
 
@@ -124,10 +131,13 @@ liteconf/
 ├── cmd/liteconf-server/   # server 入口（flags/日志/优雅退出）
 ├── internal/server/       # server 实现（internal 不对外）
 │   ├── store.go           # 存储层：加载/原子写/版本元数据
-│   ├── handler.go         # HTTP API（读/写/发现）
+│   ├── handler.go         # HTTP API（读/写/发现）与 /ui/ 路由注册
 │   ├── watch.go           # 长轮询挂起与 close-broadcast 广播
 │   ├── poller.go          # 外部编辑周期检测
-│   └── errors.go          # 统一响应包络与错误码
+│   ├── errors.go          # 统一响应包络与错误码
+│   └── webui/             # Web 控制台（纯静态托管，无业务逻辑）
+│       ├── webui.go       # go:embed 嵌入与 no-cache Handler
+│       └── static/        # 内嵌前端：index.html / app.js / style.css
 ├── client/                # SDK（公开路径，供业务 import）
 │   ├── client.go          # 初始化与公开 API
 │   ├── cache.go           # copy-on-write 快照缓存与点路径读取
@@ -138,4 +148,4 @@ liteconf/
 
 ## 定位与边界
 
-单实例部署（文件即数据库，无集群/主备）；无鉴权、无 TLS、无历史版本回滚；不校验配置 schema；无 Web 控制台（编辑器就是控制台）。按《CLI 工具开发标准》记录例外：本项目形态为服务 + 库，无管理命令面，故不配套 CLI 与 MCP。
+单实例部署（文件即数据库，无集群/主备）；无鉴权、无 TLS、无历史版本回滚；不校验配置 schema。控制台为最小 GUI 壳子：仅静态托管 + 页面交互，无登录鉴权、无自动保存、无乐观锁（保存即覆盖，last-write-wins），沿用内网可信环境定位。按《CLI 工具开发标准》记录例外：本项目形态为服务 + 库，无管理命令面，故不配套 CLI 与 MCP。

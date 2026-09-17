@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/shihao-hub/liteconf/internal/server/webui"
 )
 
 // 长轮询超时参数
@@ -32,6 +34,8 @@ func NewMux(st *Store, bc *Broadcaster) *http.ServeMux {
 	mux.HandleFunc("GET /api/watch/{app}/{env}", func(w http.ResponseWriter, r *http.Request) {
 		handleWatch(w, r, st, bc)
 	})
+	// Web 控制台静态资源（/ui 由 ServeMux 自动 301 补斜杠到 /ui/）
+	mux.Handle("GET /ui/", webui.Handler())
 	return mux
 }
 

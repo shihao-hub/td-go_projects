@@ -1,0 +1,111 @@
+/* liteconf 控制台最小样式：内网工具风，朴素可读即可 */
+* { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, "Segoe UI", sans-serif;
+  margin: 0 1.5rem 2rem;
+  color: #222;
+  background: #fafafa;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #ddd;
+}
+
+header h1 { font-size: 1.2rem; margin: 0; }
+
+.hidden { display: none !important; }
+
+/* 全局错误横幅 */
+#error-banner {
+  margin: 0.75rem 0;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #d33;
+  background: #fdecea;
+  color: #a11;
+  border-radius: 4px;
+}
+
+.empty-state { color: #777; padding: 2rem 0; text-align: center; }
+
+/* 列表：按应用分组的卡片 */
+.app-card {
+  margin: 1rem 0;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.5rem 1rem 1rem;
+}
+
+.app-card h3 { margin: 0.5rem 0; }
+
+table { border-collapse: collapse; width: 100%; }
+
+th, td {
+  border: 1px solid #ddd;
+  padding: 0.35rem 0.6rem;
+  text-align: left;
+}
+
+.env-row { cursor: pointer; }
+.env-row:hover { background: #eef; }
+
+/* 编辑器 */
+.mode-switch { margin: 0.75rem 0; }
+.mode-switch button.active { font-weight: bold; background: #dfe7ff; }
+
+#json-text {
+  width: 100%;
+  font-family: Consolas, monospace;
+  font-size: 0.9rem;
+}
+
+.editor-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+#editor-status, #table-status { color: #070; }
+
+.path-cell {
+  font-family: Consolas, monospace;
+  white-space: nowrap;
+}
+
+.row-error td { background: #fdecea; }
+.row-error input { border-color: #d33; }
+.complex-value { font-family: Consolas, monospace; }
+
+/* 新建配置对话框 */
+dialog { min-width: 22rem; max-width: 32rem; }
+
+dialog label { display: block; margin: 0.6rem 0; }
+
+dialog input, dialog textarea {
+  width: 100%;
+  font-family: Consolas, monospace;
+}
+
+.dialog-error {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid #d33;
+  background: #fdecea;
+  color: #a11;
+  border-radius: 4px;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+#not-found { margin: 1rem 0; }
