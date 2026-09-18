@@ -35,6 +35,8 @@ exestarter help | version
 go build ./cmd/exestarter
 ```
 
+exe 默认带站标地鼠图标：主包目录下的 `icon.ico` 与 `rsrc_windows_amd64.syso` 由 `go build` 自动链接，无需额外参数；更换图标时用 rsrc 重出 syso（见父仓 `docs/go_projects/SKILL-GO-EXE-ICON.md`）。
+
 ## 与 exe-launcher / clictl 的关系
 
 - exe-launcher（Win32 GUI 版）已归档至父仓 `.archived/go_projects/exe-launcher`，由本项目替代；条目配置位于 `%APPDATA%\language_projects\exestarter\config.json`（与旧版 exe-launcher 目录不互通）
