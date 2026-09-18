@@ -13,7 +13,8 @@
 - **原子写入**：临时文件 + rename，失败不留半截配置
 - **SDK 容错**：断线指数退避自动重连，故障期间继续读最后一份可用配置
 - **内嵌 Web 控制台**：浏览器访问 `/ui/` 即可完成配置浏览、查看、双模式编辑（JSON 文本 / 键值表）与新建，静态资源经 `go:embed` 随二进制分发
-- **零依赖**：server 与 SDK 均只用标准库，`go build` 即得单文件二进制
+- **调试 CLI**：独立 `liteconf.exe`，`http` 子命令把参数原样透传给 curlie（HTTPie 语法 + curl 引擎）调试 API，`schema` 导出 CLI 契约目录
+- **零依赖**：server、SDK 与 CLI 均只用标准库，`go build` 即得单文件二进制
 
 ## 快速开始
 
@@ -21,7 +22,7 @@
 
 ```powershell
 cd go_projects\liteconf
-.\scripts\build.ps1              # 产物 build/liteconf-server.exe
+.\scripts\build.ps1              # 产物 build/liteconf-server.exe + build/liteconf.exe
 .\build\liteconf-server.exe      # 默认监听 :8646
 ```
 
@@ -36,6 +37,50 @@ cd go_projects\liteconf
 | `-poll` | `5s` | 外部编辑检测间隔 |
 
 日志同时写 stderr 与 `%APPDATA%\language_projects\liteconf\logs\liteconf-server.log`。
+
+### 调试 CLI（liteconf.exe）
+
+构建脚本同时产出 `build\liteconf.exe`（server 二进制不受影响）。前提：安装 curlie（HTTPie 语法 + curl 引擎）：
+
+```powershell
+go install github.com/rs/curlie@latest
+```
+
+```powershell
+.\build\liteconf.exe http GET :8646/api/app1/dev              # 读配置
+.\build\liteconf.exe http :8646/api/discovery                 # 发现列表
+.\build\liteconf.exe http PUT :8646/api/app1/dev key=value    # 写配置（HTTPie 键值语法）
+.\build\liteconf.exe schema                                   # 输出 CLI 命令契约目录（JSON）
+```
+
+`http` 把全部参数原样透传给 PATH 中的 curlie，stdin/stdout/stderr 直通、不经 shell 包裹，`--help` 等参数归 curlie 而非 liteconf。退出码：0 成功；1 运行失败（如 curlie 缺失，stderr 给出安装指引）；2 调用参数错误；`http` 子命令透传 curlie 的退出码。版本号由构建脚本 `-Version` 参数注入（`liteconf --version` 查看）。
+
+### curlie 常用语法速查
+
+curlie 兼容 HTTPie 语法；本机 Windows 自带 curl 未内置手册（`curlie --help` 不可用），下表写法均在 curlie 1.8.2 + PowerShell 5.1 实测通过，完整文档见 <https://curlie.io>。
+
+| 写法 | 含义 |
+|---|---|
+| `GET url` | 请求方法，建议总是显式写——curlie 1.8.2 省略方法时本 server 会返回 `Method Not Allowed` |
+| `:8646/api/app1/dev` | URL 简写，等价 `localhost:8646/...` |
+| `key=value` | JSON 字符串字段，默认 `Content-Type: application/json` |
+| `key:=30`、`key:=true`、`key:=[1,2]` | 原始 JSON 值（数字/布尔/数组不会被转成字符串） |
+| `key:='{\"a\":1}'` | 嵌套 JSON 对象：PowerShell 5.1 下内层引号必须写成 `\"`，否则引号被参数传递吃掉、字段变成 null |
+| `key==value` | URL 查询参数（拼成 `?key=value`） |
+| `Header:value` | 请求头 |
+| `-v` | 显示请求与响应明细 |
+
+踩坑提示：
+
+- HTTPie 的 `--body` / `--headers` / `--print` 在 curlie 1.8.2 不可用——会原样透传给 curl 并报 `option is unknown`；输出控制用 `-v` 或 curl 原生参数
+- curlie 没有 `help` 子命令，`curlie help` 会把 `help` 当主机名去解析（`Could not resolve host`）
+
+示例（PowerShell）：
+
+```powershell
+.\build\liteconf.exe http GET :8646/api/discovery
+.\build\liteconf.exe http PUT :8646/api/app1/dev timeout:=30 db:='{\"host\":\"127.0.0.1\"}'
+```
 
 ### 写入配置
 
@@ -128,16 +173,25 @@ v := c.Version()
 
 ```
 liteconf/
-├── cmd/liteconf-server/   # server 入口（flags/日志/优雅退出）
-├── internal/server/       # server 实现（internal 不对外）
-│   ├── store.go           # 存储层：加载/原子写/版本元数据
-│   ├── handler.go         # HTTP API（读/写/发现）与 /ui/ 路由注册
-│   ├── watch.go           # 长轮询挂起与 close-broadcast 广播
-│   ├── poller.go          # 外部编辑周期检测
-│   ├── errors.go          # 统一响应包络与错误码
-│   └── webui/             # Web 控制台（纯静态托管，无业务逻辑）
-│       ├── webui.go       # go:embed 嵌入与 no-cache Handler
-│       └── static/        # 内嵌前端：index.html / app.js / style.css
+├── cmd/
+│   ├── liteconf-server/   # server 入口（flags/日志/优雅退出）
+│   └── liteconf/          # 调试 CLI 入口（组装：标准流 + 退出码）
+├── internal/
+│   ├── server/            # server 实现（internal 不对外）
+│   │   ├── store.go       # 存储层：加载/原子写/版本元数据
+│   │   ├── handler.go     # HTTP API（读/写/发现）与 /ui/ 路由注册
+│   │   ├── watch.go       # 长轮询挂起与 close-broadcast 广播
+│   │   ├── poller.go      # 外部编辑周期检测
+│   │   ├── errors.go      # 统一响应包络与错误码
+│   │   └── webui/         # Web 控制台（纯静态托管，无业务逻辑）
+│   │       ├── webui.go   # go:embed 嵌入与 no-cache Handler
+│   │       └── static/    # 内嵌前端：index.html / app.js / style.css
+│   ├── cli/               # CLI 适配器（子命令分发/透传/契约导出）
+│   │   ├── cli.go         # Run 分发与运行依赖注入点（Options）
+│   │   ├── http.go        # http 子命令：curlie 透传编排
+│   │   ├── catalog.go     # 命令契约目录（help 与 schema 的同源数据）
+│   │   └── schema.go      # schema 子命令：契约目录 JSON 导出
+│   └── version/           # 版本号注入点（build.ps1 -ldflags -X）
 ├── client/                # SDK（公开路径，供业务 import）
 │   ├── client.go          # 初始化与公开 API
 │   ├── cache.go           # copy-on-write 快照缓存与点路径读取
@@ -148,4 +202,4 @@ liteconf/
 
 ## 定位与边界
 
-单实例部署（文件即数据库，无集群/主备）；无鉴权、无 TLS、无历史版本回滚；不校验配置 schema。控制台为最小 GUI 壳子：仅静态托管 + 页面交互，无登录鉴权、无自动保存、无乐观锁（保存即覆盖，last-write-wins），沿用内网可信环境定位。按《CLI 工具开发标准》记录例外：本项目形态为服务 + 库，无管理命令面，故不配套 CLI 与 MCP。
+单实例部署（文件即数据库，无集群/主备）；无鉴权、无 TLS、无历史版本回滚；不校验配置 schema。控制台为最小 GUI 壳子：仅静态托管 + 页面交互，无登录鉴权、无自动保存、无乐观锁（保存即覆盖，last-write-wins），沿用内网可信环境定位。按《CLI 工具开发标准》记录：本项目提供独立调试 CLI `liteconf.exe`（`http` 纯透传 + `schema` 契约导出，见「调试 CLI」一节）；不提供 MCP 入口——CLI 仅含纯终端透传子命令，无自身数据面、状态与记账，无合理的 MCP 操作，属标准 0.1 节例外。
