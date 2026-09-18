@@ -21,13 +21,17 @@ type Store struct {
 	db *sql.DB
 }
 
-// DataDir 返回 %APPDATA%\sublime-folders，存放记录库与日志。
+// DataDir 返回 %APPDATA%\language_projects\sublimefolders，存放记录库与日志。
+// 取不到 AppData 回退 ~/.language_projects/sublimefolders/。
 func DataDir() (string, error) {
-	base, err := os.UserConfigDir()
+	if appData := os.Getenv("AppData"); appData != "" {
+		return filepath.Join(appData, "language_projects", "sublimefolders"), nil
+	}
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "sublime-folders"), nil
+	return filepath.Join(home, ".language_projects", "sublimefolders"), nil
 }
 
 func OpenStore() (*Store, error) {

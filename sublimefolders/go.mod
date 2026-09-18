@@ -1,4 +1,4 @@
-module sublime-folders
+module sublimefolders
 
 go 1.26.6
 

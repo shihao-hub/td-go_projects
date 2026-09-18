@@ -17,7 +17,7 @@ import (
 //	找到 sublimetext 的数据存储区返回 Folders 的目录内容和数量等信息
 //
 // 说明：本文件自包含（自己手写核心链路），与根目录 app 包互不影响；
-// 想偷懒调用现成实现时 import "sublime-folders" 即可（见 app.LoadAutoSession / app.CurrentFolders）。
+// 想偷懒调用现成实现时 import "sublimefolders" 即可（见 app.LoadAutoSession / app.CurrentFolders）。
 func main() {
 	session, err := getSublimeTextSession()
 	if err != nil {

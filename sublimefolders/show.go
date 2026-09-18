@@ -11,7 +11,7 @@ import (
 
 // showText 把文本写入固定临时文件并用记事本打开（zread-tray openLog 模式）。
 func showText(name, header string, lines []string) {
-	dir := filepath.Join(os.TempDir(), "sublime-folders")
+	dir := filepath.Join(os.TempDir(), "sublimefolders")
 	_ = os.MkdirAll(dir, 0o755)
 	path := filepath.Join(dir, name+".txt")
 	var b strings.Builder
@@ -23,7 +23,7 @@ func showText(name, header string, lines []string) {
 		b.WriteString("\r\n")
 	}
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
-		AlertError("sublime-folders", "写入临时文件失败: "+err.Error())
+		AlertError("sublimefolders", "写入临时文件失败: "+err.Error())
 		return
 	}
 	_ = exec.Command("notepad", path).Start()
@@ -32,7 +32,7 @@ func showText(name, header string, lines []string) {
 func showCurrent() {
 	folders, src, err := CurrentFolders()
 	if err != nil {
-		AlertError("sublime-folders", "读取 Sublime 会话失败: "+err.Error())
+		AlertError("sublimefolders", "读取 Sublime 会话失败: "+err.Error())
 		return
 	}
 	lines := []string{

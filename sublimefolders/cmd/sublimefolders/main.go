@@ -1,12 +1,12 @@
-// sublime-folders: 托盘常驻工具，定时记录 Sublime Text 打开的目录到 SQLite。
+// sublimefolders: 托盘常驻工具，定时记录 Sublime Text 打开的目录到 SQLite。
 //
 // Usage:
 //
-//	sublime-folders.exe                托盘模式（默认），每 5 分钟记录一次
-//	sublime-folders.exe -interval 3m   自定义采集间隔
-//	sublime-folders.exe -no-tray       无托盘模式（调试用），仅采集入库
+//	sublimefolders.exe                托盘模式（默认），每 5 分钟记录一次
+//	sublimefolders.exe -interval 3m   自定义采集间隔
+//	sublimefolders.exe -no-tray       无托盘模式（调试用），仅采集入库
 //
-// 数据与日志: %APPDATA%\sublime-folders\
+// 数据与日志: %APPDATA%\sublimefolders\
 // 托盘菜单: 查看当前目录 / 最新 10 条记录 / 全部记录 / 打开数据目录 / 退出
 //
 // 构建脚本: scripts/build-tray.ps1
@@ -17,7 +17,7 @@ import (
 	"log"
 	"time"
 
-	app "sublime-folders"
+	app "sublimefolders"
 )
 
 const (
@@ -40,7 +40,7 @@ func main() {
 	st, err := app.OpenStore()
 	if err != nil {
 		log.Printf("打开数据库失败: %v", err)
-		app.AlertError("sublime-folders 启动失败", "打开数据库失败: "+err.Error())
+		app.AlertError("sublimefolders 启动失败", "打开数据库失败: "+err.Error())
 		return
 	}
 	defer st.Close()
