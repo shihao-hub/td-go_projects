@@ -39,6 +39,6 @@ model 字段兼容 JSON 对象 / 纯字符串 / null。已适配 opencode 1.18.x
 
     go build -o ocstat.exe .
 
-exe 默认带站标地鼠图标：项目根下的 `icon.ico` 与 `rsrc_windows_amd64.syso` 由 `go build` 自动链接，无需额外参数；更换图标时用 rsrc 重出 syso（见父仓 `docs/go_projects/SKILL-GO-EXE-ICON.md`）。
+exe 默认带站标地鼠图标：项目根下的 `icon.ico` 与 `rsrc_windows_amd64.syso` 由 `go build` 自动链接，无需额外参数；更换图标时用 rsrc 重出 syso（见父仓 `docs/go_projects/GUIDE-GO-EXE-ICON.md`）。
 
 watch 模式使用 ANSI 清屏，请在 Windows Terminal / Zed 终端等现代终端运行。

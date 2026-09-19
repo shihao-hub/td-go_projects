@@ -33,7 +33,7 @@ zreadmanager help                                                 # JSON 帮助
 go build ./cmd/zreadmanager
 ```
 
-exe 默认带站标地鼠图标：主包目录下的 `icon.ico` 与 `rsrc_windows_amd64.syso` 由 `go build` 自动链接，无需额外参数；更换图标时用 rsrc 重出 syso（见父仓 `docs/go_projects/SKILL-GO-EXE-ICON.md`）。
+exe 默认带站标地鼠图标：主包目录下的 `icon.ico` 与 `rsrc_windows_amd64.syso` 由 `go build` 自动链接，无需额外参数；更换图标时用 rsrc 重出 syso（见父仓 `docs/go_projects/GUIDE-GO-EXE-ICON.md`）。
 
 ## 与 zread-tray 的关系
 
