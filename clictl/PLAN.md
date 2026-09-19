@@ -33,7 +33,7 @@ go_projects/clictl/
 ├── internal/runner/runner.go     # 透传启动 + 启动记录回写
 ├── scripts/build.ps1             # 构建 + 版本注入
 ├── README.md / .gitignore
-父仓镜像文档：docs/go_projects/clictl/clictl.md
+父仓镜像文档：docs/projects/go_projects/clictl/clictl.md
 ```
 
 ## 核心数据结构
@@ -242,7 +242,7 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - 本项目属 go_projects 子仓（monorepo），不单独 `git init`；提交格式 `clictl:<type>: <subject>`
 - `completion powershell|names` 输出 raw 文本是 JSON 约定例外：消费者是 shell 补全脚本，输出即协议（同 run stdout 例外先例）；`--install`/`--uninstall` 动作型命令仍输出 JSON
 - 补全脚本（内嵌 Go raw string）禁止使用反引号；升级脚本本体时旧安装块由 `$PROFILE` 安装行动态拉取最新版，无需重新 install；但安装块自身结构变更（v1.4.0 编码固化，3 行→5 行）由 `--install` 幂等三态处理：无块追加 / 已是标准块跳过 / 缺编码行的旧块按标记整块重写（`upgraded:true`），标记不完整时保守不动
-- 表结构变更三同步：schema 常量（新库）+ `migrate()` ALTER（存量库）+ 父仓 `docs/go_projects/clictl/migrations/` SQL 存档，缺一不可
+- 表结构变更三同步：schema 常量（新库）+ `migrate()` ALTER（存量库）+ 父仓 `docs/projects/go_projects/clictl/migrations/` SQL 存档，缺一不可
 - start 面向 GUI/托盘/服务类：DETACHED 无控制台，console 程序无输出能力（要看输出用 run）；Win11 商店化 stub（notepad/mspaint）自退出后真实进程 PID 与记录不符，属已知局限
 - 探活已知局限：进程退出码恰为 259（STILL_ACTIVE 哨兵值）会误判为存活；SysWOW64/System32 路径重定向会误判为已退出；概率极低，接受
 - stop 的 taskkill /T 树杀依赖父子快照，极端竞态（PID 复用窗口）可能波及无关子进程——与 taskkill 本身行为一致，接受

@@ -2,7 +2,7 @@
 
 exe 收藏架 CLI：目录扫描收集、集中注册、一键启动 / 定位文件 / 开 PowerShell。
 
-从 `exe-launcher`（Win32 原生 GUI 版）复制改造而来，`model/`（Entry/Store/标签）与 `scan/`（噪音目录过滤扫描）原样继承，窗口/托盘/对话框替换为子命令 + JSON 输出（模式参考 `docs/go_projects/clictl/Go CLI JSON 输出模式参考.md`）。
+从 `exe-launcher`（Win32 原生 GUI 版）复制改造而来，`model/`（Entry/Store/标签）与 `scan/`（噪音目录过滤扫描）原样继承，窗口/托盘/对话框替换为子命令 + JSON 输出（模式参考 `docs/projects/go_projects/clictl/Go CLI JSON 输出模式参考.md`）。
 
 ## 命令
 
@@ -35,9 +35,9 @@ exestarter help | version
 go build ./cmd/exestarter
 ```
 
-exe 默认带站标地鼠图标：主包目录下的 `icon.ico` 与 `rsrc_windows_amd64.syso` 由 `go build` 自动链接，无需额外参数；更换图标时用 rsrc 重出 syso（见父仓 `docs/go_projects/GUIDE-GO-EXE-ICON.md`）。
+exe 默认带站标地鼠图标：主包目录下的 `icon.ico` 与 `rsrc_windows_amd64.syso` 由 `go build` 自动链接，无需额外参数；更换图标时用 rsrc 重出 syso（见父仓 `docs/projects/go_projects/GUIDE-GO-EXE-ICON.md`）。
 
 ## 与 exe-launcher / clictl 的关系
 
-- exe-launcher（Win32 GUI 版）已归档至父仓 `.archived/go_projects/exe-launcher`，由本项目替代；条目配置位于 `%APPDATA%\language_projects\exestarter\config.json`（与旧版 exe-launcher 目录不互通）
+- exe-launcher（Win32 GUI 版）已归档至父仓 `.archived/projects/go_projects/exe-launcher`，由本项目替代；条目配置位于 `%APPDATA%\language_projects\exestarter\config.json`（与旧版 exe-launcher 目录不互通）
 - clictl 是"注册 + 启动记账"的通用 CLI；exestarter 聚焦 exe 收藏场景（扫描批量导入、状态标签、定位/开终端）

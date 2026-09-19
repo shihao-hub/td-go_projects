@@ -1,6 +1,6 @@
 # liteconf
 
-轻量配置中心：`.env` 的替代品、极简版 Apollo。单实例 Go server 托管各应用各环境的 JSON 配置文件，配套 Go client SDK 实现配置热更新与变更回调。零第三方依赖，仅 Go 标准库。
+轻量配置中心：`.env` 的替代品、极简版 Apollo。单实例 Go server 托管各应用各环境的 JSON 配置文件，配套 Go client SDK 实现配置热更新与变更回调。server 与 client SDK 零第三方依赖，仅 Go 标准库；调试 CLI 因 MCP 入口引入官方 [go-sdk](https://github.com/modelcontextprotocol/go-sdk) v1.8.0。
 
 定位**内网/本机可信环境**：HTTP 明文、无鉴权，请勿暴露公网。
 
@@ -13,8 +13,9 @@
 - **原子写入**：临时文件 + rename，失败不留半截配置
 - **SDK 容错**：断线指数退避自动重连，故障期间继续读最后一份可用配置
 - **内嵌 Web 控制台**：浏览器访问 `/ui/` 即可完成配置浏览、查看、双模式编辑（JSON 文本 / 键值表）与新建，静态资源经 `go:embed` 随二进制分发
-- **调试 CLI**：独立 `liteconf.exe`，`http` 子命令把参数原样透传给 curlie（HTTPie 语法 + curl 引擎）调试 API，`schema` 导出 CLI 契约目录
-- **零依赖**：server、SDK 与 CLI 均只用标准库，`go build` 即得单文件二进制
+- **MCP 入口**：`liteconf.exe mcp` 启动 stdio MCP server（官方 go-sdk v1.8.0，协议基线 2025-11-25），AI 客户端可直接发现、读取、写入配置
+- **调试 CLI**：`http` 子命令把参数原样透传给 curlie（HTTPie 语法 + curl 引擎）调试 API，`schema` 导出契约目录（MCP 工具 + CLI 命令同源）
+- **零依赖数据面**：server 与 client SDK 仅用标准库，`go build` 即得单文件二进制（server 二进制不含 MCP 代码）
 
 ## 快速开始
 
@@ -40,7 +41,7 @@ cd go_projects\liteconf
 
 ### 调试 CLI（liteconf.exe）
 
-构建脚本同时产出 `build\liteconf.exe`（server 二进制不受影响）。前提：安装 curlie（HTTPie 语法 + curl 引擎）：
+构建脚本同时产出 `build\liteconf.exe`（server 二进制不受影响）。`http` 子命令前提：安装 curlie（HTTPie 语法 + curl 引擎）：
 
 ```powershell
 go install github.com/rs/curlie@latest
@@ -50,10 +51,47 @@ go install github.com/rs/curlie@latest
 .\build\liteconf.exe http GET :8646/api/app1/dev              # 读配置
 .\build\liteconf.exe http :8646/api/discovery                 # 发现列表
 .\build\liteconf.exe http PUT :8646/api/app1/dev key=value    # 写配置（HTTPie 键值语法）
-.\build\liteconf.exe schema                                   # 输出 CLI 命令契约目录（JSON）
+.\build\liteconf.exe mcp                                      # 启动 stdio MCP server（默认连 http://127.0.0.1:8646）
+.\build\liteconf.exe mcp -server http://192.168.1.10:8646     # 连接其他 server 实例
+.\build\liteconf.exe schema                                   # 输出契约目录（JSON）：tools + commands
 ```
 
 `http` 把全部参数原样透传给 PATH 中的 curlie，stdin/stdout/stderr 直通、不经 shell 包裹，`--help` 等参数归 curlie 而非 liteconf。退出码：0 成功；1 运行失败（如 curlie 缺失，stderr 给出安装指引）；2 调用参数错误；`http` 子命令透传 curlie 的退出码。版本号由构建脚本 `-Version` 参数注入（`liteconf --version` 查看）。
+
+### MCP 接入
+
+`mcp` 子命令是常驻 stdio MCP server：stdin/stdout 专用于协议，启动诊断写 stderr。AI 客户端（opencode、Claude Desktop 等）在 `mcpServers` 中以子进程方式接入：
+
+```json
+{
+  "mcpServers": {
+    "liteconf": {
+      "command": "D:\\path\\to\\liteconf.exe",
+      "args": ["mcp"],
+      "env": { }
+    }
+  }
+}
+```
+
+`-server` 指向运行中的 liteconf server；server 未启动时工具调用返回 `server_unreachable`。MCP 数据面与 Web 控制台、curlie 同一地位（走 `/api/*`），client SDK（`client/`）供 Go 业务进程 import，三者互不替代。
+
+## MCP 工具
+
+| 工具 | 对应 API | 输入 | 结构化输出 | 行为标注 |
+|---|---|---|---|---|
+| `liteconf.discovery` | `GET /api/discovery` | 无 | `{"ok":true,"data":{"apps":[{app,envs:[{env,version}]}]}}` | 只读 |
+| `liteconf.config.get` | `GET /api/{app}/{env}` | `app`,`env` 必填；`path` 可选点路径（如 `db.host`，未命中 `path_not_found`） | `{"ok":true,"data":{app,env,version,content}}` | 只读 |
+| `liteconf.config.put` | `PUT /api/{app}/{env}` | `app`,`env`,`content`（完整 JSON 对象，整体覆盖写） | `{"ok":true,"data":{app,env,version}}` | 破坏性、非幂等（每次版本 +1） |
+
+- 业务失败返回 `isError=true` 且结构化错误 `{"ok":false,"error":{"code","message"}}`；错误码透传 server 包络（`not_found` / `invalid_name` / `invalid_json` / `internal`），客户端侧新增 `server_unreachable`、`path_not_found`。
+- `liteconf schema` 输出的 `tools` 与 MCP 实际注册同源（in-memory transport 读注册视图，全分页遍历）；`commands` 为 CLI 命令契约。
+- **不暴露 watch 长轮询**：挂起 30~120s 与 MCP 请求-响应的等待预算/取消语义冲突；等价替代是重读 `liteconf.config.get` 对比 `version`。
+
+## MCP 契约变更记录
+
+- `liteconf schema` 自本版起输出 `{"name","version","tools":[...],"commands":[...]}`，**移除存量 `interface:"cli"` 字段**（提供 MCP 入口后不再适用《CLI 工具开发标准》5.5 的 cli 例外）；tools 与 MCP 注册同源，新增 `mcp` 子命令。
+- go.mod 的 go 指令自 1.22 升至 **1.25.0**（go-sdk v1.8.0 硬要求）；liteconf-server 与 client SDK 代码零改动、仍仅标准库。
 
 ### curlie 常用语法速查
 
@@ -91,7 +129,7 @@ curl.exe -X PUT http://localhost:8646/api/app1/dev -H "Content-Type: application
 
 ### 接口测试
 
-Bruno collection 位于父仓库 `docs/go_projects/liteconf/brunos/`（OpenCollection YAML 格式），选 `local` 环境按编号顺序执行。
+Bruno collection 位于父仓库 `docs/projects/go_projects/liteconf/brunos/`（OpenCollection YAML 格式），选 `local` 环境按编号顺序执行。
 
 ## HTTP API
 
@@ -189,8 +227,14 @@ liteconf/
 │   ├── cli/               # CLI 适配器（子命令分发/透传/契约导出）
 │   │   ├── cli.go         # Run 分发与运行依赖注入点（Options）
 │   │   ├── http.go        # http 子命令：curlie 透传编排
+│   │   ├── mcp.go         # mcp 子命令：stdio MCP server 组装与 -server 参数
 │   │   ├── catalog.go     # 命令契约目录（help 与 schema 的同源数据）
-│   │   └── schema.go      # schema 子命令：契约目录 JSON 导出
+│   │   └── schema.go      # schema 子命令：契约目录 JSON 导出（tools + commands）
+│   ├── mcp/               # MCP 适配器（官方 go-sdk，stdio server）
+│   │   ├── mcp.go         # server 构建（工具注册）与 Run 入口
+│   │   ├── api.go         # apiClient：HTTP 调 server /api/* 与统一业务错误
+│   │   ├── tools.go       # 三个工具的输入/输出类型、handler、点路径下钻
+│   │   └── view.go        # ToolSpecs：in-memory 读注册视图（供 schema 同源导出）
 │   └── version/           # 版本号注入点（build.ps1 -ldflags -X）
 ├── client/                # SDK（公开路径，供业务 import）
 │   ├── client.go          # 初始化与公开 API
@@ -202,4 +246,6 @@ liteconf/
 
 ## 定位与边界
 
-单实例部署（文件即数据库，无集群/主备）；无鉴权、无 TLS、无历史版本回滚；不校验配置 schema。控制台为最小 GUI 壳子：仅静态托管 + 页面交互，无登录鉴权、无自动保存、无乐观锁（保存即覆盖，last-write-wins），沿用内网可信环境定位。按《CLI 工具开发标准》记录：本项目提供独立调试 CLI `liteconf.exe`（`http` 纯透传 + `schema` 契约导出，见「调试 CLI」一节）；不提供 MCP 入口——CLI 仅含纯终端透传子命令，无自身数据面、状态与记账，无合理的 MCP 操作，属标准 0.1 节例外。
+单实例部署（文件即数据库，无集群/主备）；无鉴权、无 TLS、无历史版本回滚；不校验配置 schema。控制台为最小 GUI 壳子：仅静态托管 + 页面交互，无登录鉴权、无自动保存、无乐观锁（保存即覆盖，last-write-wins），沿用内网可信环境定位。
+
+按《CLI 工具开发标准》记录能力表：三个入口共用 server HTTP API 这一个数据面——Go 业务进程 import `client/` SDK（读优化 + 变更回调），AI 客户端走 `liteconf mcp`（MCP stdio），人调试走 `http` 透传 + Web 控制台。MCP 未暴露 watch 长轮询（理由见「MCP 工具」一节）；`http` 为纯终端透传，无合理 MCP 形态，不重复暴露。依赖偏离说明：调试 CLI 为 MCP 入口引入官方 go-sdk v1.8.0（第三方），server 与 client SDK 保持仅标准库；liteconf-server 二进制不包含 MCP 代码。

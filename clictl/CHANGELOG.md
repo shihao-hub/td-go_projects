@@ -28,7 +28,7 @@
 - PID 探活：OpenProcess 存在性 + GetExitCodeProcess 终止态（STILL_ACTIVE）+ QueryFullProcessImageName 路径比对三重校验，防 PID 回收复用误判；已知局限：退出码恰为 259 的进程误判为存活、SysWOW64 路径重定向误判为已退出（概率极低）
 - `list --running`：只列出有后台活实例的工具，附 `running_pids` 与 `last_start`（与 `--status` 互斥）
 - `info` 输出新增 `running` 字段（alive + pids），launch 记录新增 `pid` 字段
-- launches 表新增 `pid` 列（仅 start 写入）：新库建表自带，存量库启动时自动 ALTER 迁移；SQL 存档见父仓 `docs/go_projects/clictl/migrations/`
+- launches 表新增 `pid` 列（仅 start 写入）：新库建表自带，存量库启动时自动 ALTER 迁移；SQL 存档见父仓 `docs/projects/go_projects/clictl/migrations/`
 - 探活单元测试（真实路径比对 + 已退出进程判死表驱动）；`run`/`start`/`stop` 共用前置校验 lookup（未注册相似名建议三命令一致）
 - PowerShell 补全：子命令列表与工具名补全集合纳入 `start`/`stop`
 

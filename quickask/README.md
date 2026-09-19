@@ -36,4 +36,4 @@ go build ./cmd/quickaskd   # 后端守护
 
 ## 与 aiquick 的关系
 
-aiquick（fyne GUI 版）已归档至父仓 `.archived/go_projects/aiquick`，由本项目替代；后端数据与协议同源，数据文件已按仓库规范迁至 `%APPDATA%\language_projects\quickask\`，与 GUI 版不再互通。
+aiquick（fyne GUI 版）已归档至父仓 `.archived/projects/go_projects/aiquick`，由本项目替代；后端数据与协议同源，数据文件已按仓库规范迁至 `%APPDATA%\language_projects\quickask\`，与 GUI 版不再互通。
