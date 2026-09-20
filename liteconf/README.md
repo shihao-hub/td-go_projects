@@ -203,6 +203,23 @@ v := c.Version()
 
 读取全部走本地缓存（纯内存、无锁），**业务热路径零网络开销**；网络断开期间继续返回最后可用配置，server 恢复后自动追平最新版本。
 
+### 非 Go 语言最小接入（实战案例）
+
+已有实战：`python_projects/sql-pg-sqlalchemy`（SQLAlchemy 学习脚手架）。**参考价值有限但姿势可抄**：只覆盖"进程启动时读一次配置"的最小场景，没有热更新、长轮询、断线兜底（那些是 Go client SDK 的能力），这种用法下配置中心 ≈ 远程 `.env`。要点：
+
+- 一次 `GET /api/{app}/{env}`，语言自带 HTTP 客户端即可（Python 用 `urllib`，零第三方依赖）
+- 解析统一包络，`code != "ok"` 即视为失败
+- 远程键与本地默认值合并，配置中心里只放必改键（如 `PG_PASSWORD`），其余走代码内默认值
+- 错误显式兜底、绝不静默降级：连不上 → 提示启动 liteconf-server；HTTP 404 → 提示去控制台建 app/env；缺必填键 → 启动即报错退出
+- 服务地址留环境变量覆盖口子（如 `LITECONF_URL`），方便换实例/端口调试
+
+```python
+url = f"{LITECONF_URL}/api/{APP}/{ENV}"      # http://localhost:8646/api/sql-pg-sqlalchemy/dev
+with urllib.request.urlopen(url, timeout=3) as resp:
+    body = json.loads(resp.read().decode("utf-8"))
+cfg = {**DEFAULTS, **body["data"]["content"]}  # 远程键覆盖默认值；缺 PG_PASSWORD 则报错退出
+```
+
 ### 命名建议
 
 `App` 用服务名（如 `taskmon`），`Env` 用环境名（`dev`/`test`/`prod`），所有服务共用同一个 server 实例。名称只能含 `[a-zA-Z0-9_-]`。
