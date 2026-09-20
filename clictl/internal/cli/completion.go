@@ -169,7 +169,8 @@ func psInstall() int {
 			sb.WriteString("\r\n")
 		}
 		for _, line := range psBlockLines() {
-			sb.WriteString(line + "\r\n")
+			sb.WriteString(line)
+			sb.WriteString("\r\n")
 		}
 		if err := os.WriteFile(profile, []byte(sb.String()), 0o644); err != nil {
 			Fail("internal", "写入 $PROFILE 失败: "+err.Error())
