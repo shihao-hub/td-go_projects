@@ -33,14 +33,32 @@ var commands = []command{
 		},
 	},
 	{
+		Name:    "mcp",
+		Summary: "启动 stdio MCP server（AI 客户端经 mcpServers 子进程接入），暴露 liteconf.discovery / liteconf.config.get / liteconf.config.put 三个工具",
+		Usage:   "liteconf mcp [-server URL]",
+		Input: map[string]any{
+			"server": "liteconf server 地址，默认 http://127.0.0.1:8646",
+		},
+		Output: map[string]any{
+			"kind":   "protocol",
+			"stdout": "MCP JSON-RPC 协议消息（stdio 专用，无任何人读输出）",
+			"stderr": "启动诊断与运行错误",
+			"exit_codes": map[string]any{
+				"常驻": "服务直到客户端断开，正常退出返回 0",
+				"1":  "server 构建或运行失败",
+				"2":  "调用参数错误",
+			},
+		},
+	},
+	{
 		Name:    "schema",
-		Summary: "输出 liteconf CLI 自身的命令契约目录（JSON）；无 MCP 入口，interface 固定为 cli",
+		Summary: "输出契约目录（JSON）：tools 与 MCP 注册同源，commands 为 CLI 命令契约",
 		Usage:   "liteconf schema",
 		Input:   map[string]any{"kind": "none"},
 		Output: map[string]any{
 			"kind":       "json",
-			"stdout":     "本契约目录 JSON 对象（含 name/interface/version/commands）",
-			"exit_codes": map[string]any{"0": "成功"},
+			"stdout":     "本契约目录 JSON 对象（含 name/version/tools/commands）",
+			"exit_codes": map[string]any{"0": "成功", "1": "读取 MCP 注册视图或写出失败"},
 		},
 	},
 	{
@@ -86,10 +104,14 @@ func renderHelp(opt *Options) int {
 		"  liteconf http GET :8646/api/app1/dev",
 		"  liteconf http :8646/api/discovery",
 		"  liteconf http PUT :8646/api/app1/dev Content-Type:application/json key=value",
+		"  liteconf mcp                     # 启动 stdio MCP server（默认连 http://127.0.0.1:8646）",
+		"  liteconf mcp -server http://192.168.1.10:8646",
+		"  liteconf schema",
 		"",
-		"依赖：http 子命令需要 curlie（go install github.com/rs/curlie@latest）",
+		"依赖：http 子命令需要 curlie（go install github.com/rs/curlie@latest）；",
+		"      mcp 子命令需要 liteconf server 在运行",
 		"退出码：0 成功；1 运行失败（如 curlie 缺失）；2 调用参数错误；",
-		"        http 子命令透传 curlie 的退出码。",
+		"        http 子命令透传 curlie 的退出码；mcp 常驻直到客户端断开。",
 	)
 	for _, l := range lines {
 		fmt.Fprintln(opt.Stdout, l)

@@ -51,6 +51,8 @@ func Run(args []string, opt Options) int {
 		return 0
 	case "http":
 		return runHTTP(args[1:], &opt)
+	case "mcp":
+		return runMCP(args[1:], &opt)
 	case "schema":
 		return runSchema(&opt)
 	default:

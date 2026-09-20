@@ -70,26 +70,39 @@ func TestSchema(t *testing.T) {
 		t.Fatalf("schema 退出码 = %d，want 0", code)
 	}
 	var parsed struct {
-		Name      string `json:"name"`
-		Interface string `json:"interface"`
-		Commands  []struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+		Tools   []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+		Commands []struct {
 			Name string `json:"name"`
 		} `json:"commands"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
 		t.Fatalf("schema 输出不是合法 JSON：%v\n%s", err, stdout.String())
 	}
-	if parsed.Interface != "cli" {
-		t.Errorf("interface = %q，want \"cli\"", parsed.Interface)
+	if parsed.Name != "liteconf" || parsed.Version == "" {
+		t.Errorf("name/version = %q/%q，want liteconf/非空", parsed.Name, parsed.Version)
 	}
-	var hasHTTP bool
+	// MCP 入口已提供：tools 与注册同源且非空（详细同源对照见 schema_test.go）
+	if len(parsed.Tools) == 0 {
+		t.Error("schema tools 应非空")
+	}
+	var hasHTTP, hasMCP bool
 	for _, c := range parsed.Commands {
-		if c.Name == "http" {
+		switch c.Name {
+		case "http":
 			hasHTTP = true
+		case "mcp":
+			hasMCP = true
 		}
 	}
 	if !hasHTTP {
 		t.Error("schema commands 应包含 http")
+	}
+	if !hasMCP {
+		t.Error("schema commands 应包含 mcp")
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("schema stderr 应为空，得到 %q", stderr.String())
