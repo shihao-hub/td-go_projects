@@ -6,9 +6,21 @@
 
 遵循《CLI 工具开发标准》：CLI 人读输出 + `--json` 信封 + `mcp` stdio server + `schema` 契约导出。
 
-## 构建
+## 构建与安装
 
 要求 Go 1.25+：
+
+### 1. 使用 scripts 构建脚本（推荐）
+
+```powershell
+# 构建 agyquota.exe
+.\scripts\build.ps1
+
+# 构建并自动安装部署至系统 PATH (~/.local/bin)
+.\scripts\install.ps1
+```
+
+### 2. 手动构建
 
 ```powershell
 go build -trimpath -ldflags "-s -w -X agyquota/internal/cli.Version=0.1.0" -o agyquota.exe ./cmd/agyquota
@@ -17,20 +29,20 @@ go build -trimpath -ldflags "-s -w -X agyquota/internal/cli.Version=0.1.0" -o ag
 ## 快速上手
 
 ```powershell
-.\agyquota.exe            # 等价于 agyquota quota
+agyquota            # 全局已安装时，等价于 agyquota quota
 ```
 
 输出示例（人读，真实数据）：
 
 ```
-Antigravity 模型配额（查询于 2026-09-23 00:19:31）
+Antigravity 模型配额（查询于 2026-09-23 00:25:55）
 Gemini Models
-  Gemini Models                5h          87%  2小时46分钟后刷新
-  Gemini Models                weekly      92%  5天21小时后刷新
+  Gemini Models                5h          84%  2小时40分钟后刷新
+  Gemini Models                weekly      91%  5天21小时后刷新
 
 Claude and GPT models
   Claude and GPT models        5h         100%  4小时59分钟后刷新
-  Claude and GPT models        weekly      96%  6天1小时后刷新
+  Claude and GPT models        weekly      96%  6天后刷新
 ```
 
 ## 命令一览
