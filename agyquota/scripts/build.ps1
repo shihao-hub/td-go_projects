@@ -1,7 +1,7 @@
 # 构建单文件 agyquota.exe；版本号通过 -ldflags -X 注入
-# 用法: ./scripts/build.ps1 [-Version 0.2.0]，默认 0.2.0
+# 用法: ./scripts/build.ps1 [-Version 0.2.3]，默认 0.2.3
 param(
-    [string]$Version = "0.2.0"
+    [string]$Version = "0.2.3"
 )
 
 $ErrorActionPreference = "Stop"

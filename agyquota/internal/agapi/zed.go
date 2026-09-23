@@ -26,7 +26,11 @@ const (
 	DefaultTokenRelPath = ".gemini/antigravity-acp/acp_token.json"
 
 	// CacheFileName Access Token 本地缓存，预留 2 分钟安全冗余（缓存约 58 分钟），杜绝频繁向 Google 刷新
+	// 注意：该文件只允许落在本项目自有数据目录（见 resolveDataDir），禁止写入 Zed 凭据等外部程序目录
 	CacheFileName = ".quota_token_cache.json"
+
+	// ProjectName 用于运行时数据目录命名（%APPDATA%\language_projects\<项目名>）
+	ProjectName = "agyquota"
 )
 
 // TokenFile 是 Zed ACP 凭据文件的落盘结构
@@ -40,6 +44,8 @@ type TokenFile struct {
 
 // TokenCache 本地 Access Token 及配额状态缓存
 type TokenCache struct {
+	// TokenPath 记录缓存归属的凭据文件路径，加载时校验一致才复用，防止多凭据场景串号
+	TokenPath     string          `json:"token_path,omitempty"`
 	AccessToken   string          `json:"access_token"`
 	ExpiresAt     time.Time       `json:"expires_at"`
 	Email         string          `json:"email,omitempty"`
@@ -71,14 +77,57 @@ func NewZedClient(tokenPath string) *ZedClient {
 }
 
 func defaultZedTokenPath() string {
+	if home := userHomeDir(); home != "" {
+		return filepath.Join(home, filepath.FromSlash(DefaultTokenRelPath))
+	}
+	return ""
+}
+
+// userHomeDir 依次尝试 USERPROFILE / HOME 环境变量获取用户主目录
+func userHomeDir() string {
 	home := os.Getenv("USERPROFILE")
 	if home == "" {
 		home = os.Getenv("HOME")
 	}
-	if home == "" {
+	return home
+}
+
+// resolveDataDir 返回本项目运行时自产数据文件的存放目录（仓库强约束）：
+// 优先 %APPDATA%\language_projects\agyquota，取不到 APPDATA 时回退 ~/.language_projects/agyquota/
+func resolveDataDir() string {
+	if appdata := os.Getenv("APPDATA"); appdata != "" {
+		return filepath.Join(appdata, "language_projects", ProjectName)
+	}
+	if home := userHomeDir(); home != "" {
+		return filepath.Join(home, ".language_projects", ProjectName)
+	}
+	return ""
+}
+
+// cachePath 返回 Access Token 缓存文件路径：固定在项目自有数据目录内，与凭据文件位置解耦
+func (c *ZedClient) cachePath() string {
+	dir := resolveDataDir()
+	if dir == "" {
 		return ""
 	}
-	return filepath.Join(home, filepath.FromSlash(DefaultTokenRelPath))
+	return filepath.Join(dir, CacheFileName)
+}
+
+// cleanupLegacyCache 删除历史版本误写在 Zed 凭据目录（外部程序目录）内的缓存文件。
+// 该文件由本工具自产，归位清理；只按固定文件名匹配，不触碰目录内其他任何文件。
+func (c *ZedClient) cleanupLegacyCache() {
+	if c.TokenPath == "" {
+		return
+	}
+	legacy := filepath.Join(filepath.Dir(c.TokenPath), CacheFileName)
+	if legacy == c.cachePath() {
+		return
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		if rmErr := os.Remove(legacy); rmErr == nil && c.Logf != nil {
+			c.Logf("已清理历史版本遗留在凭据目录的缓存文件（已归位至项目数据目录）: %s", legacy)
+		}
+	}
 }
 
 // FetchUsageWithMeta 通过 Zed ACP 凭据获取配额数据、账号邮箱与凭据到期时间
@@ -282,7 +331,11 @@ func inspectQuotaStatus(raw []byte) (hasGeminiUsage bool, geminiReset time.Time,
 }
 
 func (c *ZedClient) loadCache() (*TokenCache, string) {
-	cachePath := filepath.Join(filepath.Dir(c.TokenPath), CacheFileName)
+	c.cleanupLegacyCache()
+	cachePath := c.cachePath()
+	if cachePath == "" {
+		return nil, ""
+	}
 	b, err := os.ReadFile(cachePath)
 	if err != nil {
 		return nil, cachePath
@@ -291,13 +344,22 @@ func (c *ZedClient) loadCache() (*TokenCache, string) {
 	if err := json.Unmarshal(b, &cache); err != nil {
 		return nil, cachePath
 	}
+	// 缓存归属凭据与当前凭据不一致（含旧版无 token_path 字段）时不复用，防止多凭据串号
+	if cache.TokenPath != c.TokenPath {
+		return nil, cachePath
+	}
 	return &cache, cachePath
 }
 
 func (c *ZedClient) saveCache(cache *TokenCache, cachePath string) {
-	if cache == nil {
+	if cache == nil || cachePath == "" {
 		return
 	}
+	// 写前自动创建目录链（含 language_projects 一层）；缓存写盘失败不影响主流程
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		return
+	}
+	cache.TokenPath = c.TokenPath
 	if b, err := json.MarshalIndent(cache, "", "  "); err == nil {
 		_ = os.WriteFile(cachePath, b, 0600)
 	}
@@ -322,13 +384,14 @@ func loadTokenFile(path string) (*TokenFile, error) {
 }
 
 func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (string, string, time.Time, error) {
-	cachePath := filepath.Join(filepath.Dir(c.TokenPath), CacheFileName)
+	c.cleanupLegacyCache()
+	cachePath := c.cachePath()
 
 	// 1. 检查本地缓存是否存在及是否有效
 	cacheBytes, err := os.ReadFile(cachePath)
 	if err == nil {
 		var cache TokenCache
-		if jsonErr := json.Unmarshal(cacheBytes, &cache); jsonErr == nil && cache.AccessToken != "" {
+		if jsonErr := json.Unmarshal(cacheBytes, &cache); jsonErr == nil && cache.AccessToken != "" && cache.TokenPath == c.TokenPath {
 			now := time.Now()
 			if now.Before(cache.ExpiresAt) {
 				if c.Logf != nil {
@@ -420,6 +483,10 @@ func (c *ZedClient) refreshToken(ctx context.Context, tf *TokenFile, cachePath s
 	var existingCache TokenCache
 	if existingBytes, err := os.ReadFile(cachePath); err == nil {
 		_ = json.Unmarshal(existingBytes, &existingCache)
+	}
+	// 仅当旧缓存归属同一凭据时才延续其配额历史，防止多凭据串号
+	if existingCache.TokenPath != c.TokenPath {
+		existingCache = TokenCache{}
 	}
 
 	cache := TokenCache{

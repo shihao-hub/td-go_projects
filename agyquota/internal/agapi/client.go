@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"time"
 )
 
@@ -99,7 +99,10 @@ func (c *Client) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error) {
 }
 
 // FetchUsage 调用 agy 获取 /usage 并返回原始 JSON 字节。
-// 执行完毕（无论成功或失败）均会确保强杀子进程树，防止任何后台常驻残留。
+// agy 运行于伪控制台内：启动即拥有可用 console（不再 AllocConsole 向系统请求新会话，
+// 根除「默认终端接管 → Windows Terminal 前台化隔壁窗口」触发链）；stdout/stderr 走
+// 独立管道保证 JSON 纯净；整棵进程树受作业对象前台限制兜底。
+// 执行完毕（无论成功或失败）均由 shutdown 原子终止整树并释放全部句柄，不留后台残留。
 func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	if c.AgyPath == "" {
 		return nil, errors.New("未找到 agy 命令行工具，请先安装 Antigravity CLI")
@@ -109,36 +112,42 @@ func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 		c.Logf("正在执行 %s -p \"/usage\" --output-format json ...", c.AgyPath)
 	}
 
-	cmd := exec.CommandContext(ctx, c.AgyPath, "-p", "/usage", "--output-format", "json")
-	setNoWindow(cmd) // 彻底静默运行，杜绝终端闪烁
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("启动 agy 命令失败: %w", err)
-	}
-
-	pid := 0
-	if cmd.Process != nil {
-		pid = cmd.Process.Pid
-	}
-
-	// 退出时强制收口：确保杀死整个进程树，绝不留后台孤儿进程
-	defer func() {
-		if pid > 0 {
-			killProcessTree(pid)
-		}
-	}()
-
-	err := cmd.Wait()
+	p, err := startAgyProcess(c.AgyPath)
 	if err != nil {
+		return nil, err
+	}
+	defer p.shutdown()
+
+	var stdout, stderr bytes.Buffer
+	copyDone := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(&stdout, p.Stdout()); copyDone <- struct{}{} }()
+	go func() { _, _ = io.Copy(&stderr, p.Stderr()); copyDone <- struct{}{} }()
+
+	waitDone := make(chan struct{})
+	var exitCode uint32
+	var waitErr error
+	go func() { exitCode, waitErr = p.Wait(); close(waitDone) }()
+
+	// 超时/取消：终止整树解除 Wait 阻塞
+	select {
+	case <-waitDone:
+	case <-ctx.Done():
+		p.shutdown()
+		<-waitDone
+		return nil, fmt.Errorf("执行 agy 命令失败: %v", ctx.Err())
+	}
+	<-copyDone
+	<-copyDone
+
+	if waitErr != nil {
+		return nil, fmt.Errorf("执行 agy 命令失败 (%v): %s", waitErr, stderr.String())
+	}
+	if exitCode != 0 {
 		errMsg := stderr.String()
 		if errMsg == "" {
 			errMsg = stdout.String()
 		}
-		return nil, fmt.Errorf("执行 agy 命令失败 (%w): %s", err, errMsg)
+		return nil, fmt.Errorf("执行 agy 命令失败 (exit status %d): %s", exitCode, errMsg)
 	}
 
 	outBytes := stdout.Bytes()
@@ -151,14 +160,4 @@ func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	}
 
 	return outBytes, nil
-}
-
-// killProcessTree 在 Windows 下使用 taskkill 强杀进程树 (/F /T)，跨平台兼容 Process.Kill()
-func killProcessTree(pid int) {
-	if pid <= 0 {
-		return
-	}
-	killCmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
-	setNoWindow(killCmd) // 隐藏 taskkill 控制台黑框，杜绝窗口闪烁
-	_ = killCmd.Run()
 }

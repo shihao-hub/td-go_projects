@@ -15,7 +15,7 @@ import (
 )
 
 // Version 版本号，构建时经 -ldflags 注入。
-var Version = "0.2.1"
+var Version = "0.2.3"
 
 // Run 执行 CLI 并返回进程退出码：0 成功、1 业务失败、2 参数/flag 错误。
 func Run(args []string) int {

@@ -72,7 +72,7 @@ Claude and GPT models
    - 运行完成后，无论成功与否均强制终结进程树 (`taskkill /F /T`)，绝不在后台挂起孤儿进程。
 2. **Zed 独立接口与防风控设计 (`--zed`)**：
    - 凭据来源：`~/.gemini/antigravity-acp/acp_token.json`；
-   - **50 分钟安全缓存**：自动将获取的 Access Token 与过期时间缓存至 `~/.gemini/antigravity-acp/.quota_token_cache.json`，在有效期内直接复用，彻底杜绝高频刷新；
+   - **50 分钟安全缓存**：自动将获取的 Access Token 与过期时间缓存至本项目自有数据目录 `%APPDATA%\language_projects\agyquota\.quota_token_cache.json`（取不到 APPDATA 时回退 `~/.language_projects/agyquota/`），在有效期内直接复用，彻底杜绝高频刷新；凭据目录（`~/.gemini/`）对本工具只读，不写入任何文件；
    - **1:1 官方 User-Agent**：严格复刻 Zed ACP 官方客户端指纹，规避脚本特征识别。
 3. **适配器隔离**：业务逻辑收口在 `internal/service`，上层无缝挂接终端人读排版、JSON 格式化输出与 Model Context Protocol (MCP) 接口。
 
