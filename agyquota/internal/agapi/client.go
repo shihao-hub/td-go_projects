@@ -110,6 +110,7 @@ func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, c.AgyPath, "-p", "/usage", "--output-format", "json")
+	setNoWindow(cmd) // 彻底静默运行，杜绝终端闪烁
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -158,5 +159,6 @@ func killProcessTree(pid int) {
 		return
 	}
 	killCmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
+	setNoWindow(killCmd) // 隐藏 taskkill 控制台黑框，杜绝窗口闪烁
 	_ = killCmd.Run()
 }
