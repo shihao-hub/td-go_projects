@@ -25,7 +25,7 @@ const (
 	// DefaultTokenRelPath Zed ACP 凭据默认相对路径
 	DefaultTokenRelPath = ".gemini/antigravity-acp/acp_token.json"
 
-	// CacheFileName Access Token 内存级本地缓存，预留 2 分钟安全冗余（缓存约 58 分钟），杜绝频繁向 Google 刷新
+	// CacheFileName Access Token 本地缓存，预留 2 分钟安全冗余（缓存约 58 分钟），杜绝频繁向 Google 刷新
 	CacheFileName = ".quota_token_cache.json"
 )
 
@@ -38,11 +38,14 @@ type TokenFile struct {
 	ProjectID    string `json:"project_id"`
 }
 
-// TokenCache 本地 Access Token 缓存
+// TokenCache 本地 Access Token 及配额状态缓存
 type TokenCache struct {
-	AccessToken string    `json:"access_token"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	Email       string    `json:"email,omitempty"`
+	AccessToken   string          `json:"access_token"`
+	ExpiresAt     time.Time       `json:"expires_at"`
+	Email         string          `json:"email,omitempty"`
+	LastQuotaRaw  json.RawMessage `json:"last_quota_raw,omitempty"`
+	LastQuotaAt   time.Time       `json:"last_quota_at,omitempty"`
+	GeminiResetAt time.Time       `json:"gemini_reset_at,omitempty"`
 }
 
 // ZedClient 是查询 Zed 对应 Antigravity 账号配额的客户端
@@ -106,37 +109,12 @@ func (c *ZedClient) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error
 		c.Logf("正在请求 Google Cloud Code 配额接口 (project: %s) ...", project)
 	}
 
-	cachePath := filepath.Join(filepath.Dir(c.TokenPath), CacheFileName)
+	cache, cachePath := c.loadCache()
 
-	// 带一次遇错退避重试，以及遇到 401 时的自动失效刷新重试
-	var respBytes []byte
-	for attempt := 1; attempt <= 2; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, ZedQuotaEndpoint, bytes.NewReader(reqBody))
-		if err != nil {
-			return nil, fmt.Errorf("构造请求失败: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+accessToken)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", ZedUserAgent)
-
-		resp, err := c.HTTPClient.Do(req)
-		if err != nil {
-			if attempt < 2 {
-				time.Sleep(300 * time.Millisecond)
-				continue
-			}
-			return nil, fmt.Errorf("请求配额接口网络失败: %w", err)
-		}
-
-		respBytes, err = io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		_ = resp.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("读取响应数据失败: %w", err)
-		}
-
-		// 401 Unauthorized 自愈：缓存的 Access Token 意外失效时，清除缓存重新向 OAuth 换取并重试
-		if resp.StatusCode == http.StatusUnauthorized && attempt == 1 {
+	// 3. 执行请求，并包含 401 自动失效自愈与 1 次网络重试
+	status, respBytes, err := c.doQuotaRequest(ctx, accessToken, reqBody)
+	if err != nil || status == http.StatusUnauthorized {
+		if status == http.StatusUnauthorized {
 			if c.Logf != nil {
 				c.Logf("本地 Access Token 已失效 (HTTP 401)，正在向 Google 重新刷新并重试 ...")
 			}
@@ -146,14 +124,69 @@ func (c *ZedClient) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error
 				accessToken = newTok
 				email = newEmail
 				expiresAt = newExp
-				continue
+				status, respBytes, err = c.doQuotaRequest(ctx, accessToken, reqBody)
+			}
+		} else {
+			time.Sleep(300 * time.Millisecond)
+			status, respBytes, err = c.doQuotaRequest(ctx, accessToken, reqBody)
+		}
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("请求配额接口网络失败: %w", err)
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("配额接口返回 HTTP %d: %s", status, string(respBytes))
+	}
+
+	// 4. 防 Google 服务端多副本同步延迟与降级抖动
+	hasUsage, resetTime, isDegraded := inspectQuotaStatus(respBytes)
+
+	// 如果当前副本返回的是空/降级响应（如 100% 且缺少 description 字段）
+	if isDegraded {
+		needRetry := false
+		if cache != nil && !cache.GeminiResetAt.IsZero() && time.Now().Before(cache.GeminiResetAt) {
+			needRetry = true
+		} else {
+			// 无缓存或首次查询也做 1 次快速重试，防偶发冷副本
+			needRetry = true
+		}
+
+		if needRetry {
+			for i := 0; i < 2; i++ {
+				time.Sleep(150 * time.Millisecond)
+				s2, b2, err2 := c.doQuotaRequest(ctx, accessToken, reqBody)
+				if err2 == nil && s2 == http.StatusOK {
+					h2, r2, deg2 := inspectQuotaStatus(b2)
+					if h2 || !deg2 {
+						respBytes = b2
+						hasUsage = h2
+						resetTime = r2
+						isDegraded = deg2
+						break
+					}
+				}
 			}
 		}
 
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("配额接口返回 HTTP %d: %s", resp.StatusCode, string(respBytes))
+		// 重试后若仍未拿到同步数据，且本地有尚未到期的真实配额历史，则自动对齐为有效历史，消除 100% 假象
+		if isDegraded && cache != nil && len(cache.LastQuotaRaw) > 0 && !cache.GeminiResetAt.IsZero() && time.Now().Before(cache.GeminiResetAt) {
+			if c.Logf != nil {
+				c.Logf("提示: 检测到 Google 副本用量数据同步延迟，已自动校准为最新真实配额")
+			}
+			respBytes = cache.LastQuotaRaw
 		}
-		break
+	}
+
+	// 5. 拿到真实有效用量时更新落盘缓存，记录当前配额快照
+	if hasUsage {
+		if cache == nil {
+			cache = &TokenCache{AccessToken: accessToken, ExpiresAt: expiresAt, Email: email}
+		}
+		cache.LastQuotaRaw = respBytes
+		cache.LastQuotaAt = time.Now()
+		cache.GeminiResetAt = resetTime
+		c.saveCache(cache, cachePath)
 	}
 
 	return &UsageResult{
@@ -170,6 +203,104 @@ func (c *ZedClient) FetchUsage(ctx context.Context) ([]byte, error) {
 		return nil, err
 	}
 	return res.Raw, nil
+}
+
+func (c *ZedClient) doQuotaRequest(ctx context.Context, accessToken string, reqBody []byte) (int, []byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ZedQuotaEndpoint, bytes.NewReader(reqBody))
+	if err != nil {
+		return 0, nil, fmt.Errorf("构造请求失败: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", ZedUserAgent)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return resp.StatusCode, nil, fmt.Errorf("读取响应数据失败: %w", err)
+	}
+	return resp.StatusCode, b, nil
+}
+
+type quotaInspector struct {
+	Groups []struct {
+		DisplayName string `json:"displayName"`
+		Name        string `json:"name"`
+		Buckets     []struct {
+			BucketID          string   `json:"bucketId"`
+			RemainingFraction *float64 `json:"remainingFraction"`
+			Description       string   `json:"description"`
+			ResetTime         string   `json:"resetTime"`
+		} `json:"buckets"`
+	} `json:"groups"`
+}
+
+// inspectQuotaStatus 检查返回的配额中 Gemini 桶的状态
+func inspectQuotaStatus(raw []byte) (hasGeminiUsage bool, geminiReset time.Time, isGeminiEmpty bool) {
+	var qi quotaInspector
+	if err := json.Unmarshal(raw, &qi); err != nil {
+		return false, time.Time{}, false
+	}
+	for _, g := range qi.Groups {
+		name := g.DisplayName
+		if name == "" {
+			name = g.Name
+		}
+		if name == "Gemini Models" {
+			for _, b := range g.Buckets {
+				if b.RemainingFraction != nil && *b.RemainingFraction < 0.999 && b.Description != "" {
+					hasGeminiUsage = true
+					if t, err := time.Parse(time.RFC3339, b.ResetTime); err == nil && t.After(geminiReset) {
+						geminiReset = t
+					}
+				}
+			}
+			// 判断是否属于空配额（所有桶均为 1.0 且缺少 description 描述）
+			allFullWithoutDesc := true
+			for _, b := range g.Buckets {
+				rem := float64(1)
+				if b.RemainingFraction != nil {
+					rem = *b.RemainingFraction
+				}
+				if rem < 0.999 || b.Description != "" {
+					allFullWithoutDesc = false
+					break
+				}
+			}
+			if allFullWithoutDesc && len(g.Buckets) > 0 {
+				isGeminiEmpty = true
+			}
+		}
+	}
+	return
+}
+
+func (c *ZedClient) loadCache() (*TokenCache, string) {
+	cachePath := filepath.Join(filepath.Dir(c.TokenPath), CacheFileName)
+	b, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil, cachePath
+	}
+	var cache TokenCache
+	if err := json.Unmarshal(b, &cache); err != nil {
+		return nil, cachePath
+	}
+	return &cache, cachePath
+}
+
+func (c *ZedClient) saveCache(cache *TokenCache, cachePath string) {
+	if cache == nil {
+		return
+	}
+	if b, err := json.MarshalIndent(cache, "", "  "); err == nil {
+		_ = os.WriteFile(cachePath, b, 0600)
+	}
 }
 
 func loadTokenFile(path string) (*TokenFile, error) {
@@ -208,9 +339,7 @@ func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (strin
 				// 补全 email（若旧缓存未记录）
 				if cache.Email == "" {
 					cache.Email = c.fetchEmail(ctx, cache.AccessToken)
-					if data, e := json.Marshal(cache); e == nil {
-						_ = os.WriteFile(cachePath, data, 0600)
-					}
+					c.saveCache(&cache, cachePath)
 				}
 				return cache.AccessToken, cache.Email, cache.ExpiresAt, nil
 			}
@@ -288,14 +417,20 @@ func (c *ZedClient) refreshToken(ctx context.Context, tf *TokenFile, cachePath s
 
 	email := c.fetchEmail(ctx, tokResp.AccessToken)
 
+	var existingCache TokenCache
+	if existingBytes, err := os.ReadFile(cachePath); err == nil {
+		_ = json.Unmarshal(existingBytes, &existingCache)
+	}
+
 	cache := TokenCache{
-		AccessToken: tokResp.AccessToken,
-		ExpiresAt:   expiresAt,
-		Email:       email,
+		AccessToken:   tokResp.AccessToken,
+		ExpiresAt:     expiresAt,
+		Email:         email,
+		LastQuotaRaw:  existingCache.LastQuotaRaw,
+		LastQuotaAt:   existingCache.LastQuotaAt,
+		GeminiResetAt: existingCache.GeminiResetAt,
 	}
-	if cacheData, err := json.Marshal(cache); err == nil {
-		_ = os.WriteFile(cachePath, cacheData, 0600)
-	}
+	c.saveCache(&cache, cachePath)
 
 	return tokResp.AccessToken, email, expiresAt, nil
 }
