@@ -42,6 +42,7 @@ type TokenFile struct {
 type TokenCache struct {
 	AccessToken string    `json:"access_token"`
 	ExpiresAt   time.Time `json:"expires_at"`
+	Email       string    `json:"email,omitempty"`
 }
 
 // ZedClient 是查询 Zed 对应 Antigravity 账号配额的客户端
@@ -56,9 +57,13 @@ func NewZedClient(tokenPath string) *ZedClient {
 	if tokenPath == "" {
 		tokenPath = defaultZedTokenPath()
 	}
+	tr := &http.Transport{
+		Proxy:             http.ProxyFromEnvironment,
+		DisableKeepAlives: true, // 避免代理层闲置切断连接引发 EOF
+	}
 	return &ZedClient{
 		TokenPath:  tokenPath,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: &http.Client{Timeout: 30 * time.Second, Transport: tr},
 	}
 }
 
@@ -73,8 +78,8 @@ func defaultZedTokenPath() string {
 	return filepath.Join(home, filepath.FromSlash(DefaultTokenRelPath))
 }
 
-// FetchUsage 通过 Zed ACP 凭据获取配额原始响应
-func (c *ZedClient) FetchUsage(ctx context.Context) ([]byte, error) {
+// FetchUsageWithMeta 通过 Zed ACP 凭据获取配额数据、账号邮箱与凭据到期时间
+func (c *ZedClient) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error) {
 	if c.TokenPath == "" {
 		return nil, errors.New("无法确定 Zed 凭据文件路径（~/.gemini/antigravity-acp/acp_token.json）")
 	}
@@ -84,8 +89,8 @@ func (c *ZedClient) FetchUsage(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("读取 Zed 凭据失败: %w", err)
 	}
 
-	// 1. 获取 Access Token（带 50 分钟安全缓存）
-	accessToken, err := c.getOrRefreshToken(ctx, tf)
+	// 1. 获取 Access Token 及邮箱元信息（带 50 分钟安全缓存）
+	accessToken, email, expiresAt, err := c.getOrRefreshToken(ctx, tf)
 	if err != nil {
 		return nil, fmt.Errorf("获取认证令牌失败: %w", err)
 	}
@@ -101,31 +106,53 @@ func (c *ZedClient) FetchUsage(ctx context.Context) ([]byte, error) {
 		c.Logf("正在请求 Google Cloud Code 配额接口 (project: %s) ...", project)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ZedQuotaEndpoint, bytes.NewReader(reqBody))
+	// 带一次遇错退避重试
+	var respBytes []byte
+	for attempt := 1; attempt <= 2; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, ZedQuotaEndpoint, bytes.NewReader(reqBody))
+		if err != nil {
+			return nil, fmt.Errorf("构造请求失败: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", ZedUserAgent)
+
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			if attempt < 2 {
+				time.Sleep(300 * time.Millisecond)
+				continue
+			}
+			return nil, fmt.Errorf("请求配额接口网络失败: %w", err)
+		}
+
+		respBytes, err = io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+		_ = resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("读取响应数据失败: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("配额接口返回 HTTP %d: %s", resp.StatusCode, string(respBytes))
+		}
+		break
+	}
+
+	return &UsageResult{
+		Raw:       respBytes,
+		Account:   email,
+		ExpiresAt: &expiresAt,
+	}, nil
+}
+
+// FetchUsage 兼容纯 []byte 接口
+func (c *ZedClient) FetchUsage(ctx context.Context) ([]byte, error) {
+	res, err := c.FetchUsageWithMeta(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("构造请求失败: %w", err)
+		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", ZedUserAgent)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("请求配额接口网络失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return nil, fmt.Errorf("读取响应数据失败: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("配额接口返回 HTTP %d: %s", resp.StatusCode, string(respBytes))
-	}
-
-	return respBytes, nil
+	return res.Raw, nil
 }
 
 func loadTokenFile(path string) (*TokenFile, error) {
@@ -146,7 +173,7 @@ func loadTokenFile(path string) (*TokenFile, error) {
 	return &tf, nil
 }
 
-func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (string, error) {
+func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (string, string, time.Time, error) {
 	cachePath := filepath.Join(filepath.Dir(c.TokenPath), CacheFileName)
 
 	// 检查缓存
@@ -157,7 +184,14 @@ func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (strin
 				if c.Logf != nil {
 					c.Logf("命中本地 Token 缓存（有效期至 %s），无需向 Google 重新刷新", cache.ExpiresAt.Format("15:04:05"))
 				}
-				return cache.AccessToken, nil
+				// 补全 email（若旧缓存未记录）
+				if cache.Email == "" {
+					cache.Email = c.fetchEmail(ctx, cache.AccessToken)
+					if data, e := json.Marshal(cache); e == nil {
+						_ = os.WriteFile(cachePath, data, 0600)
+					}
+				}
+				return cache.AccessToken, cache.Email, cache.ExpiresAt, nil
 			}
 		}
 	}
@@ -176,20 +210,20 @@ func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (strin
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tf.TokenURI, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", "", time.Time{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", ZedUserAgent)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", time.Time{}, err
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OAuth 端点返回 HTTP %d: %s", resp.StatusCode, string(body))
+		return "", "", time.Time{}, fmt.Errorf("OAuth 端点返回 HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	var tokResp struct {
@@ -197,10 +231,10 @@ func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (strin
 		ExpiresIn   int    `json:"expires_in"` // 通常为 3599 秒
 	}
 	if err := json.Unmarshal(body, &tokResp); err != nil {
-		return "", fmt.Errorf("解析 OAuth 响应失败: %w", err)
+		return "", "", time.Time{}, fmt.Errorf("解析 OAuth 响应失败: %w", err)
 	}
 	if tokResp.AccessToken == "" {
-		return "", errors.New("OAuth 响应中未包含 access_token")
+		return "", "", time.Time{}, errors.New("OAuth 响应中未包含 access_token")
 	}
 
 	// 写入本地缓存，默认缓存 50 分钟（3000 秒）
@@ -208,13 +242,40 @@ func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (strin
 	if tokResp.ExpiresIn > 600 {
 		validDuration = time.Duration(tokResp.ExpiresIn-600) * time.Second
 	}
+	expiresAt := time.Now().Add(validDuration)
+
+	email := c.fetchEmail(ctx, tokResp.AccessToken)
+
 	cache := TokenCache{
 		AccessToken: tokResp.AccessToken,
-		ExpiresAt:   time.Now().Add(validDuration),
+		ExpiresAt:   expiresAt,
+		Email:       email,
 	}
 	if cacheData, err := json.Marshal(cache); err == nil {
 		_ = os.WriteFile(cachePath, cacheData, 0600)
 	}
 
-	return tokResp.AccessToken, nil
+	return tokResp.AccessToken, email, expiresAt, nil
+}
+
+func (c *ZedClient) fetchEmail(ctx context.Context, accessToken string) string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.googleapis.com/oauth2/v2/userinfo", nil)
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("User-Agent", ZedUserAgent)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	var uinfo struct {
+		Email string `json:"email"`
+	}
+	_ = json.Unmarshal(b, &uinfo)
+	return uinfo.Email
 }

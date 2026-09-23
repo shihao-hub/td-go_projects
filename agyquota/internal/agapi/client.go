@@ -11,7 +11,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"time"
 )
+
+// UsageResult 封装查询返回的数据与账号元信息。
+type UsageResult struct {
+	Raw       []byte
+	Account   string     // 账号邮箱（若可获取）
+	ExpiresAt *time.Time // 凭据到期时间（若适用）
+}
 
 // AgyUsageOutput 是 agy -p "/usage" --output-format json 的完整应答结构。
 type AgyUsageOutput struct {
@@ -77,6 +85,19 @@ func findAgyPath() string {
 	return "agy"
 }
 
+// FetchUsageWithMeta 获取配额数据并提取 agy 登录邮箱。
+func (c *Client) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error) {
+	raw, err := c.FetchUsage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	email := GetAgyLoggedEmail()
+	return &UsageResult{
+		Raw:     raw,
+		Account: email,
+	}, nil
+}
+
 // FetchUsage 调用 agy 获取 /usage 并返回原始 JSON 字节。
 // 执行完毕（无论成功或失败）均会确保强杀子进程树，防止任何后台常驻残留。
 func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
@@ -136,7 +157,6 @@ func killProcessTree(pid int) {
 	if pid <= 0 {
 		return
 	}
-	// Windows 平台强杀进程树
 	killCmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
 	_ = killCmd.Run()
 }

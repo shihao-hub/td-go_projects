@@ -15,7 +15,7 @@ import (
 )
 
 // Version 版本号，构建时经 -ldflags 注入。
-var Version = "0.2.0"
+var Version = "0.2.1"
 
 // Run 执行 CLI 并返回进程退出码：0 成功、1 业务失败、2 参数/flag 错误。
 func Run(args []string) int {
@@ -83,7 +83,7 @@ func mcpCmd() *cobra.Command {
 
 // ---- schema ----
 
-// schemaCmd 导出与 tools/list 同源的 MCP 工具定义（输出即 JSON，无业务调用）。
+// schemaCmd 导出与 tools/list 同源的 MCP 工具定义（离线检查用，输出即 JSON）。
 func schemaCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "schema",

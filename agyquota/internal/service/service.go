@@ -70,9 +70,12 @@ type Bucket struct {
 
 // Snapshot 一次配额查询结果。
 type Snapshot struct {
-	Source    string    `json:"source"`
-	FetchedAt time.Time `json:"fetchedAt"`
-	Buckets   []Bucket  `json:"buckets"`
+	Source         string    `json:"source"`
+	Account        string    `json:"account,omitempty"`        // 账号邮箱
+	TokenExpiresAt string    `json:"tokenExpiresAt,omitempty"` // 凭据到期时间（仅 Zed 模式）
+	TokenExpiresIn string    `json:"tokenExpiresIn,omitempty"` // 剩余有效期（仅 Zed 模式）
+	FetchedAt      time.Time `json:"fetchedAt"`
+	Buckets        []Bucket  `json:"buckets"`
 }
 
 // Options 查询选项。
@@ -107,18 +110,35 @@ func (s *Service) GetQuota(ctx context.Context, opt Options) (*Snapshot, error) 
 		)
 	}
 
-	raw, sourceLabel, err := s.fetchRawBySource(ctx, opt)
+	res, sourceLabel, err := s.fetchBySource(ctx, opt)
 	if err != nil {
 		return nil, err
 	}
 
-	snap, err := parseSnapshot(raw, time.Now(), sourceLabel)
+	snap, err := parseSnapshot(res.Raw, time.Now(), sourceLabel)
 	if err != nil {
 		return nil, withSuggestion(
 			errf(ErrParse, "解析配额响应失败: %v", err),
 			"可追加 --raw 参数查看底层接口的原始响应数据",
 		)
 	}
+
+	snap.Account = res.Account
+	if res.ExpiresAt != nil {
+		snap.TokenExpiresAt = res.ExpiresAt.Format("2006-01-02 15:04:05")
+		d := time.Until(*res.ExpiresAt)
+		if d > 0 {
+			mins := int(d.Minutes())
+			if mins >= 60 {
+				snap.TokenExpiresIn = fmt.Sprintf("%d小时%d分钟后到期", mins/60, mins%60)
+			} else {
+				snap.TokenExpiresIn = fmt.Sprintf("%d分钟后到期", mins)
+			}
+		} else {
+			snap.TokenExpiresIn = "已到期"
+		}
+	}
+
 	return snap, nil
 }
 
@@ -131,37 +151,40 @@ func (s *Service) FetchRaw(ctx context.Context, opt Options) (json.RawMessage, e
 		)
 	}
 
-	raw, _, err := s.fetchRawBySource(ctx, opt)
-	return raw, err
+	res, _, err := s.fetchBySource(ctx, opt)
+	if err != nil {
+		return nil, err
+	}
+	return res.Raw, nil
 }
 
-func (s *Service) fetchRawBySource(ctx context.Context, opt Options) (json.RawMessage, string, error) {
+func (s *Service) fetchBySource(ctx context.Context, opt Options) (*agapi.UsageResult, string, error) {
 	switch opt.Source {
 	case SourceZed:
 		s.progress("正在通过 Zed (antigravity-acp) 凭据查询模型配额 ...")
 		zc := agapi.NewZedClient(opt.TokenFile)
 		zc.Logf = s.progress
-		raw, err := zc.FetchUsage(ctx)
+		res, err := zc.FetchUsageWithMeta(ctx)
 		if err != nil {
 			return nil, "", withSuggestion(
 				errf(ErrZedExecute, "获取 Zed 对应账号配额失败: %v", err),
 				"请确认 ~/.gemini/antigravity-acp/acp_token.json 是否存在且网络正常",
 			)
 		}
-		return raw, "Zed (antigravity-acp)", nil
+		return res, "Zed (antigravity-acp)", nil
 
 	case SourceAgy:
 		s.progress("正在通过 Antigravity CLI (agy) 查询模型配额 ...")
 		ac := agapi.NewClient()
 		ac.Logf = s.progress
-		raw, err := ac.FetchUsage(ctx)
+		res, err := ac.FetchUsageWithMeta(ctx)
 		if err != nil {
 			return nil, "", withSuggestion(
 				errf(ErrAgyExecute, "获取 agy 配额失败: %v", err),
 				"请确认系统已安装 Antigravity CLI (agy) 并且能正常执行 `agy -p /usage`",
 			)
 		}
-		return raw, "Antigravity CLI (agy)", nil
+		return res, "Antigravity CLI (agy)", nil
 
 	default:
 		return nil, "", errf(ErrSourceRequired, "未知的数据源: %s", opt.Source)

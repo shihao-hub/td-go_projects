@@ -70,7 +70,24 @@ func outQuota(cmd *cobra.Command, snap *service.Snapshot) error {
 	if snap.Source != "" {
 		sourceTag = fmt.Sprintf(" [%s]", snap.Source)
 	}
-	fmt.Fprintf(w, "Antigravity 模型配额%s（查询于 %s）\n", sourceTag, snap.FetchedAt.Format("2006-01-02 15:04:05"))
+
+	accountStr := ""
+	if snap.Account != "" {
+		accountStr = fmt.Sprintf(" (%s)", snap.Account)
+	}
+
+	fmt.Fprintf(w, "Antigravity 模型配额%s%s\n", sourceTag, accountStr)
+
+	timeLine := fmt.Sprintf("  查询时间: %s", snap.FetchedAt.Format("2006-01-02 15:04:05"))
+	if snap.TokenExpiresAt != "" {
+		timeLine += fmt.Sprintf(" | Token 到期: %s", snap.TokenExpiresAt)
+		if snap.TokenExpiresIn != "" {
+			timeLine += fmt.Sprintf(" (%s)", snap.TokenExpiresIn)
+		}
+	}
+	fmt.Fprintln(w, timeLine)
+	fmt.Fprintln(w)
+
 	if len(snap.Buckets) == 0 {
 		fmt.Fprintln(w, "  未解析到配额数据；接口响应结构可能已变化，可用 --raw 查看原始响应。")
 		return nil
