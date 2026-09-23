@@ -8,21 +8,10 @@ if (-not (Test-Path $exePath)) {
     & (Join-Path $PSScriptRoot "build.ps1")
 }
 
-$destDirs = @(
-    "D:\Users\language_projects_bin",
-    "C:\Users\29580\.local\bin",
-    "C:\Users\29580\AppData\Local\agy\bin"
-)
-
-$installed = $false
-foreach ($dir in $destDirs) {
-    if (Test-Path $dir) {
-        Copy-Item -LiteralPath $exePath -Destination $dir -Force
-        Write-Host "已将 agyquota.exe 安装到: $dir\agyquota.exe"
-        $installed = $true
-    }
+$targetDir = "D:\Users\language_projects_bin"
+if (-not (Test-Path $targetDir)) {
+    throw "未找到目标安装目录: $targetDir"
 }
 
-if (-not $installed) {
-    throw "未找到有效的目标安装目录"
-}
+Copy-Item -LiteralPath $exePath -Destination $targetDir -Force
+Write-Host "已将 agyquota.exe 安装到: $targetDir\agyquota.exe"
