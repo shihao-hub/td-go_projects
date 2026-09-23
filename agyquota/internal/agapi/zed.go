@@ -25,7 +25,7 @@ const (
 	// DefaultTokenRelPath Zed ACP 凭据默认相对路径
 	DefaultTokenRelPath = ".gemini/antigravity-acp/acp_token.json"
 
-	// CacheFileName Access Token 内存级本地缓存，默认缓存 50 分钟，杜绝频繁向 Google 刷新
+	// CacheFileName Access Token 内存级本地缓存，预留 2 分钟安全冗余（缓存约 58 分钟），杜绝频繁向 Google 刷新
 	CacheFileName = ".quota_token_cache.json"
 )
 
@@ -89,7 +89,7 @@ func (c *ZedClient) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error
 		return nil, fmt.Errorf("读取 Zed 凭据失败: %w", err)
 	}
 
-	// 1. 获取 Access Token 及邮箱元信息（带 50 分钟安全缓存）
+	// 1. 获取 Access Token 及邮箱元信息（优先读本地约 58 分钟安全缓存）
 	accessToken, email, expiresAt, err := c.getOrRefreshToken(ctx, tf)
 	if err != nil {
 		return nil, fmt.Errorf("获取认证令牌失败: %w", err)
@@ -106,7 +106,9 @@ func (c *ZedClient) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error
 		c.Logf("正在请求 Google Cloud Code 配额接口 (project: %s) ...", project)
 	}
 
-	// 带一次遇错退避重试
+	cachePath := filepath.Join(filepath.Dir(c.TokenPath), CacheFileName)
+
+	// 带一次遇错退避重试，以及遇到 401 时的自动失效刷新重试
 	var respBytes []byte
 	for attempt := 1; attempt <= 2; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, ZedQuotaEndpoint, bytes.NewReader(reqBody))
@@ -131,6 +133,21 @@ func (c *ZedClient) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error
 		_ = resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("读取响应数据失败: %w", err)
+		}
+
+		// 401 Unauthorized 自愈：缓存的 Access Token 意外失效时，清除缓存重新向 OAuth 换取并重试
+		if resp.StatusCode == http.StatusUnauthorized && attempt == 1 {
+			if c.Logf != nil {
+				c.Logf("本地 Access Token 已失效 (HTTP 401)，正在向 Google 重新刷新并重试 ...")
+			}
+			_ = os.Remove(cachePath)
+			newTok, newEmail, newExp, refErr := c.refreshToken(ctx, tf, cachePath)
+			if refErr == nil {
+				accessToken = newTok
+				email = newEmail
+				expiresAt = newExp
+				continue
+			}
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -176,13 +193,17 @@ func loadTokenFile(path string) (*TokenFile, error) {
 func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (string, string, time.Time, error) {
 	cachePath := filepath.Join(filepath.Dir(c.TokenPath), CacheFileName)
 
-	// 检查缓存
-	if cacheBytes, err := os.ReadFile(cachePath); err == nil {
+	// 1. 检查本地缓存是否存在及是否有效
+	cacheBytes, err := os.ReadFile(cachePath)
+	if err == nil {
 		var cache TokenCache
-		if json.Unmarshal(cacheBytes, &cache) == nil {
-			if cache.AccessToken != "" && time.Now().Before(cache.ExpiresAt) {
+		if jsonErr := json.Unmarshal(cacheBytes, &cache); jsonErr == nil && cache.AccessToken != "" {
+			now := time.Now()
+			if now.Before(cache.ExpiresAt) {
 				if c.Logf != nil {
-					c.Logf("命中本地 Token 缓存（有效期至 %s），无需向 Google 重新刷新", cache.ExpiresAt.Format("15:04:05"))
+					rem := time.Until(cache.ExpiresAt)
+					c.Logf("命中本地 Access Token 缓存（有效期至 %s，还剩 %s），无需向 Google 刷新",
+						cache.ExpiresAt.Format("15:04:05"), formatDuration(rem))
 				}
 				// 补全 email（若旧缓存未记录）
 				if cache.Email == "" {
@@ -193,14 +214,33 @@ func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (strin
 				}
 				return cache.AccessToken, cache.Email, cache.ExpiresAt, nil
 			}
+			// 缓存已到期
+			if c.Logf != nil {
+				c.Logf("本地 Access Token 缓存已到期（已满 Google 1小时生命周期），正在向 Google OAuth 自动静默续期 ...")
+			}
+		} else {
+			// 缓存格式损坏
+			if c.Logf != nil {
+				c.Logf("本地 Access Token 缓存文件无效或已损坏，正在向 Google OAuth 重新获取 ...")
+			}
+		}
+	} else if os.IsNotExist(err) {
+		// 缓存文件不存在（首次查询或被清理）
+		if c.Logf != nil {
+			c.Logf("本地未发现 Access Token 缓存（首次查询），正在通过 Zed 凭据向 Google OAuth 获取访问令牌 ...")
+		}
+	} else {
+		// 读取缓存出现其他 I/O 错误
+		if c.Logf != nil {
+			c.Logf("读取本地 Token 缓存出错 (%v)，正在向 Google OAuth 获取访问令牌 ...", err)
 		}
 	}
 
-	// 缓存未命中或已过期，向 Google 请求刷新
-	if c.Logf != nil {
-		c.Logf("本地 Token 缓存未命中或已过期，正在向 Google OAuth 刷新 Access Token ...")
-	}
+	// 2. 向 Google OAuth 请求刷新
+	return c.refreshToken(ctx, tf, cachePath)
+}
 
+func (c *ZedClient) refreshToken(ctx context.Context, tf *TokenFile, cachePath string) (string, string, time.Time, error) {
 	form := url.Values{
 		"client_id":     {tf.ClientID},
 		"client_secret": {tf.ClientSecret},
@@ -237,10 +277,12 @@ func (c *ZedClient) getOrRefreshToken(ctx context.Context, tf *TokenFile) (strin
 		return "", "", time.Time{}, errors.New("OAuth 响应中未包含 access_token")
 	}
 
-	// 写入本地缓存，默认缓存 50 分钟（3000 秒）
-	validDuration := 50 * time.Minute
-	if tokResp.ExpiresIn > 600 {
-		validDuration = time.Duration(tokResp.ExpiresIn-600) * time.Second
+	// 写入本地缓存：Google access_token 通常为 3600 秒（1小时）。
+	// 预留 2 分钟安全缓冲（即缓存约 58 分钟），最大化利用本地缓存生命周期，
+	// 避免频繁刷新，同时防止临界点过期。
+	validDuration := 55 * time.Minute
+	if tokResp.ExpiresIn > 180 {
+		validDuration = time.Duration(tokResp.ExpiresIn-120) * time.Second
 	}
 	expiresAt := time.Now().Add(validDuration)
 
@@ -278,4 +320,19 @@ func (c *ZedClient) fetchEmail(ctx context.Context, accessToken string) string {
 	}
 	_ = json.Unmarshal(b, &uinfo)
 	return uinfo.Email
+}
+
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "0秒"
+	}
+	mins := int(d.Minutes())
+	secs := int(d.Seconds()) % 60
+	if mins >= 60 {
+		return fmt.Sprintf("%d小时%d分钟", mins/60, mins%60)
+	}
+	if mins > 0 {
+		return fmt.Sprintf("%d分钟", mins)
+	}
+	return fmt.Sprintf("%d秒", secs)
 }

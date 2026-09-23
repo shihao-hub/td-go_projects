@@ -80,7 +80,7 @@ func outQuota(cmd *cobra.Command, snap *service.Snapshot) error {
 
 	timeLine := fmt.Sprintf("  查询时间: %s", snap.FetchedAt.Format("2006-01-02 15:04:05"))
 	if snap.TokenExpiresAt != "" {
-		timeLine += fmt.Sprintf(" | Token 到期: %s", snap.TokenExpiresAt)
+		timeLine += fmt.Sprintf(" | Access Token 有效期至: %s", snap.TokenExpiresAt)
 		if snap.TokenExpiresIn != "" {
 			timeLine += fmt.Sprintf(" (%s)", snap.TokenExpiresIn)
 		}

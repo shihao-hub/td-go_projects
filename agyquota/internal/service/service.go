@@ -130,12 +130,12 @@ func (s *Service) GetQuota(ctx context.Context, opt Options) (*Snapshot, error) 
 		if d > 0 {
 			mins := int(d.Minutes())
 			if mins >= 60 {
-				snap.TokenExpiresIn = fmt.Sprintf("%d小时%d分钟后到期", mins/60, mins%60)
+				snap.TokenExpiresIn = fmt.Sprintf("%d小时%d分钟后自动续期", mins/60, mins%60)
 			} else {
-				snap.TokenExpiresIn = fmt.Sprintf("%d分钟后到期", mins)
+				snap.TokenExpiresIn = fmt.Sprintf("%d分钟后自动续期", mins)
 			}
 		} else {
-			snap.TokenExpiresIn = "已到期"
+			snap.TokenExpiresIn = "待自动续期"
 		}
 	}
 
