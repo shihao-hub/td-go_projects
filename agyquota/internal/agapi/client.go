@@ -1,4 +1,4 @@
-// Package agapi 提供 Antigravity CLI (agy) 的调用与数据获取封装。
+// Package agapi 提供 Antigravity CLI (agy) 与 Zed ACP 的调用与数据获取封装。
 package agapi
 
 import (
@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 )
 
 // AgyUsageOutput 是 agy -p "/usage" --output-format json 的完整应答结构。
@@ -77,6 +78,7 @@ func findAgyPath() string {
 }
 
 // FetchUsage 调用 agy 获取 /usage 并返回原始 JSON 字节。
+// 执行完毕（无论成功或失败）均会确保强杀子进程树，防止任何后台常驻残留。
 func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	if c.AgyPath == "" {
 		return nil, errors.New("未找到 agy 命令行工具，请先安装 Antigravity CLI")
@@ -92,7 +94,24 @@ func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("启动 agy 命令失败: %w", err)
+	}
+
+	pid := 0
+	if cmd.Process != nil {
+		pid = cmd.Process.Pid
+	}
+
+	// 退出时强制收口：确保杀死整个进程树，绝不留后台孤儿进程
+	defer func() {
+		if pid > 0 {
+			killProcessTree(pid)
+		}
+	}()
+
+	err := cmd.Wait()
+	if err != nil {
 		errMsg := stderr.String()
 		if errMsg == "" {
 			errMsg = stdout.String()
@@ -110,4 +129,14 @@ func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	}
 
 	return outBytes, nil
+}
+
+// killProcessTree 在 Windows 下使用 taskkill 强杀进程树 (/F /T)，跨平台兼容 Process.Kill()
+func killProcessTree(pid int) {
+	if pid <= 0 {
+		return
+	}
+	// Windows 平台强杀进程树
+	killCmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
+	_ = killCmd.Run()
 }

@@ -66,7 +66,11 @@ func outQuota(cmd *cobra.Command, snap *service.Snapshot) error {
 		return nil
 	}
 	w := cmd.OutOrStdout()
-	fmt.Fprintf(w, "Antigravity 模型配额（查询于 %s）\n", snap.FetchedAt.Format("2006-01-02 15:04:05"))
+	sourceTag := ""
+	if snap.Source != "" {
+		sourceTag = fmt.Sprintf(" [%s]", snap.Source)
+	}
+	fmt.Fprintf(w, "Antigravity 模型配额%s（查询于 %s）\n", sourceTag, snap.FetchedAt.Format("2006-01-02 15:04:05"))
 	if len(snap.Buckets) == 0 {
 		fmt.Fprintln(w, "  未解析到配额数据；接口响应结构可能已变化，可用 --raw 查看原始响应。")
 		return nil

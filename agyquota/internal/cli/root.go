@@ -15,7 +15,7 @@ import (
 )
 
 // Version 版本号，构建时经 -ldflags 注入。
-var Version = "0.1.0"
+var Version = "0.2.0"
 
 // Run 执行 CLI 并返回进程退出码：0 成功、1 业务失败、2 参数/flag 错误。
 func Run(args []string) int {
@@ -42,12 +42,13 @@ func Run(args []string) int {
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "agyquota",
-		Short:   "Antigravity 模型配额查询（无需打开 IDE）",
-		Long: "通过 Antigravity 落盘的 Google OAuth 凭据直接查询 Cloud Code 配额接口，\n" +
-			"显示各模型桶（Gemini / Claude and GPT）的剩余百分比与重置时间。\n" +
-			"凭据来源：~\\.gemini\\antigravity-acp\\acp_token.json（只读，绝不回写）。\n" +
-			"不带子命令运行等价于 agyquota quota。",
+		Use:   "agyquota",
+		Short: "Antigravity 模型配额查询（需指定 --agy 或 --zed）",
+		Long: "查询 Google AI Pro 在 Antigravity 中的模型配额（Gemini / Claude and GPT）。\n\n" +
+			"数据源选项（二选一）：\n" +
+			"  --agy : 调用官方 Antigravity CLI (agy)，查询终端与桌面端账号配额，调用后自动回收进程；\n" +
+			"  --zed : 读取 Zed (antigravity-acp) 本地凭据直连 Google 官方接口，支持本地安全缓存。\n\n" +
+			"不带子命令运行时等价于 agyquota quota。",
 		Version:       Version,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -56,8 +57,10 @@ func newRootCmd() *cobra.Command {
 			return quotaRun(cmd)
 		},
 	}
+	root.PersistentFlags().Bool("agy", false, "查询官方 Antigravity CLI / 桌面端账号配额（进程随用随杀）")
+	root.PersistentFlags().Bool("zed", false, "查询 Zed (antigravity-acp) 账号配额（带 50 分钟安全缓存）")
 	root.PersistentFlags().Bool("json", false, "以 JSON 信封输出（供脚本/程序消费）")
-	root.PersistentFlags().String("token-file", "", "凭据文件路径（缺省用 ~/.gemini/antigravity-acp/acp_token.json）")
+	root.PersistentFlags().String("token-file", "", "Zed 凭据文件路径（仅 --zed 生效，缺省用 ~/.gemini/antigravity-acp/acp_token.json）")
 	root.PersistentFlags().Bool("raw", false, "输出配额接口原始响应（调试用，仅 quota 生效）")
 	root.SetVersionTemplate("{{.Version}}\n")
 	root.AddCommand(quotaCmd(), mcpCmd(), schemaCmd())

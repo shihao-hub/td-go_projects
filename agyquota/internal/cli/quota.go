@@ -13,10 +13,11 @@ import (
 func quotaCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "quota",
-		Short: "查询 Antigravity 模型配额（与不带子命令运行等价）",
-		Long: "查询各模型桶（Gemini / Claude and GPT）的配额剩余百分比与重置时间。\n" +
-			"接口限流较严：遇 429 自动退避重试（15s/45s/90s），请耐心等待；\n" +
-			"Antigravity IDE 正在运行时会竞争限额，建议关闭后查询。",
+		Short: "查询 Antigravity 模型配额（需指定 --agy 或 --zed）",
+		Long: "查询各模型桶（Gemini / Claude and GPT）的配额剩余百分比与重置时间。\n\n" +
+			"必须显式指定查询数据源：\n" +
+			"  --agy : 调用本地官方 Antigravity CLI (agy)，查询终端/桌面端配额，执行完强制回收进程；\n" +
+			"  --zed : 读取 Zed (antigravity-acp) 凭据直连 Google 官方接口，带 50 分钟本地缓存与官方 UA 伪装。",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return quotaRun(cmd)
@@ -25,19 +26,46 @@ func quotaCmd() *cobra.Command {
 }
 
 // quotaRun 是 quota 的执行体：调用公共 service 并渲染。
-// 接口带 429 退避重试，整体预算放宽到 4 分钟。
 func quotaRun(cmd *cobra.Command) error {
 	raw, _ := cmd.Flags().GetBool("raw")
 	tokenFile, _ := cmd.Flags().GetString("token-file")
+	useAgy, _ := cmd.Flags().GetBool("agy")
+	useZed, _ := cmd.Flags().GetBool("zed")
+
+	if !useAgy && !useZed {
+		return outErr(cmd, &service.Error{
+			Code:    service.ErrSourceRequired,
+			Message: "未指定查询数据源",
+			Suggestions: []string{
+				"使用 agyquota --agy 查询终端与桌面 GUI 账号配额",
+				"使用 agyquota --zed 查询 Zed (antigravity-acp) 账号配额",
+			},
+		})
+	}
+
+	if useAgy && useZed {
+		return outErr(cmd, &service.Error{
+			Code:    "bad_args",
+			Message: "--agy 与 --zed 为互斥选项，请每次指定一个数据源",
+		})
+	}
+
+	source := service.SourceAgy
+	if useZed {
+		source = service.SourceZed
+	}
 
 	svc := service.New()
 	// 进度与退避提示走 stderr（人读/JSON 模式均合法：stderr 是诊断流）
 	svc.Progress = func(f string, a ...any) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "[agyquota] "+f+"\n", a...)
 	}
-	ctx, cancel := contextTimeout(cmd, 4*time.Minute)
+	ctx, cancel := contextTimeout(cmd, 2*time.Minute)
 	defer cancel()
-	opt := service.Options{TokenFile: tokenFile}
+	opt := service.Options{
+		Source:    source,
+		TokenFile: tokenFile,
+	}
 
 	if raw {
 		rawJSON, err := svc.FetchRaw(ctx, opt)

@@ -1,4 +1,4 @@
-# 将 agyquota.exe 部署到用户 PATH 目录（~/.local/bin 或 AppData/Local/agy/bin）
+# 将 agyquota.exe 部署到用户 PATH 目录
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $exePath = Join-Path $repoRoot "agyquota.exe"
@@ -9,15 +9,20 @@ if (-not (Test-Path $exePath)) {
 }
 
 $destDirs = @(
+    "D:\Users\language_projects_bin",
     "C:\Users\29580\.local\bin",
     "C:\Users\29580\AppData\Local\agy\bin"
 )
 
-$targetDir = $destDirs | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-if (-not $targetDir) {
-    throw "未找到有效的目标安装目录"
+$installed = $false
+foreach ($dir in $destDirs) {
+    if (Test-Path $dir) {
+        Copy-Item -LiteralPath $exePath -Destination $dir -Force
+        Write-Host "已将 agyquota.exe 安装到: $dir\agyquota.exe"
+        $installed = $true
+    }
 }
 
-Copy-Item -LiteralPath $exePath -Destination $targetDir -Force
-Write-Host "已将 agyquota.exe 安装到: $targetDir\agyquota.exe"
+if (-not $installed) {
+    throw "未找到有效的目标安装目录"
+}

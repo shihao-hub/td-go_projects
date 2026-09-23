@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"agyquota/internal/agapi"
 )
 
 // 模型桶名称（与 Antigravity 设置面板与 agy 保持一致）。
@@ -20,29 +18,81 @@ const (
 
 var bucketOrder = map[string]int{bucketGemini: 0, bucketClaude: 1, bucketOther: 2}
 
-// parseSnapshot 把 agy 的原始输出归一化为模型桶 × 窗口快照。
-func parseSnapshot(raw json.RawMessage, now time.Time) (*Snapshot, error) {
-	var usage agapi.AgyUsageOutput
-	if err := json.Unmarshal(raw, &usage); err != nil {
+type rawQuotaBucket struct {
+	ID                     string   `json:"id"`
+	BucketID               string   `json:"bucketId"`
+	Name                   string   `json:"name"`
+	DisplayName            string   `json:"displayName"`
+	Description            string   `json:"description"`
+	Window                 string   `json:"window"`
+	RemainingFraction      *float64 `json:"remainingFraction"`
+	RemainingFractionSnake *float64 `json:"remaining_fraction"`
+	ResetTime              string   `json:"resetTime"`
+	ResetTimeSnake         string   `json:"reset_time"`
+}
+
+type rawQuotaGroup struct {
+	Name        string           `json:"name"`
+	DisplayName string           `json:"displayName"`
+	Description string           `json:"description"`
+	Buckets     []rawQuotaBucket `json:"buckets"`
+}
+
+type rawUsageContainer struct {
+	Groups  []rawQuotaGroup `json:"groups"`
+	Command struct {
+		Name string `json:"name"`
+		Data struct {
+			Description string          `json:"description"`
+			Groups      []rawQuotaGroup `json:"groups"`
+		} `json:"data"`
+	} `json:"command"`
+}
+
+// parseSnapshot 把 agy 或 Google API 的原始输出归一化为模型桶 × 窗口快照。
+func parseSnapshot(raw json.RawMessage, now time.Time, source string) (*Snapshot, error) {
+	var container rawUsageContainer
+	if err := json.Unmarshal(raw, &container); err != nil {
 		return nil, fmt.Errorf("响应不是预期的 JSON 格式: %w", err)
 	}
 
-	groups := usage.Command.Data.Groups
+	groups := container.Command.Data.Groups
 	if len(groups) == 0 {
-		// 容错：有些版本可能顶层直接返回 AgyUsageData
-		var directData agapi.AgyUsageData
-		if err := json.Unmarshal(raw, &directData); err == nil && len(directData.Groups) > 0 {
-			groups = directData.Groups
-		}
+		groups = container.Groups
+	}
+
+	if len(groups) == 0 {
+		return nil, fmt.Errorf("响应中未找到任何配额分组数据")
 	}
 
 	var buckets []Bucket
 	for _, group := range groups {
 		var windows []Window
 		for _, b := range group.Buckets {
-			rem := b.RemainingFraction
-			winID, label := normalizeWindowID(b.Window, b.ID, b.Name)
-			resetAt, resetsIn := describeResetTime(b.ResetTime, now)
+			var rem float64
+			if b.RemainingFraction != nil {
+				rem = *b.RemainingFraction
+			} else if b.RemainingFractionSnake != nil {
+				rem = *b.RemainingFractionSnake
+			}
+
+			bucketID := b.BucketID
+			if bucketID == "" {
+				bucketID = b.ID
+			}
+
+			bucketName := b.DisplayName
+			if bucketName == "" {
+				bucketName = b.Name
+			}
+
+			resetTime := b.ResetTime
+			if resetTime == "" {
+				resetTime = b.ResetTimeSnake
+			}
+
+			winID, label := normalizeWindowID(b.Window, bucketID, bucketName)
+			resetAt, resetsIn := describeResetTime(resetTime, now)
 
 			windows = append(windows, Window{
 				Window:            winID,
@@ -56,17 +106,19 @@ func parseSnapshot(raw json.RawMessage, now time.Time) (*Snapshot, error) {
 		sortWindows(windows)
 
 		// 归类桶名称
-		bName := group.Name
+		bName := group.DisplayName
+		if bName == "" {
+			bName = group.Name
+		}
 		if bName == "" {
 			bName = bucketOther
 		}
 
-		// 在 agy 结构中，每个 group 下共享配额桶，将它作为一个代表性的 ModelQuota
 		buckets = append(buckets, Bucket{
 			Name: bName,
 			Models: []ModelQuota{
 				{
-					Name:    group.Name,
+					Name:    bName,
 					Windows: windows,
 				},
 			},
@@ -86,6 +138,7 @@ func parseSnapshot(raw json.RawMessage, now time.Time) (*Snapshot, error) {
 	})
 
 	return &Snapshot{
+		Source:    source,
 		FetchedAt: now,
 		Buckets:   buckets,
 	}, nil
