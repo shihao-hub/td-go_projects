@@ -1,0 +1,10 @@
+# 前端构建与依赖（生成物不入库）
+frontend/node_modules/
+frontend/dist/
+frontend/bindings/
+
+# Wails 构建产物
+dist/
+build/bin/
+
+# 子仓根 .gitignore 已覆盖 *.exe 等通用产物；此处补充项目特有规则
