@@ -16,9 +16,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// 项目根图标字节（托盘图标；exe 图标由 build/windows/icon.ico 生成）。
+// Windows 应用图标字节（托盘与 exe 共用 build/windows/icon.ico）。
 //
-//go:embed icon.ico
+//go:embed build/windows/icon.ico
 var iconICO []byte
 
 func main() {

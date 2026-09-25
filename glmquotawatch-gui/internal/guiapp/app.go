@@ -18,7 +18,7 @@ type RunOptions struct {
 	Demo   bool     // --demo：进入演示模式（60 倍速模拟上游）
 	Hidden bool     // --hidden：静默启动（开机自启形态，不弹主窗）
 	Assets embed.FS // //go:embed all:frontend/dist 的产物
-	Icon   []byte   // 项目根 icon.ico 字节（托盘图标，与 exe 图标同源）
+	Icon   []byte   // build/windows/icon.ico 字节（托盘图标，与 exe 图标同源）
 }
 
 // 单实例标识（与 build/config.yml 的 productIdentifier 一致）。

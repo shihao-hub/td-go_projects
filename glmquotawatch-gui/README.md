@@ -17,7 +17,7 @@ wails3 build         # 产出 bin\glmquotawatch-gui.exe（含版本号注入）
 wails3 dev           # 开发模式（前端热更新）
 ```
 
-- exe 图标：`build/windows/icon.ico`（仓库站标地鼠，与项目根 `icon.ico` 同源）经 `wails3 generate syso` 注入；wails 构建后自动清理根目录临时 `*.syso`，**不要提交静态 syso**。
+- exe 图标：`build/windows/icon.ico`（自定义青色用量环 + 珊瑚告警段），托盘图标与 exe 图标共用同一文件，经 `wails3 generate syso` 注入；wails 构建后自动清理根目录临时 `*.syso`，**不要提交静态 syso**。
 - 纯 `go build .`：仅在 `frontend/dist` 已存在时可用（先跑过一次前端构建）。
 - 版本号：`build/config.yml` 的 `info.version` 与 `build/windows/Taskfile.yml` 的 `-X …cli.Version` 保持同步。
 
