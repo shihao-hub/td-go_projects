@@ -31,10 +31,10 @@ var commandDocs = map[string]commandDoc{
 		Args:   []argSpec{{Name: "token", Required: true, Desc: "bigmodel 开放平台 API token，trim 后长度 ≥ 20"}},
 		Output: "ConfigView（token 脱敏）",
 	},
-	"token show":    {Output: "ConfigView（token 脱敏）"},
-	"token remove":  {Output: "ConfigView"},
-	"status":        {Output: "StatusView（level/sampled_at/windows[]，含各窗口百分比与已通知档位）"},
-	"config show":   {Output: "ConfigView"},
+	"token show":   {Output: "ConfigView（token 脱敏）"},
+	"token remove": {Output: "ConfigView"},
+	"status":       {Output: "StatusView（level/sampled_at/windows[]，含各窗口百分比与已通知档位）"},
+	"config show":  {Output: "ConfigView"},
 	"config set": {
 		Args: []argSpec{
 			{Name: "key", Required: true, Desc: "interval | thresholds | hysteresis | silent"},
@@ -48,8 +48,8 @@ var commandDocs = map[string]commandDoc{
 
 // schemaCommand 契约目录中的单条命令。
 type schemaCommand struct {
-	Name        string `json:"name"`        // 命令路径（相对 root，空格分层，如 "token set"）
-	Description string `json:"description"` // cobra Short
+	Name        string    `json:"name"`        // 命令路径（相对 root，空格分层，如 "token set"）
+	Description string    `json:"description"` // cobra Short
 	Args        []argSpec `json:"args,omitempty"`
 	Output      string    `json:"output,omitempty"`
 }

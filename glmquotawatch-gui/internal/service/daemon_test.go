@@ -43,7 +43,7 @@ func TestRunDaemonNotifies(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- svc.RunDaemon(ctx, fn, quietLogger(), nil) }()
+	go func() { done <- svc.RunDaemon(ctx, fn, quietLogger(), DaemonHooks{}) }()
 
 	select {
 	case m := <-fn.got:
@@ -82,7 +82,7 @@ func TestRunDaemonNoRepeat(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- svc.RunDaemon(ctx, fn, quietLogger(), nil) }()
+	go func() { done <- svc.RunDaemon(ctx, fn, quietLogger(), DaemonHooks{}) }()
 
 	select {
 	case <-fn.got: // 首轮通知到达
@@ -115,12 +115,12 @@ func TestRunDaemonOnSampleHook(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.RunDaemon(ctx, &fakeNotifier{got: make(chan string, 1)}, quietLogger(), func(v StatusView) {
+		done <- svc.RunDaemon(ctx, &fakeNotifier{got: make(chan string, 1)}, quietLogger(), DaemonHooks{OnSample: func(v StatusView) {
 			select {
 			case got <- v:
 			default:
 			}
-		})
+		}})
 	}()
 
 	select {
@@ -163,7 +163,7 @@ func TestRunDaemonFixedInterval(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		done <- svc.RunDaemon(ctx, &fakeNotifier{got: make(chan string, 1)}, quietLogger(), func(v StatusView) { got <- v })
+		done <- svc.RunDaemon(ctx, &fakeNotifier{got: make(chan string, 1)}, quietLogger(), DaemonHooks{OnSample: func(v StatusView) { got <- v }})
 	}()
 
 	// 固定 2s 间隔下，6s 内应收到 ≥3 轮回调（首轮 + 至少两个周期轮）

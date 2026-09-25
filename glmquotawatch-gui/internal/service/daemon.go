@@ -15,13 +15,19 @@ const (
 	defInterval   = 5 * time.Minute
 )
 
+// DaemonHooks daemon 运行期回调（两个字段均 nil 安全），GUI 壳用来驱动
+// 托盘 tooltip、前端事件与错误横幅；CLI 无 daemon 场景，传零值即可。
+type DaemonHooks struct {
+	OnSample func(StatusView) // 每轮采样成功后收到最新视图
+	OnError  func(error)      // 每轮采样失败时收到业务错误（含 service.Error）
+}
+
 // RunDaemon 常驻监控：先采一轮 → 按 interval 周期采样。
 // 新触发档位时经 Notifier 发送告警（同轮多窗口合并为一条多行通知）；
-// 采样失败只记日志保持运行；interval 配置变更在每轮开头热加载
-//（fixedInterval 非零时跳过热加载直用固定值，演示模式用）；
+// 采样失败只记日志保持运行（并回调 hooks.OnError）；interval 配置变更在
+// 每轮开头热加载（fixedInterval 非零时跳过热加载直用固定值，演示模式用）；
 // ctx 取消（托盘退出）后优雅退出。通知发送失败绝不中断循环。
-// onSample 在每轮采样成功后回调最新视图（nil 安全），GUI 用它驱动托盘与前端。
-func (s *Service) RunDaemon(ctx context.Context, n Notifier, log *slog.Logger, onSample func(StatusView)) error {
+func (s *Service) RunDaemon(ctx context.Context, n Notifier, log *slog.Logger, hooks DaemonHooks) error {
 	interval := s.fixedInterval
 	silent := false
 	if interval == 0 {
@@ -48,10 +54,13 @@ func (s *Service) RunDaemon(ctx context.Context, n Notifier, log *slog.Logger, o
 				return
 			}
 			log.Warn("采样失败（保持运行，下轮重试）", "err", err)
+			if hooks.OnError != nil {
+				hooks.OnError(err)
+			}
 			return
 		}
-		if onSample != nil {
-			onSample(view)
+		if hooks.OnSample != nil {
+			hooks.OnSample(view)
 		}
 		var msgs []string
 		for _, o := range outs {

@@ -212,7 +212,6 @@ func configCmd() *cobra.Command {
 	return cmd
 }
 
-
 // ---- schema ----
 
 func schemaCmd() *cobra.Command {

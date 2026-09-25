@@ -272,7 +272,7 @@ func dedupSorted(ts []int) []int {
 
 // SampleOnce 立即采样一次：请求上游 → 原文落历史 → 评估阈值推进告警状态。
 // 不发送任何通知（通知是 daemon 的职责）。返回状态视图与逐窗口评估结果
-//（CLI 只用视图，GUI daemon 用评估结果）。
+// （CLI 只用视图，GUI daemon 用评估结果）。
 func (s *Service) SampleOnce(ctx context.Context) (StatusView, []quota.Outcome, error) {
 	cfg, err := s.st.LoadConfig()
 	if err != nil {
