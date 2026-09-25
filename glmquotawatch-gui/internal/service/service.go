@@ -67,6 +67,23 @@ type StatusView struct {
 	Windows   []WindowView `json:"windows"`
 }
 
+// sampleResult 保存一次采样的评估结果；状态是否已提交由调用路径决定。
+type sampleResult struct {
+	usage    *api.Usage
+	now      time.Time
+	prev     store.State
+	next     store.State
+	outcomes []quota.Outcome
+}
+
+func (r sampleResult) view(committed bool) StatusView {
+	state := r.prev
+	if committed {
+		state = r.next
+	}
+	return buildStatusView(r.usage, r.now, state)
+}
+
 // Service 业务用例集合。
 type Service struct {
 	st             *store.Store
@@ -274,21 +291,38 @@ func dedupSorted(ts []int) []int {
 // 不发送任何通知（通知是 daemon 的职责）。返回状态视图与逐窗口评估结果
 // （CLI 只用视图，GUI daemon 用评估结果）。
 func (s *Service) SampleOnce(ctx context.Context) (StatusView, []quota.Outcome, error) {
+	result, err := s.sample(ctx, true)
+	if err != nil {
+		return StatusView{}, nil, err
+	}
+	return result.view(true), result.outcomes, nil
+}
+
+// SampleUncommitted 刷新观察视图但不确认阈值；daemon 在通知成功后自行提交状态。
+func (s *Service) SampleUncommitted(ctx context.Context) (StatusView, error) {
+	result, err := s.sample(ctx, false)
+	if err != nil {
+		return StatusView{}, err
+	}
+	return result.view(false), nil
+}
+
+func (s *Service) sample(ctx context.Context, commit bool) (sampleResult, error) {
 	cfg, err := s.st.LoadConfig()
 	if err != nil {
-		return StatusView{}, nil, errf("internal", "读取配置失败: %v", err)
+		return sampleResult{}, errf("internal", "读取配置失败: %v", err)
 	}
 	if cfg.Token == "" {
-		return StatusView{}, nil, errf("no_token", "尚未配置 token，请先在设置页录入")
+		return sampleResult{}, errf("no_token", "尚未配置 token，请先在设置页录入")
 	}
 
 	f, err := s.fetcher()
 	if err != nil {
-		return StatusView{}, nil, err
+		return sampleResult{}, err
 	}
 	usage, raw, err := f.FetchUsage(ctx)
 	if err != nil {
-		return StatusView{}, nil, mapUpstream(err)
+		return sampleResult{}, mapUpstream(err)
 	}
 
 	now := time.Now()
@@ -302,10 +336,12 @@ func (s *Service) SampleOnce(ctx context.Context) (StatusView, []quota.Outcome, 
 		prev = store.State{}
 	}
 	next, outs := quota.Evaluate(cfg, prev, usage.TokensLimits(), now)
-	if err := s.st.SaveState(next); err != nil {
-		slog.Warn("state.json 写入失败（下一轮重试，不影响通知）", "err", err)
+	if commit {
+		if err := s.st.SaveState(next); err != nil {
+			slog.Warn("state.json 写入失败（下一轮重试，不影响通知）", "err", err)
+		}
 	}
-	return buildStatusView(usage, now, next), outs, nil
+	return sampleResult{usage: usage, now: now, prev: prev, next: next, outcomes: outs}, nil
 }
 
 func buildStatusView(u *api.Usage, now time.Time, st store.State) StatusView {

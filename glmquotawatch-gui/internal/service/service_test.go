@@ -226,6 +226,47 @@ func TestSampleOnceUpstreamCodes(t *testing.T) {
 	}
 }
 
+func TestSampleUncommittedDoesNotAdvanceState(t *testing.T) {
+	pct := int64(92)
+	svc := newTestSvc(t, &pct)
+	if _, err := svc.SetToken(validToken); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := svc.SampleUncommitted(context.Background())
+	if err != nil {
+		t.Fatalf("SampleUncommitted: %v", err)
+	}
+	if len(view.Windows) != 1 || view.Windows[0].Percentage != 92 {
+		t.Fatalf("观察视图不符: %+v", view)
+	}
+	if got := view.Windows[0].Notified; len(got) != 0 {
+		t.Fatalf("未提交视图不应显示已通知: %v", got)
+	}
+	state, err := svc.st.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Version != 0 || len(state.Notified) != 0 {
+		t.Fatalf("未提交采样不应写 state.json: %+v", state)
+	}
+
+	_, outs, err := svc.SampleOnce(context.Background())
+	if err != nil {
+		t.Fatalf("SampleOnce: %v", err)
+	}
+	if len(outs) != 1 || !outs[0].Notify {
+		t.Fatalf("提交式采样应评估新档: %+v", outs)
+	}
+	state, err = svc.st.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.Notified["TOKENS_LIMIT:3:5"]; !reflect.DeepEqual(got, []int{50, 60, 80, 90}) {
+		t.Fatalf("提交式采样应记账: %v", got)
+	}
+}
+
 // TestViewThresholdsNeverNull 手改 config.json 把 thresholds 写成 null 时，
 // 视图仍须序列化为 []：CLI/GUI JSON 出口不含 null 数组，机器消费侧友好。
 func TestViewThresholdsNeverNull(t *testing.T) {

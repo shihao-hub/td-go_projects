@@ -23,6 +23,7 @@ type Outcome struct {
 	Percentage int64         // 当前用量百分比
 	Notify     bool          // 是否新触发档位（需要发通知）
 	Highest    int           // 本次新触发的最高档位
+	Newly      []int         // 本次新触发并待确认的全部阈值档位（升序）
 	Message    string        // 通知正文（Notify=true 时非空）
 	ResetIn    time.Duration // 距下次刷新时长（HasReset=true 时有效，可能为负）
 	HasReset   bool          // 上游是否给出 nextResetTime
@@ -75,19 +76,19 @@ func Evaluate(cfg store.Config, prev store.State, limits []api.Limit, now time.T
 		}
 
 		notified := next.Notified[key]
-		newly, highest := 0, 0
+		newly, highest := make([]int, 0, len(cfg.Thresholds)), 0
 		for _, th := range cfg.Thresholds {
 			if int64(th) <= p && !containsInt(notified, th) {
-				newly++
+				newly = append(newly, th)
 				if th > highest {
 					highest = th
 				}
 			}
 		}
-		switch {
-		case newly > 0:
+		if len(newly) > 0 {
 			out.Notify = true
 			out.Highest = highest
+			out.Newly = newly
 			out.Message = fmt.Sprintf("%s已消耗 %d%%（阈值 %d%%）", out.Label, p, highest)
 			if out.HasReset && out.ResetIn > 0 {
 				out.Message += "，距下次刷新还有 " + FormatResetIn(out.ResetIn)
@@ -101,7 +102,7 @@ func Evaluate(cfg store.Config, prev store.State, limits []api.Limit, now time.T
 			}
 			sort.Ints(merged)
 			next.Notified[key] = merged
-		case p < int64(clearBelow):
+		} else if p < int64(clearBelow) {
 			out.Cleared = true
 			delete(next.Notified, key)
 		}

@@ -31,6 +31,7 @@ const (
 const (
 	EventStatus    = "status"
 	EventSampleErr = "sample-error"
+	EventNotifyErr = "notify-error"
 	EventMode      = "mode-changed"
 	EventConfig    = "config-changed"
 )
@@ -51,7 +52,11 @@ type toastNotifier struct {
 }
 
 func (t toastNotifier) Notify(title, msg string, silent bool) error {
-	opts := notifications.NotificationOptions{Title: title, Body: msg}
+	opts := notifications.NotificationOptions{
+		ID:    fmt.Sprintf("glmquotawatch-gui-%d", time.Now().UnixNano()),
+		Title: title,
+		Body:  msg,
+	}
 	if silent {
 		opts.Sound = &notifications.NotificationSound{Silent: true}
 	}
@@ -237,8 +242,9 @@ func (r *MonitorRuntime) startDaemonLocked() {
 	go func() {
 		defer close(done)
 		_ = svc.RunDaemon(ctx, notifier, log, service.DaemonHooks{
-			OnSample: r.onSample,
-			OnError:  r.onError,
+			OnSample:      r.onSample,
+			OnError:       r.onError,
+			OnNotifyError: r.onNotifyError,
 		})
 	}()
 }
@@ -282,6 +288,21 @@ func (r *MonitorRuntime) onError(err error) {
 	}
 }
 
+func (r *MonitorRuntime) onNotifyError(err error) {
+	r.mu.Lock()
+	e := ErrInfo{Code: "internal", Message: err.Error()}
+	var se *service.Error
+	if errors.As(err, &se) {
+		e = ErrInfo{Code: se.Code, Message: se.Message}
+	}
+	r.lastErr = &e
+	r.mu.Unlock()
+	r.app.Event.Emit(EventNotifyErr, e)
+	if r.ui != nil {
+		r.ui.SetTooltip(r.tooltipText())
+	}
+}
+
 // tooltipText 三态托盘文案：正常 / 已告警 / 采样失败（FR-6、评审 R-14）。
 func (r *MonitorRuntime) tooltipText() string {
 	r.mu.Lock()
@@ -295,7 +316,14 @@ func (r *MonitorRuntime) tooltipText() string {
 		return base
 	}
 	if r.lastErr != nil {
-		return "GLM 用量监控（采样失败，下轮自动重试）"
+		switch r.lastErr.Code {
+		case "notify_failed":
+			return "GLM 用量监控（告警发送失败，下轮重试）"
+		case "state_save_failed":
+			return "GLM 用量监控（告警状态保存失败）"
+		default:
+			return "GLM 用量监控（采样失败，下轮自动重试）"
+		}
 	}
 	if r.lastStatus == nil || len(r.lastStatus.Windows) == 0 {
 		return "GLM 用量监控"
@@ -320,7 +348,7 @@ func (r *MonitorRuntime) tooltipText() string {
 
 // ---- 前端绑定与托盘共用的操作 ----
 
-// SampleNow 手动立即采样（不发通知，同 CLI status 语义），成功后广播。
+// SampleNow 手动立即采样；只刷新观察视图，不发送通知或推进告警记账。
 func (r *MonitorRuntime) SampleNow() (service.StatusView, error) {
 	r.mu.Lock()
 	svc := r.svc
@@ -330,7 +358,7 @@ func (r *MonitorRuntime) SampleNow() (service.StatusView, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	view, _, err := svc.SampleOnce(ctx)
+	view, err := svc.SampleUncommitted(ctx)
 	if err != nil {
 		return view, err
 	}

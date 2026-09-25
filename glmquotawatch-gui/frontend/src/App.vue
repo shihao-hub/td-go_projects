@@ -15,6 +15,7 @@ const tabs = [
 useEvents({
   status: () => void refreshState(),
   "sample-error": () => void refreshState(),
+  "notify-error": () => void refreshState(),
   "mode-changed": () => void refreshState(),
   "config-changed": () => void refreshState(),
 });

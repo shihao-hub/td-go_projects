@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,10 +19,16 @@ import (
 
 // fakeNotifier 捕获 daemon 发出的通知（真实通知依赖 Wails 服务，不进单测）。
 type fakeNotifier struct {
-	got chan string
+	got      chan string
+	failures int
+	calls    int
 }
 
 func (f *fakeNotifier) Notify(title, msg string, silent bool) error {
+	f.calls++
+	if f.calls <= f.failures {
+		return errors.New("notification ID cannot be empty")
+	}
 	f.got <- title + "|" + msg
 	return nil
 }
@@ -182,4 +189,91 @@ func TestRunDaemonFixedInterval(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestRunDaemonRetriesFailedNotificationBeforeState(t *testing.T) {
+	pct := int64(60)
+	reset := time.Now().Add(4 * time.Hour).UnixMilli()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"code":200,"msg":"操作成功","success":true,"data":{"level":"max","limits":[`+
+			`{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":%d,"nextResetTime":%d}]}}`, pct, reset)
+	}))
+	defer srv.Close()
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveConfig(store.Config{
+		Token:      validToken,
+		Thresholds: []int{50, 60, 80, 90},
+		Hysteresis: 5,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(st,
+		WithFetcherFactory(func() api.Fetcher { return api.NewClient(srv.URL, validToken) }),
+		WithFixedInterval(10*time.Millisecond))
+
+	fn := &fakeNotifier{got: make(chan string, 2), failures: 1}
+	notifyErrs := make(chan string, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.RunDaemon(ctx, fn, quietLogger(), DaemonHooks{
+			OnNotifyError: func(err error) {
+				select {
+				case notifyErrs <- err.Error():
+				default:
+				}
+			},
+		})
+	}()
+
+	select {
+	case msg := <-notifyErrs:
+		if !strings.Contains(msg, "notify_failed") {
+			t.Fatalf("应报告 notify_failed: %q", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("2s 内未收到通知失败回调")
+	}
+
+	state, err := st.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Version != 0 || len(state.Notified) != 0 {
+		t.Fatalf("通知失败后不应记账: %+v", state)
+	}
+
+	select {
+	case msg := <-fn.got:
+		if !strings.Contains(msg, "阈值 60%") {
+			t.Fatalf("重试应保留未确认档位: %q", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("2s 内未完成通知重试")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		state, err = st.LoadState()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := state.Notified["TOKENS_LIMIT:3:5"]; len(got) == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("重试成功后应记账 [50,60]: %+v", state)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 }

@@ -33,6 +33,8 @@ wails3 dev           # 开发模式（前端热更新）
 
 设置页配置 token（≥ 20 字符）、interval（30s–24h）、thresholds（1-99）、hysteresis（0-30）、silent；历史页看 24h/7d 百分比曲线（含阈值虚线）。
 
+阈值 Toast 采用“发送成功后记账”：daemon 首次跨档发送 Windows Toast，`state.json` 只在通知调用成功后记录档位；发送失败时显示 `notify_failed`，未确认档位下一轮重试。GUI 的「立即采样」只刷新观察视图，不会代替 daemon 确认告警。CLI `status` 仍保持立即采样、推进状态、不发送通知的机器语义。
+
 ## CLI（恒 JSON）
 
 ```powershell
@@ -59,5 +61,6 @@ wails3 dev           # 开发模式（前端热更新）
 ## 已知限制
 
 - 通知以应用自身 AUMID 发出；若系统通知设置关闭则静默丢弃（排查路径同 Windows 通知设置）。
+- Wails `SendNotification` 返回成功只代表应用调用链成功，不保证 Windows 当前一定会展示横幅；专注助手等系统级抑制无法由该返回值判定。
 - dev 期（`go run` / 临时构建产物）拒绝注册开机自启（错误 `dev_executable`），请用 `wails3 build` 产物验证。
 - TIME_LIMIT（MCP 月度额度）告警、突发消耗检测、z.ai 国际版端点留二期。

@@ -56,6 +56,9 @@ func TestFirstSampleCrossJumpRecordsAll(t *testing.T) {
 	if outs[0].Message != want {
 		t.Fatalf("文案不符:\n got %s\nwant %s", outs[0].Message, want)
 	}
+	if got := outs[0].Newly; !reflect.DeepEqual(got, []int{50, 60, 80, 90}) {
+		t.Fatalf("应保留全部待确认新档: %v", got)
+	}
 	if got := notifiedOf(next, testKey); !reflect.DeepEqual(got, []int{50, 60, 80, 90}) {
 		t.Fatalf("应记账全量 F: %v", got)
 	}

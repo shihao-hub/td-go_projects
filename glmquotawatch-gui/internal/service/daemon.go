@@ -3,30 +3,33 @@ package service
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
 	"glmquotawatch-gui/internal/quota"
+	"glmquotawatch-gui/internal/store"
 )
 
-// sampleTimeout 单次采样预算；defInterval 默认采样间隔（配置缺失/非法时兜底）。
 const (
 	sampleTimeout = 30 * time.Second
 	defInterval   = 5 * time.Minute
 )
 
-// DaemonHooks daemon 运行期回调（两个字段均 nil 安全），GUI 壳用来驱动
-// 托盘 tooltip、前端事件与错误横幅；CLI 无 daemon 场景，传零值即可。
+// DaemonHooks 是 daemon 运行期回调；所有字段 nil 安全。
 type DaemonHooks struct {
-	OnSample func(StatusView) // 每轮采样成功后收到最新视图
-	OnError  func(error)      // 每轮采样失败时收到业务错误（含 service.Error）
+	OnSample      func(StatusView) // 每轮采样成功后收到视图
+	OnError       func(error)      // 每轮采样失败时收到业务错误
+	OnNotifyError func(error)      // Toast 或告警状态写入失败时收到业务错误
 }
 
-// RunDaemon 常驻监控：先采一轮 → 按 interval 周期采样。
-// 新触发档位时经 Notifier 发送告警（同轮多窗口合并为一条多行通知）；
-// 采样失败只记日志保持运行（并回调 hooks.OnError）；interval 配置变更在
-// 每轮开头热加载（fixedInterval 非零时跳过热加载直用固定值，演示模式用）；
-// ctx 取消（托盘退出）后优雅退出。通知发送失败绝不中断循环。
+// pendingAlert 保存发送失败后仍待确认的告警。
+type pendingAlert struct {
+	message string
+	newly   []int
+}
+
+// RunDaemon 常驻监控：采样、评估阈值、发送告警，并在 Toast 确认成功后记账。
 func (s *Service) RunDaemon(ctx context.Context, n Notifier, log *slog.Logger, hooks DaemonHooks) error {
 	interval := s.fixedInterval
 	silent := false
@@ -44,12 +47,26 @@ func (s *Service) RunDaemon(ctx context.Context, n Notifier, log *slog.Logger, h
 	}
 	log.Info("监控已启动", "interval", interval.String(), "data_dir", s.st.Dir())
 
+	pending := map[string]pendingAlert{}
+	pendingThresholds := []int(nil)
+
+	commitState := func(state store.State) error {
+		if err := s.st.SaveState(state); err != nil {
+			codedErr := errf("state_save_failed", "保存告警状态失败: %v", err)
+			log.Warn("告警状态保存失败", "err", err)
+			if hooks.OnNotifyError != nil {
+				hooks.OnNotifyError(codedErr)
+			}
+			return err
+		}
+		return nil
+	}
+
 	sample := func() {
 		sctx, cancel := context.WithTimeout(ctx, sampleTimeout)
-		view, outs, err := s.SampleOnce(sctx)
+		result, err := s.sample(sctx, false)
 		cancel()
 		if err != nil {
-			// ctx 已取消时不再刷屏
 			if ctx.Err() != nil {
 				return
 			}
@@ -60,24 +77,75 @@ func (s *Service) RunDaemon(ctx context.Context, n Notifier, log *slog.Logger, h
 			return
 		}
 		if hooks.OnSample != nil {
-			hooks.OnSample(view)
+			hooks.OnSample(result.view(false))
 		}
-		var msgs []string
-		for _, o := range outs {
-			if o.Notify {
-				msgs = append(msgs, o.Message)
+
+		if !equalIntSlice(pendingThresholds, result.next.Thresholds) {
+			pending = map[string]pendingAlert{}
+			pendingThresholds = append([]int(nil), result.next.Thresholds...)
+		}
+		currentKeys := map[string]bool{}
+		for _, outcome := range result.outcomes {
+			currentKeys[outcome.Key] = true
+			if outcome.Notify {
+				pending[outcome.Key] = pendingAlert{
+					message: outcome.Message,
+					newly:   append([]int(nil), outcome.Newly...),
+				}
 			}
-			if o.Cleared {
-				log.Info("窗口用量回落，重置告警记录", "key", o.Key)
+			if outcome.Cleared {
+				delete(pending, outcome.Key)
+				log.Info("窗口用量回落，重置告警记录", "key", outcome.Key)
 			}
 		}
-		if len(msgs) == 0 {
+		for key := range pending {
+			if !currentKeys[key] {
+				delete(pending, key)
+			}
+		}
+
+		if len(pending) == 0 {
+			if err := commitState(result.next); err != nil {
+				return
+			}
+			if hooks.OnSample != nil {
+				hooks.OnSample(result.view(true))
+			}
 			return
 		}
+
+		keys := make([]string, 0, len(pending))
+		for key := range pending {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		msgs := make([]string, 0, len(keys))
+		for _, key := range keys {
+			msgs = append(msgs, pending[key].message)
+		}
+
 		if nerr := n.Notify(quota.AlertTitle, strings.Join(msgs, "\n"), silent); nerr != nil {
 			log.Warn("通知发送失败", "err", nerr)
-		} else {
-			log.Info("通知已发送", "windows", len(msgs))
+			if hooks.OnNotifyError != nil {
+				hooks.OnNotifyError(errf("notify_failed", "发送用量告警失败: %v", nerr))
+			}
+			return
+		}
+		log.Info("通知已发送", "windows", len(msgs))
+
+		confirmed := result.next
+		if confirmed.Notified == nil {
+			confirmed.Notified = map[string][]int{}
+		}
+		for key, alert := range pending {
+			confirmed.Notified[key] = mergeInts(confirmed.Notified[key], alert.newly)
+		}
+		if err := commitState(confirmed); err != nil {
+			return
+		}
+		pending = map[string]pendingAlert{}
+		if hooks.OnSample != nil {
+			hooks.OnSample(result.view(true))
 		}
 	}
 
@@ -91,11 +159,9 @@ func (s *Service) RunDaemon(ctx context.Context, n Notifier, log *slog.Logger, h
 			return nil
 		case <-ticker.C:
 			if s.fixedInterval != 0 {
-				// 演示模式：间隔与静音固定，跳过热加载
 				sample()
 				continue
 			}
-			// 热加载 interval 与 silent：手改 config.json / GUI 设置下一轮生效
 			if cfg, cerr := s.st.LoadConfig(); cerr == nil {
 				silent = cfg.Silent
 				if d, perr := time.ParseDuration(cfg.Interval); perr == nil && d > 0 {
@@ -109,4 +175,34 @@ func (s *Service) RunDaemon(ctx context.Context, n Notifier, log *slog.Logger, h
 			sample()
 		}
 	}
+}
+
+func equalIntSlice(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeInts(left, right []int) []int {
+	out := append([]int(nil), left...)
+	for _, value := range right {
+		found := false
+		for _, existing := range out {
+			if existing == value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, value)
+		}
+	}
+	sort.Ints(out)
+	return out
 }

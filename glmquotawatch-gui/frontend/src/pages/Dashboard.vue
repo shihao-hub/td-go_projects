@@ -17,6 +17,18 @@ const demoRemain = computed(() => {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
 });
 
+const errorTitle = computed(() => {
+  const code = store.state?.last_error?.code;
+  if (code === "notify_failed") return `告警发送失败（${code}）`;
+  if (code === "state_save_failed") return `告警状态保存失败（${code}）`;
+  return `采样失败（${code ?? "unknown"}）`;
+});
+const errorHint = computed(() =>
+  store.state?.last_error?.code === "notify_failed"
+    ? `${store.state?.last_error?.message ?? ""}，未确认档位下轮重试`
+    : `${store.state?.last_error?.message ?? ""}，下轮自动重试`,
+);
+
 const exiting = ref(false);
 async function exitDemo() {
   if (exiting.value) return;
@@ -49,15 +61,15 @@ async function exitDemo() {
       </button>
     </div>
 
-    <!-- 采样失败横幅 -->
+    <!-- 采样与告警错误横幅 -->
     <div
       v-if="store.state?.last_error"
       class="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2.5"
     >
       <div class="text-xs font-medium text-red-400">
-        采样失败（{{ store.state.last_error.code }}）
+        {{ errorTitle }}
       </div>
-      <div class="mt-0.5 text-[11px] text-red-300/70">{{ store.state.last_error.message }}，下轮自动重试</div>
+      <div class="mt-0.5 text-[11px] text-red-300/70">{{ errorHint }}</div>
     </div>
 
     <!-- 未配置 token 引导（FR-6 / AC-10） -->

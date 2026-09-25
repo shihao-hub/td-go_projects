@@ -35,7 +35,7 @@ type BindingsService struct {
 // GetState 返回全量状态快照。
 func (b *BindingsService) GetState() GUIState { return b.rt.Snapshot() }
 
-// SampleNow 立即采样一次（不发通知）。
+// SampleNow 立即刷新观察状态；不发送通知，也不推进告警记账。
 func (b *BindingsService) SampleNow() (service.StatusView, error) { return b.rt.SampleNow() }
 
 // SetToken 配置 token。
