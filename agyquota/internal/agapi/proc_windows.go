@@ -70,12 +70,17 @@ func startAgyProcess(exePath string) (*agyProcess, error) {
 	}
 	defer windows.CloseHandle(nulH)
 
-	exe16, err := windows.UTF16PtrFromString(exePath)
+	runPath, err := ensureSilentAgyExe(exePath)
+	if err != nil {
+		runPath = exePath
+	}
+
+	exe16, err := windows.UTF16PtrFromString(runPath)
 	if err != nil {
 		closeHandles(stdoutR, stdoutW, stderrR, stderrW, job)
 		return nil, fmt.Errorf("编码 agy 路径失败: %w", err)
 	}
-	cmdline := `"` + exePath + `" -p /usage --output-format json`
+	cmdline := `"` + runPath + `" -p /usage --output-format json`
 	cmd16, err := windows.UTF16PtrFromString(cmdline)
 	if err != nil {
 		closeHandles(stdoutR, stdoutW, stderrR, stderrW, job)
