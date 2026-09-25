@@ -92,11 +92,13 @@ type App struct {
 func (a *App) buildWindow(hidden bool) {
 	a.win = a.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "GLM 用量监控",
-		Width:            480,
-		Height:           760,
+		Width:            920,
+		Height:           560,
+		MinWidth:         720,
+		MinHeight:        460,
 		Hidden:           hidden, // --hidden 静默启动（开机自启）
 		URL:              "/",
-		BackgroundColour: application.NewRGB(15, 18, 25),
+		BackgroundColour: application.NewRGB(246, 248, 247),
 	})
 	// 关窗到托盘：hook 先于内置销毁监听器执行，Cancel 阻止销毁
 	a.win.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {

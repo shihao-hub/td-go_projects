@@ -1,8 +1,23 @@
 @import "tailwindcss";
 
-/* 暗色主题基调：深空底 + 状态三色（绿/黄/红）与天蓝强调色 */
+/* 浅色产品化设计令牌：贴近 CC Switch 的浅色 + 绿主色观感 */
+@theme {
+  --color-bg: #f6f8f7;
+  --color-panel: #ffffff;
+  --color-well: #eef2f0;
+  --color-edge: #e4e9e6;
+  --color-brand: #10b981;
+  --color-brand-deep: #059669;
+  --color-warn: #d97706;
+  --color-crit: #dc2626;
+  --color-ink: #1f2937;
+  --color-dim: #6b7280;
+  --color-faint: #9ca3af;
+}
+
+/* 浅色亮堂基调 */
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -13,11 +28,15 @@ body,
 }
 
 body {
-  background-color: #0b0e14;
-  color: #e2e8f0;
+  background-color: #f6f8f7;
+  color: #1f2937;
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   user-select: none;
+}
+
+::selection {
+  background: rgba(16, 185, 129, 0.22);
 }
 
 /* 数字对齐：百分比与倒计时等宽展示 */
@@ -25,13 +44,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* 滚动条：暗色细条 */
+/* 滚动条：浅色细条 */
 ::-webkit-scrollbar {
   width: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a3444;
+  background: #d5ddd8;
   border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #c2ccc6;
 }
 ::-webkit-scrollbar-track {
   background: transparent;

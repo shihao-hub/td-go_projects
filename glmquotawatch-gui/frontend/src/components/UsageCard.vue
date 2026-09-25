@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// UsageCard：单个额度窗口卡片——大号百分比、按档分色进度条、阈值刻度、
-// 倒计时（本地每秒重算）、已通知档位标签。
+// UsageCard：单个额度窗口卡片——状态彩点、大号百分比、按档分色进度条、
+// 阈值刻度、倒计时（本地每秒重算）、已通知档位胶囊。浅色产品风。
 import { computed, onUnmounted, ref } from "vue";
 import type { WindowView, ConfigView } from "../api";
 
@@ -15,26 +15,26 @@ onUnmounted(() => window.clearInterval(timer));
 
 const pct = computed(() => props.win.percentage ?? 0);
 
-// 颜色分档：<50 绿 / 50-79 黄 / ≥80 红
+// 颜色分档：<50 绿 / 50-79 琥珀 / ≥80 红
 const tone = computed(() => {
-  if (pct.value >= 80) return "red";
-  if (pct.value >= 50) return "amber";
-  return "emerald";
+  if (pct.value >= 80) return "crit";
+  if (pct.value >= 50) return "warn";
+  return "brand";
 });
 const barClass = computed(
   () =>
     ({
-      emerald: "bg-emerald-500",
-      amber: "bg-amber-500",
-      red: "bg-red-500",
+      brand: "bg-brand",
+      warn: "bg-warn",
+      crit: "bg-crit",
     })[tone.value],
 );
 const numClass = computed(
   () =>
     ({
-      emerald: "text-emerald-400",
-      amber: "text-amber-400",
-      red: "text-red-400",
+      brand: "text-brand-deep",
+      warn: "text-warn",
+      crit: "text-crit",
     })[tone.value],
 );
 
@@ -53,20 +53,23 @@ const resetIn = computed(() => {
 </script>
 
 <template>
-  <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-    <div class="flex items-baseline justify-between">
-      <span class="text-xs text-zinc-400">{{ win.label }}</span>
-      <span v-if="resetIn" class="text-[11px] text-zinc-500 tnum">
+  <div class="rounded-xl border border-edge bg-panel p-4 shadow-sm">
+    <div class="flex items-center justify-between">
+      <span class="flex items-center gap-1.5 text-xs text-dim">
+        <span class="h-2 w-2 rounded-full" :class="barClass"></span>
+        {{ win.label }}
+      </span>
+      <span v-if="resetIn" class="text-[11px] text-faint tnum">
         距刷新 {{ resetIn }}
       </span>
     </div>
     <div class="mt-1 flex items-baseline gap-1">
-      <span class="text-3xl font-semibold tnum" :class="numClass">{{ pct }}</span>
-      <span class="text-sm text-zinc-500">%</span>
+      <span class="text-4xl font-bold tnum" :class="numClass">{{ pct }}</span>
+      <span class="text-sm text-faint">%</span>
     </div>
 
     <!-- 进度条 + 阈值刻度 -->
-    <div class="relative mt-3 h-2 rounded-full bg-zinc-800">
+    <div class="relative mt-3 h-2 rounded-full bg-well">
       <div
         class="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
         :class="barClass"
@@ -75,7 +78,7 @@ const resetIn = computed(() => {
       <div
         v-for="th in config?.thresholds ?? []"
         :key="th"
-        class="absolute -top-0.5 h-3 w-px bg-zinc-600"
+        class="absolute -top-0.5 h-3 w-0.5 rounded-full bg-faint/70"
         :style="{ left: th + '%' }"
       />
     </div>
@@ -83,12 +86,12 @@ const resetIn = computed(() => {
     <div class="mt-3 flex items-center gap-1.5">
       <span
         v-if="!win.notified?.length"
-        class="text-[11px] text-zinc-500"
+        class="text-[11px] text-faint"
       >无已告警档位</span>
       <span
         v-for="th in win.notified ?? []"
         :key="th"
-        class="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 tnum"
+        class="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn tnum"
       >
         {{ th }}% 已告警
       </span>
