@@ -16,6 +16,7 @@ var userStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 var assistantStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 var dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 var errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+var inputBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 func (m *model) View() string {
 	if !m.ready {
@@ -23,17 +24,54 @@ func (m *model) View() string {
 	}
 
 	errorBar := ""
-	if m.operationErr != nil {
-		errorBar = errorStyle.Render("error: " + errorSummary(m.operationErr))
+	uiErr := m.operationErr
+	prefix := "error: "
+	if uiErr == nil {
+		uiErr = m.inputErr
+		prefix = "input: "
 	}
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
+	if uiErr != nil {
+		errorBar = errorStyle.Render(prefix + errorSummary(uiErr))
+	}
+	sections := []string{
 		m.viewport.View(),
-		m.input.View(),
+		m.inputView(),
+	}
+	if staged := m.stagedView(); staged != "" {
+		sections = append(sections, staged)
+	}
+	sections = append(sections,
 		m.statusView(),
-		dimStyle.Render("Enter 发送 · Ctrl+J 换行 · Ctrl+T thinking · PgUp/PgDn 滚动 · Ctrl+C 退出"),
+		dimStyle.Render("Enter 发送 · Ctrl+J 换行 · Ctrl+V 文本 · Alt+V 图片 · /image <路径> 添加图片 · Ctrl+T thinking · Ctrl+E 折叠 · PgUp/PgDn 滚动 · Ctrl+C 退出"),
 		errorBar,
 	)
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// inputView renders the editor like a standalone prompt area: no per-line
+// prompt character, with a colored separator above and below the input.
+func (m *model) inputView() string {
+	frameWidth := max(1, m.width-2)
+	rule := inputBorderStyle.Render(strings.Repeat("─", frameWidth))
+	body := strings.TrimRight(m.input.View(), "\n")
+	frame := strings.Join([]string{rule, body, rule}, "\n")
+	return lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1).Render(frame)
+}
+
+func (m *model) stagedView() string {
+	if len(m.staged) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(m.staged))
+	for _, image := range m.staged {
+		parts = append(parts, fmt.Sprintf(
+			"image ready: %s · %s · %s",
+			image.FileName,
+			image.MediaType,
+			truncateRunes(image.Path, max(12, m.viewport.Width/2)),
+		))
+	}
+	return dimStyle.Render(strings.Join(parts, "\n"))
 }
 
 func (m *model) statusView() string {
@@ -43,13 +81,17 @@ func (m *model) statusView() string {
 	} else if len(m.messages) > 0 {
 		reasoningChars = m.messages[len(m.messages)-1].ReasoningChars
 	}
-	return fmt.Sprintf(
+	status := fmt.Sprintf(
 		"%s · %s · %s · thinking %d chars",
 		m.chat.Model(),
 		truncateRunes(m.sessionLabel(), max(8, m.viewport.Width/3)),
 		m.currentStatus(),
 		reasoningChars,
 	)
+	if len(m.staged) > 0 {
+		status += fmt.Sprintf(" · images %d", len(m.staged))
+	}
+	return status
 }
 
 func (m *model) transcript() string {
@@ -70,7 +112,12 @@ func (m *model) renderStoredMessage(index int, message uiMessage, width int) str
 	if message.Role == "user" {
 		out.WriteString(userStyle.Render("You"))
 		out.WriteString("\n")
-		out.WriteString(wrapPlainText(message.Content, width))
+		if m.contentCollapsed(message.Content) {
+			out.WriteString(previewText(wrapPlainText(message.Content, width)))
+		} else {
+			out.WriteString(wrapPlainText(message.Content, width))
+		}
+		out.WriteString(renderImageMetadata(message.Images, width))
 		return out.String()
 	}
 
@@ -84,7 +131,12 @@ func (m *model) renderStoredMessage(index int, message uiMessage, width int) str
 		out.WriteString("\n")
 	}
 	if message.Content != "" {
-		out.WriteString(m.renderAssistantMarkdown(fmt.Sprintf("message-%04d", index), message.Content, width))
+		rendered := m.renderAssistantMarkdown(fmt.Sprintf("message-%04d", index), message.Content, width)
+		if m.contentCollapsed(message.Content) {
+			out.WriteString(previewText(rendered))
+		} else {
+			out.WriteString(rendered)
+		}
 	}
 	if message.Failed && message.Content == "" {
 		out.WriteString(dimStyle.Render("没有收到完整回答"))
@@ -99,6 +151,10 @@ func (m *model) renderActiveTurn(width int) string {
 		out.WriteString(" " + errorStyle.Render("(failed, not saved)"))
 	}
 	out.WriteString("\n")
+	if len(m.active.Images) > 0 {
+		out.WriteString(renderImageMetadata(m.active.Images, width))
+		out.WriteString("\n")
+	}
 	if m.active.Reasoning.Len() > 0 {
 		out.WriteString(m.renderReasoning(
 			m.active.Reasoning.String(),
@@ -110,7 +166,7 @@ func (m *model) renderActiveTurn(width int) string {
 		out.WriteString("\n")
 	}
 	if m.active.Answer.Len() > 0 {
-		out.WriteString(m.renderAssistantMarkdown(m.active.ID, m.active.Answer.String(), width))
+		out.WriteString(wrapPlainText(m.active.Answer.String(), width))
 	} else {
 		out.WriteString(dimStyle.Render("waiting for response..."))
 	}
@@ -145,6 +201,37 @@ func wrapPlainText(value string, width int) string {
 		return ""
 	}
 	return lipgloss.NewStyle().Width(max(1, width)).Render(value)
+}
+
+func contentShouldFold(value string) bool {
+	if value == "" {
+		return false
+	}
+	return len([]rune(value)) >= contentFoldRunes || strings.Count(value, "\n")+1 >= contentFoldLines
+}
+
+func (m *model) contentCollapsed(value string) bool {
+	return contentShouldFold(value) && !m.contentOpen
+}
+
+func previewText(value string) string {
+	lines := strings.Split(value, "\n")
+	start := 0
+	for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+	end := min(len(lines), start+contentPreviewLines)
+	for end > start && strings.TrimSpace(lines[end-1]) == "" {
+		end--
+	}
+	preview := strings.Join(lines[start:end], "\n")
+	displayLines := max(1, len(lines)-start)
+	chars := len([]rune(value))
+	return fmt.Sprintf(
+		"%s\n%s",
+		preview,
+		dimStyle.Render(fmt.Sprintf("… %d chars · %d lines · Ctrl+E 展开", chars, displayLines)),
+	)
 }
 
 func errorSummary(err error) string {

@@ -14,8 +14,53 @@ import (
 
 // Message 是发送给聊天接口的一条消息。
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
+}
+
+// Image 是一条请求消息里的本地图片负载。
+type Image struct {
+	Base64Data string
+	MediaType  string
+}
+
+type textContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type imageURL struct {
+	URL string `json:"url"`
+}
+
+type contentPart struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	ImageURL *imageURL `json:"image_url,omitempty"`
+}
+
+// TextMessage 保留纯文本消息的 OpenAI-compatible string content。
+func TextMessage(role, text string) Message {
+	content, _ := json.Marshal(text)
+	return Message{Role: role, Content: content}
+}
+
+// ImageMessage 输出 OpenAI-compatible multimodal content 数组。
+func ImageMessage(role, text string, images []Image) Message {
+	parts := make([]contentPart, 0, len(images)+1)
+	if text != "" {
+		parts = append(parts, contentPart{Type: "text", Text: text})
+	}
+	for _, image := range images {
+		parts = append(parts, contentPart{
+			Type: "image_url",
+			ImageURL: &imageURL{
+				URL: "data:" + image.MediaType + ";base64," + image.Base64Data,
+			},
+		})
+	}
+	content, _ := json.Marshal(parts)
+	return Message{Role: role, Content: content}
 }
 
 // DeltaKind 区分思考流和正式回答流。

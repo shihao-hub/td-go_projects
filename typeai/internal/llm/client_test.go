@@ -33,7 +33,7 @@ func TestChatStreamHappyPath(t *testing.T) {
 
 	client := &Client{BaseURL: server.URL, APIKey: "test-key", Model: "test-model", HTTP: server.Client()}
 	var deltas []Delta
-	full, err := client.ChatStream(t.Context(), []Message{{Role: "user", Content: "hi"}}, func(delta Delta) {
+	full, err := client.ChatStream(t.Context(), []Message{TextMessage("user", "hi")}, func(delta Delta) {
 		deltas = append(deltas, delta)
 	})
 	if err != nil {
@@ -51,7 +51,7 @@ func TestChatStreamHappyPath(t *testing.T) {
 	if request.Model != "test-model" {
 		t.Errorf("request.Model = %q", request.Model)
 	}
-	if len(request.Messages) != 1 || request.Messages[0].Content != "hi" {
+	if len(request.Messages) != 1 || string(request.Messages[0].Content) != `"hi"` {
 		t.Errorf("request.Messages = %#v", request.Messages)
 	}
 }
@@ -67,7 +67,7 @@ func TestChatStreamReasoningDelta(t *testing.T) {
 
 	client := &Client{BaseURL: server.URL, APIKey: "k", Model: "m", HTTP: server.Client()}
 	var deltas []Delta
-	full, err := client.ChatStream(t.Context(), []Message{{Role: "user", Content: "q"}}, func(delta Delta) {
+	full, err := client.ChatStream(t.Context(), []Message{TextMessage("user", "q")}, func(delta Delta) {
 		deltas = append(deltas, delta)
 	})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestChatStreamHTTPError(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{BaseURL: server.URL, APIKey: "bad", Model: "m", HTTP: server.Client()}
-	_, err := client.ChatStream(t.Context(), []Message{{Role: "user", Content: "hi"}}, nil)
+	_, err := client.ChatStream(t.Context(), []Message{TextMessage("user", "hi")}, nil)
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) {
 		t.Fatalf("ChatStream() error = %#v, want HTTPError", err)

@@ -6,7 +6,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const markdownRenderInterval = 80 * time.Millisecond
+const (
+	markdownRenderInterval  = 80 * time.Millisecond
+	viewportRefreshInterval = 100 * time.Millisecond
+)
 
 type markdownRenderMsg struct {
 	Generation uint64
@@ -17,8 +20,35 @@ type markdownRenderMsg struct {
 
 type renderTickMsg struct{}
 
+type viewportTickMsg struct{}
+
+type submitTickMsg struct {
+	Generation uint64
+}
+
 func (m *model) markRenderDirty() {
 	m.renderDirty = true
+}
+
+func (m *model) markViewportDirty() {
+	m.viewportDirty = true
+}
+
+func (m *model) queueViewportRefresh(now time.Time) tea.Cmd {
+	if !m.viewportDirty || m.viewportScheduled {
+		return nil
+	}
+	if m.nextViewportAt.IsZero() || !now.Before(m.nextViewportAt) {
+		m.viewportDirty = false
+		m.nextViewportAt = now.Add(viewportRefreshInterval)
+		m.refreshViewport()
+		return nil
+	}
+	m.viewportScheduled = true
+	delay := max(time.Millisecond, time.Until(m.nextViewportAt))
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return viewportTickMsg{}
+	})
 }
 
 func (m *model) queueMarkdownRender(now time.Time, force bool) tea.Cmd {

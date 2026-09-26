@@ -12,6 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const tuiFPS = 12
+
 // Run starts the single-process interactive TUI. The chat service owns all
 // business behavior; this package only renders state and forwards input.
 func Run(chat *service.Chat, stdout io.Writer) error {
@@ -24,6 +26,7 @@ func Run(chat *service.Chat, stdout io.Writer) error {
 	program := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
+		tea.WithFPS(tuiFPS),
 		tea.WithOutput(stdout),
 	)
 	model.sender = program

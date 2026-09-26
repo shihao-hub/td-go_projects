@@ -17,6 +17,11 @@ func coded(code, message string) error {
 	return &OperationError{Code: code, Message: message}
 }
 
+// CodedError 供适配层构造稳定业务错误；业务语义仍由 service 定义。
+func CodedError(code, message string) error {
+	return coded(code, message)
+}
+
 func asCoded(err error) error {
 	var op *OperationError
 	if errors.As(err, &op) {

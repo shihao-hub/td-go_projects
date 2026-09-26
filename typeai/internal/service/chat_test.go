@@ -111,10 +111,10 @@ func TestSendPersistsOnlySuccessfulTurns(t *testing.T) {
 	if len(histories) != 3 {
 		t.Fatalf("request count = %d, want 3", len(histories))
 	}
-	if len(histories[0]) != 1 || histories[0][0].Content != "failed" {
+	if len(histories[0]) != 1 || string(histories[0][0].Content) != `"failed"` {
 		t.Errorf("first request messages = %#v", histories[0])
 	}
-	if len(histories[2]) != 3 || histories[2][2].Content != "second" {
+	if len(histories[2]) != 3 || string(histories[2][2].Content) != `"second"` {
 		t.Errorf("third request messages = %#v, want prior successful turns plus current input", histories[2])
 	}
 }

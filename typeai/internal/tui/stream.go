@@ -25,8 +25,12 @@ type streamResultMsg struct {
 type elapsedTickMsg struct{}
 
 func startStream(commandSender sender, chat *service.Chat, ctx context.Context, input string) tea.Cmd {
+	return startStreamWithImages(commandSender, chat, ctx, input, nil)
+}
+
+func startStreamWithImages(commandSender sender, chat *service.Chat, ctx context.Context, input string, images []service.Image) tea.Cmd {
 	return func() tea.Msg {
-		err := chat.Send(ctx, input, func(delta llm.Delta) {
+		err := chat.SendWithImages(ctx, input, images, func(delta llm.Delta) {
 			commandSender.Send(streamDeltaMsg{Kind: delta.Kind, Text: delta.Text})
 		})
 		return streamResultMsg{Err: err}

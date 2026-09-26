@@ -13,13 +13,22 @@ import (
 )
 
 // SchemaVersion 是 session JSON 的当前结构版本。
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Message 是落盘的一条对话消息。
 type Message struct {
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
+	Images    []Image   `json:"images,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// Image 保存发送给模型的本地图元数据；base64 不落盘。
+type Image struct {
+	Path      string `json:"path"`
+	FileName  string `json:"file_name"`
+	MediaType string `json:"media_type"`
+	Size      int64  `json:"size"`
 }
 
 // Session 是单个 typeai 进程对应的完整会话。
