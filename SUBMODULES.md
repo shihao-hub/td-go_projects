@@ -11,15 +11,10 @@
 
 ## 现状
 
-monorepo：所有子项目平铺在根目录，整个目录作为单一 Git 仓库管理，新增项目直接建子目录、不再单独 `git init`。
-
-## 未了心愿
-
-仍然想迁移到 submodules。等以下条件出现时再动手：
-
-- 需要把某个子项目**单独分享 / 单独授权**给他人；
-- 子项目需要**独立发版 / 独立 CI**；
-- 出现多个工作区都要引用同一子项目的情况。
+混合模式（Hybrid）：
+- 大多数通用 CLI/练习工具仍作为 monorepo 平铺在根目录下统一维护。
+- **已迁移为 Submodule 的项目**：
+  - `glmquotawatch-gui`（`git@github.com:shihao-hub/td-go_projects-glmquotawatch-gui.git`）：独立托盘桌面 GUI，具备独立 CI、发版及跨设备共享需求，已于 2026-09-26 依照本方案成功转为二级 Submodule 挂载。
 
 ## 参考实现：creativault260820（`C:\WorkingProjects\creativault260820`）
 
@@ -50,11 +45,11 @@ git clone --recurse-submodules <主仓库地址>
 
 ## 未来迁移步骤草案（从本 monorepo 拆到 submodules）
 
-1. **建远端仓库**：为每个要拆出去的子项目在托管平台（如 git.tec-do.com）建独立仓库。
+1. **建远端仓库**：为每个要拆出去的子项目在托管平台（如 GitHub）建独立仓库。
 2. **拆历史**（二选一）：
    - 保留历史：主仓库内 `git subtree split -P <子目录> -b <分支名>`，把分支推到新远端；
    - 不要历史：子目录内重新 `git init`、提交、推送（本项目当初 monorepo 化时已清过一次历史，多数情况下这条路更省事）。
 3. **主仓库摘除子目录**：`git rm -r <子目录>` 并提交。
-4. **挂载 submodule**：`git submodule add <远端URL> <子目录>`，随后在 `.gitmodules` 里为该条目补 `ignore = all`。
-5. **收尾**：README 写明 `git clone --recurse-submodules`；AGENTS.md 的仓库结构说明改回 submodules 口径；把本文件标记为"已完成迁移"。
+4. **挂载 submodule**：`git submodule add <远端URL> <子目录>`，随后在 `.gitmodules` 里为该条目补 `ignore = all` 与 `branch = main`。
+5. **收尾**：README 写明 `git clone --recurse-submodules`；AGENTS.md 的仓库结构说明改回 submodules 口径；把本文档标记迁移记录。
 6. **日常命令速查**：`git submodule update --init --recursive`（拉取）、`git submodule update --remote`（跟进子仓库新提交）。
