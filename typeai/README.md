@@ -1,13 +1,13 @@
 # typeai
 
-`typeai` 是一个单进程、无守护的终端 AI 对话工具。无参数启动后进入连续会话，AI 回答按增量直接输出到 stdout，第一阶段不做颜色、Markdown 渲染或 TUI 美化。
+`typeai` 是一个单进程、无守护的终端 AI 对话工具。在 TTY 下无参数启动进入 Bubble Tea TUI；AI 回复按增量接收并流式刷新基础 Markdown 视图。
 
-GLM 等思考型模型返回的 `reasoning_content` 会以打字机方式直接透传到终端；进入正式回答前换行。思考内容只用于实时反馈，不写入 session 历史，session 的 assistant 消息仍只保存正式回答。
+GLM 等思考型模型返回的 `reasoning_content` 默认折叠，只显示字符统计；可按键展开查看最近 64 KiB。思考内容只用于当前进程界面，不写入 session 历史，session 的 assistant 消息仍只保存正式回答。
 
 ## 命令
 
 ```powershell
-typeai                        # 进入连续对话
+typeai                        # 在 TTY 下进入 TUI 连续对话
 typeai config get [--json]    # 查看有效配置
 typeai config set --base-url U --api-key K --model M [--json]
 typeai schema                 # 导出 CLI 契约目录
@@ -22,7 +22,21 @@ typeai help
 /quit
 ```
 
-空行会继续等待输入；Ctrl+C 直接结束进程。已经成功落盘的上一轮回答不受影响。
+交互按键：
+
+```text
+Enter       发送输入
+Ctrl+J      输入换行
+Ctrl+T      展开或折叠当前 thinking
+PgUp/PgDn   翻页滚动
+Up/Down     逐行滚动
+Ctrl+C      请求进行中先取消；空闲时退出
+/exit/quit  退出
+```
+
+Markdown 基础渲染覆盖标题、段落、粗体/斜体、行内代码、fenced code block、有序/无序列表、引用、分隔线和链接。流式增量先以原始文本兜底，渲染节流后刷新为终端富文本；Glamour 渲染失败时继续显示原始文本，不中断请求。用户输入保持纯文本，不作为 Markdown 解析。
+
+非 TTY 下执行无参数 `typeai` 会返回清晰错误；管理命令和轻量入口不受影响。设置 `NO_COLOR` 后不使用彩色输出。
 
 ## 配置
 
@@ -90,6 +104,6 @@ go build ./...
 ## 第二期 backlog
 
 - `export`：将 session JSON 导出为人类阅读的 HTML。
-- 界面美化：颜色、Markdown 渲染、状态提示。
+- 更多界面优化：主题配置、表格/图片等扩展 Markdown、更细的滚动和状态提示。
 - 会话列表、搜索、resume。
 - 上下文裁剪与历史压缩策略。

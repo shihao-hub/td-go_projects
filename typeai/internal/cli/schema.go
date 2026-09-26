@@ -17,9 +17,9 @@ func commandContracts() []commandContract {
 	return []commandContract{
 		{
 			Name:        "typeai",
-			Description: "进入连续对话；每行输入一条用户消息，AI 回答流式输出",
-			Input:       "终端行输入；/exit 或 /quit 退出",
-			Output:      "stdout 为流式回答文本；失败说明写 stderr",
+			Description: "TTY 下进入 TUI 连续对话；AI 回答流式渲染 Markdown，thinking 默认折叠",
+			Input:       "Enter 发送；Ctrl+J 换行；Ctrl+T thinking；PgUp/PgDn 滚动；/exit、/quit 或 Ctrl+C 退出",
+			Output:      "全屏 TUI；非 TTY 返回错误；失败说明显示在 TUI 错误条",
 		},
 		{
 			Name:        "typeai config get",
