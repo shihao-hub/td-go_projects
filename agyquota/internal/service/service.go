@@ -1,5 +1,5 @@
-// Package service 是 agyquota 的公共业务核心：配额获取、
-// 解析归一化与业务错误都归属于这里；CLI 与 MCP 只是两个入口适配器。
+// Package service 是 agyquota 的公共业务核心：配额获取、解析归一化与
+// 业务错误都归属于这里；只被 daemon 装配路径引用，CLI/MCP 不直接依赖。
 // 本服务无状态、零落盘。
 package service
 
@@ -10,84 +10,29 @@ import (
 	"time"
 
 	"agyquota/internal/agapi"
+	"agyquota/internal/api"
+
+	"golang.org/x/sync/singleflight"
 )
 
-// 数据源类型
-const (
-	SourceAgy = "agy"
-	SourceZed = "zed"
-)
-
-// 稳定业务错误码（公开契约）。
-const (
-	ErrSourceRequired = "source_required"
-	ErrAgyNotFound    = "agy_not_found"
-	ErrAgyExecute     = "agy_execute_failed"
-	ErrZedExecute     = "zed_execute_failed"
-	ErrParse          = "response_parse_failed"
-)
-
-// Error 公共业务错误：稳定 code + 可公开 message + 可选建议。
-// 不携带入口语义（CLI 退出码 / MCP isError），由入口自行映射。
-type Error struct {
-	Code        string   `json:"code"`
-	Message     string   `json:"message"`
-	Suggestions []string `json:"suggestions,omitempty"`
-}
-
-func (e *Error) Error() string { return e.Message }
-
-func errf(code, format string, a ...any) *Error {
-	return &Error{Code: code, Message: fmt.Sprintf(format, a...)}
-}
-
-func withSuggestion(e *Error, s string) *Error {
-	e.Suggestions = append(e.Suggestions, s)
-	return e
-}
-
-// Window 单个配额窗口（如 5 小时窗口 / 每周窗口）。
-type Window struct {
-	Window            string   `json:"window"`                      // 归一化标识：five_hour / weekly / daily / "quota"
-	Label             string   `json:"label"`                       // 人读短标签：5h / weekly / …
-	Percent           float64  `json:"percent"`                     // 剩余百分比 0..100（保留 1 位小数）
-	RemainingFraction *float64 `json:"remainingFraction,omitempty"` // 接口原始小数
-	ResetAt           string   `json:"resetAt,omitempty"`           // 重置时间（尽量 RFC3339）
-	ResetsIn          string   `json:"resetsIn,omitempty"`          // 人读剩余："6天21小时后刷新"
-}
-
-// ModelQuota 单模型的配额窗口集合。
-type ModelQuota struct {
-	Name    string   `json:"name"`
-	Windows []Window `json:"windows"`
-}
-
-// Bucket 模型桶。
-type Bucket struct {
-	Name   string       `json:"name"`
-	Models []ModelQuota `json:"models"`
-}
-
-// Snapshot 一次配额查询结果。
-type Snapshot struct {
-	Source         string    `json:"source"`
-	Account        string    `json:"account,omitempty"`        // 账号邮箱
-	TokenExpiresAt string    `json:"tokenExpiresAt,omitempty"` // 凭据到期时间（仅 Zed 模式）
-	TokenExpiresIn string    `json:"tokenExpiresIn,omitempty"` // 剩余有效期（仅 Zed 模式）
-	FetchedAt      time.Time `json:"fetchedAt"`
-	Buckets        []Bucket  `json:"buckets"`
-}
-
-// Options 查询选项。
+// Options 查询选项（领域入参）。
 type Options struct {
 	Source    string // "agy" 或 "zed"
 	TokenFile string // 适用于 zed 模式的自定义凭据路径
 }
 
+// Fetcher 是取数接缝：默认走 agapi 真实数据源，
+// 单元/集成测试可注入假数据源，不影响生产路径。
+type Fetcher func(ctx context.Context, opt Options) (*agapi.UsageResult, string, error)
+
 // Service 公共业务服务：无状态、可重入。
 type Service struct {
-	// Progress 可选进度回调（阶段与重试提示）；nil 时静默（MCP 入口即保持静默）。
-	Progress func(format string, args ...any)
+	// Fetcher 可选；nil 时使用默认数据源（agy / zed）。
+	Fetcher Fetcher
+
+	// group 只包住 fetch：同源并发取数仅 leader 真正执行，
+	// joined 请求共享结果；leader 的 progress 回调会触发，joined 无进度。
+	group singleflight.Group
 }
 
 // New 创建服务。
@@ -95,32 +40,21 @@ func New() *Service {
 	return &Service{}
 }
 
-func (s *Service) progress(format string, a ...any) {
-	if s.Progress != nil {
-		s.Progress(format, a...)
-	}
-}
-
 // GetQuota 查询配额：根据 opt.Source 分发至 agy 或 zed 并归一化。
-func (s *Service) GetQuota(ctx context.Context, opt Options) (*Snapshot, error) {
-	if opt.Source != SourceAgy && opt.Source != SourceZed {
-		return nil, withSuggestion(
-			errf(ErrSourceRequired, "未指定查询数据源"),
-			"请通过参数显式指定查询目标：--agy（终端/桌面端）或 --zed（Zed 账号）",
-		)
+func (s *Service) GetQuota(ctx context.Context, opt Options, progress func(string)) (*api.Snapshot, error) {
+	if opt.Source != api.SourceAgy && opt.Source != api.SourceZed {
+		return nil, sourceRequired()
 	}
 
-	res, sourceLabel, err := s.fetchBySource(ctx, opt)
+	res, sourceLabel, err := s.fetch(ctx, opt, progress)
 	if err != nil {
 		return nil, err
 	}
 
 	snap, err := parseSnapshot(res.Raw, time.Now(), sourceLabel)
 	if err != nil {
-		return nil, withSuggestion(
-			errf(ErrParse, "解析配额响应失败: %v", err),
-			"可追加 --raw 参数查看底层接口的原始响应数据",
-		)
+		return nil, api.Errorf(api.ErrParse, "解析配额响应失败: %v", err).
+			WithSuggestion("可追加 --raw 参数查看底层接口的原始响应数据")
 	}
 
 	snap.Account = res.Account
@@ -143,50 +77,90 @@ func (s *Service) GetQuota(ctx context.Context, opt Options) (*Snapshot, error) 
 }
 
 // FetchRaw 返回配额接口原始响应（--raw 调试用）。
-func (s *Service) FetchRaw(ctx context.Context, opt Options) (json.RawMessage, error) {
-	if opt.Source != SourceAgy && opt.Source != SourceZed {
-		return nil, withSuggestion(
-			errf(ErrSourceRequired, "未指定查询数据源"),
-			"请通过参数显式指定查询目标：--agy（终端/桌面端）或 --zed（Zed 账号）",
-		)
+func (s *Service) FetchRaw(ctx context.Context, opt Options, progress func(string)) (json.RawMessage, error) {
+	if opt.Source != api.SourceAgy && opt.Source != api.SourceZed {
+		return nil, sourceRequired()
 	}
 
-	res, _, err := s.fetchBySource(ctx, opt)
+	res, _, err := s.fetch(ctx, opt, progress)
 	if err != nil {
 		return nil, err
 	}
 	return res.Raw, nil
 }
 
-func (s *Service) fetchBySource(ctx context.Context, opt Options) (*agapi.UsageResult, string, error) {
+// fetch 经 singleflight 合并同源并发取数，key = source + "|" + tokenFile。
+// 注意：joined 请求共享 leader 的 ctx，leader 取消会连带失败同组请求
+// （本地单用户场景可接受，见 requirements FR-1 例外条款）。
+func (s *Service) fetch(ctx context.Context, opt Options, progress func(string)) (*agapi.UsageResult, string, error) {
+	key := opt.Source + "|" + opt.TokenFile
+	v, err, _ := s.group.Do(key, func() (any, error) {
+		res, label, err := s.fetchWithDefault(ctx, opt, progress)
+		if err != nil {
+			return nil, err
+		}
+		return fetchResult{res: res, label: label}, nil
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	r := v.(fetchResult)
+	return r.res, r.label, nil
+}
+
+type fetchResult struct {
+	res   *agapi.UsageResult
+	label string
+}
+
+// fetchWithDefault 优先使用注入的 Fetcher（测试接缝），否则走真实数据源。
+func (s *Service) fetchWithDefault(ctx context.Context, opt Options, progress func(string)) (*agapi.UsageResult, string, error) {
+	if s.Fetcher != nil {
+		return s.Fetcher(ctx, opt)
+	}
+	return s.fetchBySource(ctx, opt, progress)
+}
+
+func sourceRequired() *api.Error {
+	return api.Errorf(api.ErrSourceRequired, "未指定查询数据源").
+		WithSuggestion("请通过参数显式指定查询目标：--agy（终端/桌面端）或 --zed（Zed 账号）")
+}
+
+func (s *Service) fetchBySource(ctx context.Context, opt Options, progress func(string)) (*agapi.UsageResult, string, error) {
+	logf := func(format string, args ...any) {
+		if progress != nil {
+			progress(fmt.Sprintf(format, args...))
+		}
+	}
+
 	switch opt.Source {
-	case SourceZed:
-		s.progress("正在通过 Zed (antigravity-acp) 凭据查询模型配额 ...")
+	case api.SourceZed:
+		if progress != nil {
+			progress("正在通过 Zed (antigravity-acp) 凭据查询模型配额 ...")
+		}
 		zc := agapi.NewZedClient(opt.TokenFile)
-		zc.Logf = s.progress
+		zc.Logf = logf
 		res, err := zc.FetchUsageWithMeta(ctx)
 		if err != nil {
-			return nil, "", withSuggestion(
-				errf(ErrZedExecute, "获取 Zed 对应账号配额失败: %v", err),
-				"请确认 ~/.gemini/antigravity-acp/acp_token.json 是否存在且网络正常",
-			)
+			return nil, "", api.Errorf(api.ErrZedExecute, "获取 Zed 对应账号配额失败: %v", err).
+				WithSuggestion("请确认 ~/.gemini/antigravity-acp/acp_token.json 是否存在且网络正常")
 		}
 		return res, "Zed (antigravity-acp)", nil
 
-	case SourceAgy:
-		s.progress("正在通过 Antigravity CLI (agy) 查询模型配额 ...")
+	case api.SourceAgy:
+		if progress != nil {
+			progress("正在通过 Antigravity CLI (agy) 查询模型配额 ...")
+		}
 		ac := agapi.NewClient()
-		ac.Logf = s.progress
+		ac.Logf = logf
 		res, err := ac.FetchUsageWithMeta(ctx)
 		if err != nil {
-			return nil, "", withSuggestion(
-				errf(ErrAgyExecute, "获取 agy 配额失败: %v", err),
-				"请确认系统已安装 Antigravity CLI (agy) 并且能正常执行 `agy -p /usage`",
-			)
+			return nil, "", api.Errorf(api.ErrAgyExecute, "获取 agy 配额失败: %v", err).
+				WithSuggestion("请确认 agy 命令可执行且网络/代理正常；若是配额接口瞬态失败，请稍后重试")
 		}
 		return res, "Antigravity CLI (agy)", nil
 
 	default:
-		return nil, "", errf(ErrSourceRequired, "未知的数据源: %s", opt.Source)
+		return nil, "", api.Errorf(api.ErrSourceRequired, "未知的数据源: %s", opt.Source)
 	}
 }

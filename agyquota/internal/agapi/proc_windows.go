@@ -3,6 +3,7 @@
 package agapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,9 +32,14 @@ func closeHandles(handles ...windows.Handle) {
 	}
 }
 
-// startAgyProcess 以原生控制台继承 + 管道捕获 + 作业对象启动 agy：
+// startAgyProcess 启动 agy 进程：
+// 接收已完成静默校验的 runPath，强制附带 CREATE_NO_WINDOW 并加入作业对象，杜绝子进程链创建控制台窗口；
 // 挂起态创建、入作业、恢复线程，任一步失败即杀进程并逆序释放资源。
-func startAgyProcess(exePath string) (*agyProcess, error) {
+func startAgyProcess(runPath string) (*agyProcess, error) {
+	if runPath == "" {
+		return nil, errors.New("agy 可执行文件路径为空")
+	}
+
 	sa := &windows.SecurityAttributes{InheritHandle: 1}
 	sa.Length = uint32(unsafe.Sizeof(*sa))
 
@@ -70,10 +76,10 @@ func startAgyProcess(exePath string) (*agyProcess, error) {
 	}
 	defer windows.CloseHandle(nulH)
 
-	runPath, err := ensureSilentAgyExe(exePath)
-	if err != nil {
-		runPath = exePath
-	}
+	// 强制附加 CREATE_NO_WINDOW：
+	// 即便 agy_silent.exe 为 GUI 子系统，若其后续子进程链有组件尝试 AllocConsole 或创建 CUI 子进程，
+	// 也严格禁止创建可见窗口或抢占终端焦点。
+	createFlags := uint32(windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW)
 
 	exe16, err := windows.UTF16PtrFromString(runPath)
 	if err != nil {
@@ -94,15 +100,15 @@ func startAgyProcess(exePath string) (*agyProcess, error) {
 	si.StdOutput = stdoutW
 	si.StdErr = stderrW
 
-	// 4. 挂起态创建：不传 DETACHED_PROCESS、不传 CREATE_NEW_CONSOLE，直接继承父会话
+	// 4. 挂起态创建：不传 DETACHED_PROCESS、不传 CREATE_NEW_CONSOLE
 	var pi windows.ProcessInformation
 	if err := windows.CreateProcess(exe16, cmd16, nil, nil, true,
-		windows.CREATE_SUSPENDED, nil, nil, si, &pi); err != nil {
+		createFlags, nil, nil, si, &pi); err != nil {
 		closeHandles(stdoutR, stdoutW, stderrR, stderrW, job)
 		return nil, fmt.Errorf("启动 agy 进程失败: %w", err)
 	}
 
-	// 5. 入作业 → 恢复执行
+	// 5. 入作业 -> 恢复执行
 	if err := windows.AssignProcessToJobObject(job, pi.Process); err != nil {
 		_ = windows.TerminateProcess(pi.Process, 1)
 		windows.CloseHandle(pi.Thread)

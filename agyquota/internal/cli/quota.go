@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"agyquota/internal/service"
+	"agyquota/internal/api"
+	"agyquota/internal/client"
 
 	"github.com/spf13/cobra"
 )
@@ -25,7 +26,7 @@ func quotaCmd() *cobra.Command {
 	}
 }
 
-// quotaRun 是 quota 的执行体：调用公共 service 并渲染。
+// quotaRun 是 quota 的执行体：解析参数 → daemon HTTP 调用 → 渲染。
 func quotaRun(cmd *cobra.Command) error {
 	raw, _ := cmd.Flags().GetBool("raw")
 	tokenFile, _ := cmd.Flags().GetString("token-file")
@@ -33,8 +34,8 @@ func quotaRun(cmd *cobra.Command) error {
 	useZed, _ := cmd.Flags().GetBool("zed")
 
 	if !useAgy && !useZed {
-		return outErr(cmd, &service.Error{
-			Code:    service.ErrSourceRequired,
+		return outErr(cmd, &api.Error{
+			Code:    api.ErrSourceRequired,
 			Message: "未指定查询数据源",
 			Suggestions: []string{
 				"使用 agyquota --agy 查询终端与桌面 GUI 账号配额",
@@ -44,37 +45,43 @@ func quotaRun(cmd *cobra.Command) error {
 	}
 
 	if useAgy && useZed {
-		return outErr(cmd, &service.Error{
-			Code:    "bad_args",
+		return outErr(cmd, &api.Error{
+			Code:    api.ErrBadArgs,
 			Message: "--agy 与 --zed 为互斥选项，请每次指定一个数据源",
 		})
 	}
 
-	source := service.SourceAgy
+	source := api.SourceAgy
 	if useZed {
-		source = service.SourceZed
+		source = api.SourceZed
 	}
 
-	svc := service.New()
-	// 进度与退避提示走 stderr（人读/JSON 模式均合法：stderr 是诊断流）
-	svc.Progress = func(f string, a ...any) {
-		fmt.Fprintf(cmd.ErrOrStderr(), "[agyquota] "+f+"\n", a...)
-	}
+	host, _ := cmd.Flags().GetString("host")
+	cl := client.New(client.Config{Host: host})
 	ctx, cancel := contextTimeout(cmd, 2*time.Minute)
 	defer cancel()
-	opt := service.Options{
-		Source:    source,
-		TokenFile: tokenFile,
+
+	// 进度与退避提示走 stderr（人读/JSON 模式均合法：stderr 是诊断流）
+	progress := func(msg string) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "[agyquota] %s\n", msg)
 	}
 
+	if _, _, err := cl.Resolve(); err != nil {
+		return outErr(cmd, err)
+	}
+	if err := cl.EnsureDaemon(ctx); err != nil {
+		return outErr(cmd, err)
+	}
+
+	req := api.QuotaRequest{Source: source, TokenFile: tokenFile}
 	if raw {
-		rawJSON, err := svc.FetchRaw(ctx, opt)
+		rawJSON, err := cl.GetRaw(ctx, req, progress)
 		if err != nil {
 			return outErr(cmd, err)
 		}
 		return outRaw(cmd, rawJSON)
 	}
-	snap, err := svc.GetQuota(ctx, opt)
+	snap, err := cl.GetQuota(ctx, req, progress)
 	if err != nil {
 		return outErr(cmd, err)
 	}

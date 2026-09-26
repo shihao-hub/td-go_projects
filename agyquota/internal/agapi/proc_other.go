@@ -17,8 +17,8 @@ type agyProcess struct {
 }
 
 // startAgyProcess 非 Windows 平台无默认终端委托问题，直接常规启动
-func startAgyProcess(exePath string) (*agyProcess, error) {
-	cmd := exec.Command(exePath, "-p", "/usage", "--output-format", "json")
+func startAgyProcess(runPath string) (*agyProcess, error) {
+	cmd := exec.Command(runPath, "-p", "/usage", "--output-format", "json")
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd.Stdout = stdout

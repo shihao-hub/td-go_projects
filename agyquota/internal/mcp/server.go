@@ -1,5 +1,6 @@
-// Package mcp 实现 agyquota 的 stdio MCP server：把 service 层暴露为 MCP 工具
-// （工具发现/参数校验/结构化结果由 SDK 处理）。
+// Package mcp 实现 agyquota 的 stdio MCP server：把 daemon HTTP API 暴露为
+// MCP 工具（工具发现/参数校验/结构化结果由 SDK 处理）。
+// 本包是 daemon 的客户端（经 internal/client），不直接依赖 internal/service；
 // 协议 stdout 只走 SDK 通道，业务日志全部 stderr，绝不混流。
 package mcp
 
@@ -8,7 +9,8 @@ import (
 	"log"
 	"os"
 
-	"agyquota/internal/service"
+	"agyquota/internal/buildinfo"
+	"agyquota/internal/client"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -23,26 +25,24 @@ func init() {
 	}
 }
 
-// Version 版本号，由 cli 包注入（与 --version 同源）。
-var Version = "dev"
-
 // NewServer 构造注册了全部工具的 MCP server。
-// 工具定义与 schema 导出（schema 子命令）同源于 registerTools。
-func NewServer() *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "agyquota", Version: Version}, nil)
-	registerTools(s)
+// 工具定义与 schema 导出（schema 子命令）同源于 registerTools；
+// 启动不触达 daemon，仅工具调用时经 client 执行 EnsureDaemon。
+func NewServer(cfg client.Config) *mcp.Server {
+	s := mcp.NewServer(&mcp.Implementation{Name: "agyquota", Version: buildinfo.Version}, nil)
+	registerTools(s, cfg)
 	return s
 }
 
 // Run 启动 stdio MCP server，阻塞至客户端断开。
 // log 默认输出到 stderr，前缀标记来源，确保协议 stdout 纯净。
-func Run(ctx context.Context) error {
+func Run(ctx context.Context, cfg client.Config) error {
 	log.SetPrefix("[agyquota-mcp] ")
 	log.SetFlags(log.LstdFlags)
-	return NewServer().Run(ctx, &mcp.StdioTransport{})
+	return NewServer(cfg).Run(ctx, &mcp.StdioTransport{})
 }
 
-// mustSvc 创建业务服务（无状态、零落盘，无惰性初始化需求）。
-func mustSvc() *service.Service {
-	return service.New()
+// mustClient 创建 daemon HTTP 客户端（无状态，按需发现与拉起）。
+func mustClient(cfg client.Config) *client.Client {
+	return client.New(cfg)
 }

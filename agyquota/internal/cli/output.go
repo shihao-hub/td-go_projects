@@ -9,7 +9,7 @@ import (
 	"io"
 	"time"
 
-	"agyquota/internal/service"
+	"agyquota/internal/api"
 
 	"github.com/spf13/cobra"
 )
@@ -27,26 +27,20 @@ func jsonMode(cmd *cobra.Command) bool {
 
 // emitOK 输出成功 JSON 信封：{"ok":true,"data":...}。
 func emitOK(w io.Writer, data any) {
-	b, _ := json.MarshalIndent(map[string]any{"ok": true, "data": data}, "", "  ")
-	fmt.Fprintln(w, string(b))
+	_ = api.WriteOK(w, data)
 }
 
 // emitErrJSON 输出失败 JSON 信封：{"ok":false,"error":{code,message,suggestions}}。
-func emitErrJSON(w io.Writer, e *service.Error) {
-	errObj := map[string]any{"code": e.Code, "message": e.Message}
-	if len(e.Suggestions) > 0 {
-		errObj["suggestions"] = e.Suggestions
-	}
-	b, _ := json.MarshalIndent(map[string]any{"ok": false, "error": errObj}, "", "  ")
-	fmt.Fprintln(w, string(b))
+func emitErrJSON(w io.Writer, e *api.Error) {
+	_ = api.WriteErr(w, e)
 }
 
 // outErr 统一错误出口：人读写 stderr 并附建议；--json 写 stdout 信封。
-// 返回 *service.Error 供 Run 映射退出码 1。
+// 返回 *api.Error 供 Execute 映射退出码 1。
 func outErr(cmd *cobra.Command, err error) error {
-	var berr *service.Error
+	var berr *api.Error
 	if !errors.As(err, &berr) {
-		berr = &service.Error{Code: "internal", Message: err.Error()}
+		berr = &api.Error{Code: api.ErrInternal, Message: err.Error()}
 	}
 	if jsonMode(cmd) {
 		emitErrJSON(cmd.OutOrStdout(), berr)
@@ -60,7 +54,7 @@ func outErr(cmd *cobra.Command, err error) error {
 }
 
 // outQuota 人读/JSON 输出配额快照。
-func outQuota(cmd *cobra.Command, snap *service.Snapshot) error {
+func outQuota(cmd *cobra.Command, snap *api.Snapshot) error {
 	if jsonMode(cmd) {
 		emitOK(cmd.OutOrStdout(), snap)
 		return nil
@@ -109,7 +103,7 @@ func outQuota(cmd *cobra.Command, snap *service.Snapshot) error {
 // outRaw 输出接口原始响应：人读为缩进 JSON；--json 时装进 data.raw 信封。
 func outRaw(cmd *cobra.Command, raw json.RawMessage) error {
 	if jsonMode(cmd) {
-		emitOK(cmd.OutOrStdout(), map[string]any{"raw": raw})
+		emitOK(cmd.OutOrStdout(), api.RawResponse{Raw: raw})
 		return nil
 	}
 	var pretty bytes.Buffer

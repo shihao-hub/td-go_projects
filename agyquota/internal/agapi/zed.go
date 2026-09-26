@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"agyquota/internal/appdata"
 )
 
 const (
@@ -26,11 +28,8 @@ const (
 	DefaultTokenRelPath = ".gemini/antigravity-acp/acp_token.json"
 
 	// CacheFileName Access Token 本地缓存，预留 2 分钟安全冗余（缓存约 58 分钟），杜绝频繁向 Google 刷新
-	// 注意：该文件只允许落在本项目自有数据目录（见 resolveDataDir），禁止写入 Zed 凭据等外部程序目录
+	// 注意：该文件只允许落在本项目自有数据目录（见 appdata.Dir），禁止写入 Zed 凭据等外部程序目录
 	CacheFileName = ".quota_token_cache.json"
-
-	// ProjectName 用于运行时数据目录命名（%APPDATA%\language_projects\<项目名>）
-	ProjectName = "agyquota"
 )
 
 // TokenFile 是 Zed ACP 凭据文件的落盘结构
@@ -92,21 +91,9 @@ func userHomeDir() string {
 	return home
 }
 
-// resolveDataDir 返回本项目运行时自产数据文件的存放目录（仓库强约束）：
-// 优先 %APPDATA%\language_projects\agyquota，取不到 APPDATA 时回退 ~/.language_projects/agyquota/
-func resolveDataDir() string {
-	if appdata := os.Getenv("APPDATA"); appdata != "" {
-		return filepath.Join(appdata, "language_projects", ProjectName)
-	}
-	if home := userHomeDir(); home != "" {
-		return filepath.Join(home, ".language_projects", ProjectName)
-	}
-	return ""
-}
-
 // cachePath 返回 Access Token 缓存文件路径：固定在项目自有数据目录内，与凭据文件位置解耦
 func (c *ZedClient) cachePath() string {
-	dir := resolveDataDir()
+	dir := appdata.Dir()
 	if dir == "" {
 		return ""
 	}

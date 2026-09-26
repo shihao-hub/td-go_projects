@@ -3,14 +3,16 @@ package mcp
 import (
 	"context"
 
+	"agyquota/internal/client"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Schema 经 in-memory 连接执行真实的 tools/list，导出与协议完全同源的
 // 工具定义（含 input/output JSON Schema），供 schema 子命令离线检查与
-// 联调对照。不触发业务网络调用。
+// 联调对照。零值 Config 下不触达 daemon、不触发业务网络调用。
 func Schema(ctx context.Context) ([]*mcp.Tool, error) {
-	server := NewServer()
+	server := NewServer(client.Config{})
 	client := mcp.NewClient(&mcp.Implementation{Name: "agyquota-schema-export"}, nil)
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()

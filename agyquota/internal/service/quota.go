@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"agyquota/internal/api"
 )
 
 // 模型桶名称（与 Antigravity 设置面板与 agy 保持一致）。
@@ -50,7 +52,7 @@ type rawUsageContainer struct {
 }
 
 // parseSnapshot 把 agy 或 Google API 的原始输出归一化为模型桶 × 窗口快照。
-func parseSnapshot(raw json.RawMessage, now time.Time, source string) (*Snapshot, error) {
+func parseSnapshot(raw json.RawMessage, now time.Time, source string) (*api.Snapshot, error) {
 	var container rawUsageContainer
 	if err := json.Unmarshal(raw, &container); err != nil {
 		return nil, fmt.Errorf("响应不是预期的 JSON 格式: %w", err)
@@ -65,9 +67,9 @@ func parseSnapshot(raw json.RawMessage, now time.Time, source string) (*Snapshot
 		return nil, fmt.Errorf("响应中未找到任何配额分组数据")
 	}
 
-	var buckets []Bucket
+	var buckets []api.Bucket
 	for _, group := range groups {
-		var windows []Window
+		var windows []api.Window
 		for _, b := range group.Buckets {
 			var rem float64
 			if b.RemainingFraction != nil {
@@ -94,7 +96,7 @@ func parseSnapshot(raw json.RawMessage, now time.Time, source string) (*Snapshot
 			winID, label := normalizeWindowID(b.Window, bucketID, bucketName)
 			resetAt, resetsIn := describeResetTime(resetTime, now)
 
-			windows = append(windows, Window{
+			windows = append(windows, api.Window{
 				Window:            winID,
 				Label:             label,
 				Percent:           math.Round(rem*1000) / 10,
@@ -114,9 +116,9 @@ func parseSnapshot(raw json.RawMessage, now time.Time, source string) (*Snapshot
 			bName = bucketOther
 		}
 
-		buckets = append(buckets, Bucket{
+		buckets = append(buckets, api.Bucket{
 			Name: bName,
-			Models: []ModelQuota{
+			Models: []api.ModelQuota{
 				{
 					Name:    bName,
 					Windows: windows,
@@ -137,7 +139,7 @@ func parseSnapshot(raw json.RawMessage, now time.Time, source string) (*Snapshot
 		return oi < oj
 	})
 
-	return &Snapshot{
+	return &api.Snapshot{
 		Source:    source,
 		FetchedAt: now,
 		Buckets:   buckets,
@@ -204,8 +206,8 @@ func humanizeIn(d time.Duration) string {
 }
 
 // sortWindows 窗口排序：five_hour → weekly → daily → 其余按标识。
-func sortWindows(ws []Window) {
-	rank := func(w Window) int {
+func sortWindows(ws []api.Window) {
+	rank := func(w api.Window) int {
 		switch w.Window {
 		case "five_hour":
 			return 0

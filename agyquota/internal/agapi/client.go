@@ -11,8 +11,40 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
+
+const (
+	agyUsageMaxAttempts = 3
+	agyUsageInitialWait = 1 * time.Second
+	agyUsageMaxWait     = 2 * time.Second
+)
+
+var agyUsageRetryDelays = [...]time.Duration{agyUsageInitialWait, agyUsageMaxWait}
+
+type agyExecutionError struct {
+	err       error
+	retryable bool
+}
+
+func (e *agyExecutionError) Error() string {
+	return e.err.Error()
+}
+
+func (e *agyExecutionError) Unwrap() error {
+	return e.err
+}
+
+func isRetryableQuotaError(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	quotaSummaryEOF := strings.Contains(lower, "retrieve user quota summary") && strings.Contains(lower, "eof")
+	return quotaSummaryEOF ||
+		strings.Contains(lower, "unexpected end of json input") ||
+		strings.Contains(lower, "unexpected eof") ||
+		strings.Contains(lower, "io: unexpected eof") ||
+		strings.Contains(lower, "connection reset")
+}
 
 // UsageResult 封装查询返回的数据与账号元信息。
 type UsageResult struct {
@@ -99,20 +131,54 @@ func (c *Client) FetchUsageWithMeta(ctx context.Context) (*UsageResult, error) {
 }
 
 // FetchUsage 调用 agy 获取 /usage 并返回原始 JSON 字节。
-// agy 运行于伪控制台内：启动即拥有可用 console（不再 AllocConsole 向系统请求新会话，
-// 根除「默认终端接管 → Windows Terminal 前台化隔壁窗口」触发链）；stdout/stderr 走
-// 独立管道保证 JSON 纯净；整棵进程树受作业对象前台限制兜底。
-// 执行完毕（无论成功或失败）均由 shutdown 原子终止整树并释放全部句柄，不留后台残留。
+// Windows 下通过 ensureSilentAgyExe 生成或复用 Subsystem==2 的静默副本，杜绝 DefTerm 抢焦点；
+// 失败时禁止回退原始 agy.exe，直接返回明确错误。
+// 启动日志真实打印实际的 runPath 并明确显示是否使用了 agy_silent.exe。
 func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	if c.AgyPath == "" {
 		return nil, errors.New("未找到 agy 命令行工具，请先安装 Antigravity CLI")
 	}
 
-	if c.Logf != nil {
-		c.Logf("正在执行 %s -p \"/usage\" --output-format json ...", c.AgyPath)
+	runPath, err := ensureSilentAgyExe(c.AgyPath)
+	if err != nil {
+		return nil, fmt.Errorf("准备静默 agy 副本失败: %w", err)
 	}
 
-	p, err := startAgyProcess(c.AgyPath)
+	isSilent := filepath.Base(runPath) == "agy_silent.exe"
+	if c.Logf != nil {
+		c.Logf("正在执行 %s -p \"/usage\" --output-format json (使用静默副本: %t) ...", runPath, isSilent)
+	}
+
+	for attempt := 1; attempt <= agyUsageMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("执行 agy 命令失败: %v", err)
+		}
+
+		raw, err := c.fetchUsageOnce(ctx, runPath)
+		if err == nil {
+			return raw, nil
+		}
+
+		var executionErr *agyExecutionError
+		if !errors.As(err, &executionErr) || !executionErr.retryable || attempt == agyUsageMaxAttempts {
+			return nil, err
+		}
+
+		delay := agyUsageRetryDelays[attempt-1]
+		if c.Logf != nil {
+			c.Logf("agy 配额接口出现瞬态错误，第 %d 次尝试失败，将在 %s 后重试 ...", attempt, delay)
+		}
+		if err := waitAgyRetry(ctx, delay); err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, errors.New("agy 配额查询失败")
+}
+
+// fetchUsageOnce 执行一次 agy 查询；进程、管道和响应校验均在此处完成。
+func (c *Client) fetchUsageOnce(ctx context.Context, runPath string) ([]byte, error) {
+	p, err := startAgyProcess(runPath)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +194,7 @@ func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	var waitErr error
 	go func() { exitCode, waitErr = p.Wait(); close(waitDone) }()
 
-	// 超时/取消：终止整树解除 Wait 阻塞
+	// 超时/取消：终止整树解除 Wait 阻塞。
 	select {
 	case <-waitDone:
 	case <-ctx.Done():
@@ -140,14 +206,20 @@ func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	<-copyDone
 
 	if waitErr != nil {
-		return nil, fmt.Errorf("执行 agy 命令失败 (%v): %s", waitErr, stderr.String())
+		return nil, &agyExecutionError{
+			err:       fmt.Errorf("执行 agy 命令失败 (%v): %s", waitErr, stderr.String()),
+			retryable: false,
+		}
 	}
 	if exitCode != 0 {
 		errMsg := stderr.String()
 		if errMsg == "" {
 			errMsg = stdout.String()
 		}
-		return nil, fmt.Errorf("执行 agy 命令失败 (exit status %d): %s", exitCode, errMsg)
+		return nil, &agyExecutionError{
+			err:       fmt.Errorf("执行 agy 命令失败 (exit status %d): %s", exitCode, errMsg),
+			retryable: isRetryableQuotaError(errMsg),
+		}
 	}
 
 	outBytes := stdout.Bytes()
@@ -160,4 +232,23 @@ func (c *Client) FetchUsage(ctx context.Context) ([]byte, error) {
 	}
 
 	return outBytes, nil
+}
+
+func waitAgyRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+	}()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
