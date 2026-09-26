@@ -1,0 +1,5 @@
+[submodule "glmquotawatch-gui"]
+	path = glmquotawatch-gui
+	url = git@github.com:shihao-hub/td-go_projects-glmquotawatch-gui.git
+	branch = main
+	ignore = all
