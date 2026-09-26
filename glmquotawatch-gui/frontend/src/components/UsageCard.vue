@@ -1,6 +1,5 @@
-<script setup lang="ts">
-// UsageCard：单个额度窗口卡片——状态彩点、大号百分比、按档分色进度条、
-// 阈值刻度、倒计时（本地每秒重算）、已通知档位胶囊。浅色产品风。
+﻿<script setup lang="ts">
+// UsageCard：非对称布局微型仪表——左侧大数与状态评级，右侧倒计时与精细通知胶囊
 import { computed, onUnmounted, ref } from "vue";
 import type { WindowView, ConfigView } from "../api";
 
@@ -15,12 +14,20 @@ onUnmounted(() => window.clearInterval(timer));
 
 const pct = computed(() => props.win.percentage ?? 0);
 
-// 颜色分档：<50 绿 / 50-79 琥珀 / ≥80 红
+// 三态分级：<50 稳健 / 50-79 需关注 / ≥80 临界
 const tone = computed(() => {
   if (pct.value >= 80) return "crit";
   if (pct.value >= 50) return "warn";
   return "brand";
 });
+
+const statusDesc = computed(() => {
+  if (pct.value >= 90) return "配额极度紧绷";
+  if (pct.value >= 80) return "已逼近警戒线";
+  if (pct.value >= 50) return "用量消耗过半";
+  return "额度充裕，负载平稳";
+});
+
 const barClass = computed(
   () =>
     ({
@@ -29,6 +36,7 @@ const barClass = computed(
       crit: "bg-crit",
     })[tone.value],
 );
+
 const numClass = computed(
   () =>
     ({
@@ -38,63 +46,83 @@ const numClass = computed(
     })[tone.value],
 );
 
-// 倒计时：从 next_reset_time 本地重算（ResetIn 是采样时刻的快照）
+// 倒计时重算
 const resetIn = computed(() => {
   if (!props.win.next_reset_time) return "";
   const remain = Date.parse(props.win.next_reset_time) - nowTs.value;
-  if (remain <= 0) return "即将刷新";
+  if (remain <= 0) return "即将释放";
   const m = Math.floor(remain / 60000);
   const h = Math.floor(m / 60);
   const d = Math.floor(h / 24);
-  if (d > 0) return `${d}天${h % 24}时`;
-  if (h > 0) return `${h}时${m % 60}分`;
-  return `${m}分`;
+  if (d > 0) return `${d} 天 ${h % 24} 小时`;
+  if (h > 0) return `${h} 小时 ${m % 60} 分`;
+  return `${m} 分钟`;
 });
 </script>
 
 <template>
-  <div class="rounded-xl border border-edge bg-panel p-4 shadow-sm">
+  <div class="relative overflow-hidden rounded-xl border border-edge bg-panel p-4 shadow-card inset-highlight transition-all duration-200 hover:border-edge-strong">
+    <!-- 顶栏：标签与重置周期 -->
     <div class="flex items-center justify-between">
-      <span class="flex items-center gap-1.5 text-xs text-dim">
+      <div class="flex items-center gap-2">
         <span class="h-2 w-2 rounded-full" :class="barClass"></span>
-        {{ win.label }}
-      </span>
-      <span v-if="resetIn" class="text-[11px] text-faint tnum">
-        距刷新 {{ resetIn }}
-      </span>
-    </div>
-    <div class="mt-1 flex items-baseline gap-1">
-      <span class="text-4xl font-bold tnum" :class="numClass">{{ pct }}</span>
-      <span class="text-sm text-faint">%</span>
+        <span class="text-xs font-semibold text-ink">{{ win.label }}</span>
+        <span class="text-[11px] text-faint">· {{ statusDesc }}</span>
+      </div>
+
+      <div v-if="resetIn" class="flex items-center gap-1 rounded bg-well px-1.5 py-0.5 text-[10px] text-dim tnum">
+        <svg class="h-3 w-3 text-faint" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" />
+        </svg>
+        <span>周期倒计时 {{ resetIn }}</span>
+      </div>
     </div>
 
-    <!-- 进度条 + 阈值刻度 -->
-    <div class="relative mt-3 h-2 rounded-full bg-well">
-      <div
-        class="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
-        :class="barClass"
-        :style="{ width: pct + '%' }"
-      />
+    <!-- 非对称主体：左侧超大数字，右侧阈值与水位标尺 -->
+    <div class="mt-3 flex items-end justify-between">
+      <div class="flex items-baseline gap-1">
+        <span class="text-4xl font-extrabold tracking-tight tnum" :class="numClass">{{ pct }}</span>
+        <span class="text-sm font-semibold text-faint">%</span>
+        <span class="ml-2 text-[11px] text-faint">已占用</span>
+      </div>
+
+      <!-- 右侧阶梯告警标签 -->
+      <div class="flex flex-wrap items-center justify-end gap-1.5">
+        <span v-if="!win.notified?.length" class="text-[10px] text-faint">未跨越告警阶梯</span>
+        <span
+          v-for="th in win.notified ?? []"
+          :key="th"
+          class="inline-flex items-center gap-1 rounded-md border border-warn/30 bg-warn-light px-1.5 py-0.5 text-[10px] font-medium text-warn tnum"
+        >
+          <span class="h-1 w-1 rounded-full bg-warn"></span>
+          {{ th }}% 梯级已弹窗
+        </span>
+      </div>
+    </div>
+
+    <!-- 带有微刻度指针的高精仪表轨道 -->
+    <div class="relative mt-3.5 pt-1">
+      <div class="relative h-2 w-full overflow-hidden rounded-full bg-well shadow-inner">
+        <div
+          class="h-full rounded-full transition-all duration-700 ease-out"
+          :class="barClass"
+          :style="{ width: `${Math.min(100, Math.max(0, pct))}%` }"
+        />
+      </div>
+
+      <!-- 刻度分档垂直标尺 -->
       <div
         v-for="th in config?.thresholds ?? []"
         :key="th"
-        class="absolute -top-0.5 h-3 w-0.5 rounded-full bg-faint/70"
-        :style="{ left: th + '%' }"
-      />
-    </div>
-
-    <div class="mt-3 flex items-center gap-1.5">
-      <span
-        v-if="!win.notified?.length"
-        class="text-[11px] text-faint"
-      >无已告警档位</span>
-      <span
-        v-for="th in win.notified ?? []"
-        :key="th"
-        class="rounded-full bg-warn/10 px-2 py-0.5 text-[11px] font-medium text-warn tnum"
+        class="group absolute top-0 -translate-x-1/2"
+        :style="{ left: `${th}%` }"
       >
-        {{ th }}% 已告警
-      </span>
+        <div class="h-4 w-[1.5px] rounded-full bg-faint/80 shadow-xs transition-colors group-hover:bg-ink"></div>
+        <span class="absolute -top-3.5 left-1/2 -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100 text-[9px] font-bold text-dim tnum">
+          {{ th }}%
+        </span>
+      </div>
     </div>
   </div>
 </template>

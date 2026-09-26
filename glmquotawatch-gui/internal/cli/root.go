@@ -1,4 +1,4 @@
-// Package cli 是 glmquotawatch-gui 的机器友好薄壳（cobra）：
+﻿// Package cli 是 glmquotawatch-gui 的机器友好薄壳（cobra）：
 // 所有命令恒输出 JSON 信封（面向脚本/AI，不提供人读模式）；
 // 每个命令只做「解析 → service → 信封输出 → 退出码」，
 // 业务规则全部在 service 层。GUI 是面向人的入口。
@@ -43,6 +43,8 @@ func mustService() (*service.Service, error) {
 // Run 执行 CLI 并返回进程退出码：0 成功、1 业务失败、2 参数/flag 错误。
 // help/version 同样以 JSON 信封输出（stdout 恒纯 JSON）。
 func Run(args []string) int {
+	AttachParentConsole()
+	defer DetachParentConsole()
 	root := newRootCmd()
 	root.SetArgs(args) // 不传则 cobra 默认读 os.Args[1:]，进程内调用（测试）会错乱
 	err := root.ExecuteContext(context.Background())

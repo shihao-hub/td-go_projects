@@ -1,4 +1,4 @@
-// Package guiapp 是 glmquotawatch-gui 的 Wails v3 组装层：
+﻿// Package guiapp 是 glmquotawatch-gui 的 Wails v3 组装层：
 // 窗口/托盘/单实例/关窗到托盘/通知/开机自启/演示模式运行时/前端绑定。
 // 业务规则全部在 internal/service，本包只做装配与转发。
 package guiapp
@@ -6,6 +6,8 @@ package guiapp
 import (
 	"embed"
 	"sync/atomic"
+
+	"glmquotawatch-gui/internal/env"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -45,7 +47,7 @@ func Run(opts RunOptions) {
 			Handler: application.AssetFileServerFS(opts.Assets),
 		},
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: singleInstanceID,
+			UniqueID: env.SingleInstanceID(),
 			ExitCode: 0, // 「新进程自行退出」非错误（AC-4）
 			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
 				if a == nil {
@@ -91,7 +93,7 @@ type App struct {
 // buildWindow 创建主窗并挂关窗到托盘钩子。
 func (a *App) buildWindow(hidden bool) {
 	a.win = a.app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "GLM 用量监控",
+		Title:            env.WindowTitle(),
 		Width:            920,
 		Height:           560,
 		MinWidth:         720,

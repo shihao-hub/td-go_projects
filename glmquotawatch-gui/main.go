@@ -1,4 +1,4 @@
-// glmquotawatch-gui：GLM 编码套餐用量监控 GUI（Wails v3 + 托盘常驻）。
+﻿// glmquotawatch-gui：GLM 编码套餐用量监控 GUI（Wails v3 + 托盘常驻）。
 // 入口分流：args 为空或全部属于 {--demo, --hidden} → GUI；
 // 其余（含 --help/--version/未知 flag/子命令）→ CLI 壳（恒 JSON 信封）。
 package main
@@ -16,10 +16,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-// Windows 应用图标字节（托盘与 exe 共用 build/windows/icon.ico）。
 //
-//go:embed build/windows/icon.ico
-var iconICO []byte
 
 func main() {
 	args := os.Args[1:]

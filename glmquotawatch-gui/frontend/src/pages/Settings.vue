@@ -1,7 +1,5 @@
-<script setup lang="ts">
-// Settings：token（脱敏显示/录入/清除）+ interval/thresholds/hysteresis/silent +
-// 开机自启 + 数据目录展示。演示模式下全部只读（服务端已拒，前端同步置灰）。
-// 浅色产品风：白底圆角卡片、绿色主按钮、iOS 胶囊开关。
+﻿<script setup lang="ts">
+// Settings：Linear 风格紧凑型配置列表——分组面板、内联操作、去模板化的友好表单与就地反馈
 import { computed, reactive } from "vue";
 import { bindings } from "../api";
 import { store, refreshState, isDemo } from "../store";
@@ -20,7 +18,6 @@ const msg = reactive({ token: "", interval: "", thresholds: "", hysteresis: "", 
 
 function errText(e: unknown): string {
   const s = String(e ?? "");
-  // service.Error 序列化为 "code: message"，直接展示 message 部分
   const i = s.indexOf(": ");
   return i > 0 ? s.slice(i + 2) : s;
 }
@@ -89,149 +86,195 @@ async function toggleAutostart() {
 </script>
 
 <template>
-  <div class="mx-auto flex max-w-xl flex-col gap-4">
-    <p v-if="readonly" class="rounded-lg border border-warn/25 bg-warn/10 px-3 py-2 text-[11px] text-warn">
-      演示模式下配置只读（demo_readonly），退出演示后可修改。
-    </p>
+  <div class="mx-auto flex max-w-3xl flex-col gap-4">
+    <!-- 演示模式提示 -->
+    <div
+      v-if="readonly"
+      class="flex items-center gap-2 rounded-xl border border-warn/30 bg-warn-light px-3.5 py-2 text-xs text-warn shadow-xs"
+    >
+      <svg class="h-4 w-4 shrink-0 text-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="16" x2="12" y2="12" />
+        <line x1="12" y1="8" x2="12.01" y2="8" />
+      </svg>
+      <span>演示沙盒运行中，配置项处于受保护只读状态（demo_readonly）。结束演示后可自由调整。</span>
+    </div>
 
-    <!-- token -->
-    <section class="rounded-xl border border-edge bg-panel p-4 shadow-sm">
-      <h2 class="text-xs font-semibold text-ink">API Token</h2>
-      <div class="mt-1 flex items-center gap-2 text-[11px]">
-        <span v-if="cfg?.has_token" class="rounded-full bg-brand/10 px-2 py-0.5 text-brand-deep tnum">
-          {{ cfg?.token }}
+    <!-- 分组一：服务凭据 -->
+    <div class="rounded-2xl border border-edge bg-panel p-4 shadow-card inset-highlight">
+      <div class="flex items-center justify-between border-b border-edge/60 pb-3">
+        <div>
+          <h2 class="text-xs font-semibold text-ink">智谱 GLM 开放平台凭证</h2>
+          <p class="mt-0.5 text-[11px] text-faint">配置后即可建立安全通信链路并开始采集配额信息。</p>
+        </div>
+        <span
+          v-if="cfg?.has_token"
+          class="rounded-md border border-brand/20 bg-brand-light px-2 py-0.5 text-[11px] font-medium text-brand-deep tnum"
+        >
+          已载入 {{ cfg?.token }}
         </span>
-        <span v-else class="text-faint">未配置</span>
+        <span v-else class="text-[11px] text-faint">凭据未登记</span>
       </div>
+
       <div class="mt-3 flex gap-2">
         <input
           v-model="form.token"
           type="password"
-          placeholder="粘贴 bigmodel 开放平台密钥（≥ 20 字符）"
-          class="min-w-0 flex-1 rounded-lg border border-edge bg-panel px-3 py-1.5 text-xs text-ink outline-none placeholder:text-faint focus:border-brand disabled:opacity-50"
+          placeholder="粘贴 BigModel 开发者 API Key（不少于 20 字符）"
+          class="min-w-0 flex-1 rounded-lg border border-edge bg-well/60 px-3 py-1.5 text-xs text-ink outline-none placeholder:text-faint focus:border-brand focus:bg-panel transition-all disabled:opacity-50"
           :disabled="readonly || busy.token"
           @keyup.enter="saveToken"
         />
         <button
-          class="rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand/90 disabled:opacity-50"
+          class="btn-press rounded-lg bg-brand px-3.5 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-brand-deep disabled:opacity-50"
           :disabled="readonly || busy.token || !form.token.trim()"
           @click="saveToken"
         >
-          保存
+          {{ busy.token ? "保存中…" : "更新凭证" }}
         </button>
         <button
           v-if="cfg?.has_token"
-          class="rounded-lg border border-edge px-3 py-1.5 text-xs text-dim transition-colors hover:bg-well disabled:opacity-50"
+          class="btn-press rounded-lg border border-edge-strong bg-panel px-3 py-1.5 text-xs font-medium text-dim hover:bg-panel-hover disabled:opacity-50"
           :disabled="readonly || busy.token"
           @click="removeToken"
         >
-          清除
+          移除
         </button>
       </div>
       <p v-if="msg.token" class="mt-1.5 text-[11px] text-crit">{{ msg.token }}</p>
-    </section>
+    </div>
 
-    <!-- 采样配置 -->
-    <section class="flex flex-col gap-3 rounded-xl border border-edge bg-panel p-4 shadow-sm">
-      <h2 class="text-xs font-semibold text-ink">采样与告警</h2>
-
-      <label class="flex items-center justify-between gap-3 text-xs text-dim">
-        <span>采样间隔（30s – 24h）</span>
-        <span class="flex items-center gap-2">
+    <!-- 分组二：轮询与告警策略 -->
+    <div class="divide-y divide-edge/60 rounded-2xl border border-edge bg-panel px-4 py-1 shadow-card inset-highlight">
+      <!-- 轮询周期 -->
+      <div class="flex items-center justify-between py-3">
+        <div class="pr-4">
+          <span class="text-xs font-medium text-ink">探测轮询周期</span>
+          <p class="text-[11px] text-faint">合法区间为 30s 至 24h。建议设定为 5m ~ 15m。</p>
+        </div>
+        <div class="flex items-center gap-2">
           <input
             v-model="form.interval"
             placeholder="如 5m"
-            class="w-24 rounded-lg border border-edge bg-panel px-2.5 py-1 text-right text-ink outline-none placeholder:text-faint focus:border-brand disabled:opacity-50 tnum"
+            class="w-20 rounded-lg border border-edge bg-well/60 px-2.5 py-1 text-right text-xs text-ink outline-none placeholder:text-faint focus:border-brand focus:bg-panel tnum disabled:opacity-50"
             :disabled="readonly || busy.cfg"
             @keyup.enter="saveKey('interval', form.interval)"
           />
-          <span class="w-14 text-right text-faint tnum">当前 {{ cfg?.interval }}</span>
+          <span class="w-16 text-right text-[11px] text-dim tnum">生效中: {{ cfg?.interval }}</span>
           <button
-            class="rounded-md border border-edge px-2 py-1 text-dim transition-colors hover:bg-well disabled:opacity-40"
+            class="btn-press rounded-md border border-edge bg-panel px-2 py-1 text-xs font-medium text-ink hover:bg-panel-hover disabled:opacity-40"
             :disabled="readonly || busy.cfg || !form.interval"
             @click="saveKey('interval', form.interval)"
-          >保存</button>
-        </span>
-      </label>
-      <p v-if="msg.interval" class="text-[11px] text-crit">{{ msg.interval }}</p>
+          >
+            保存
+          </button>
+        </div>
+      </div>
+      <p v-if="msg.interval" class="py-1 text-[11px] text-crit">{{ msg.interval }}</p>
 
-      <label class="flex items-center justify-between gap-3 text-xs text-dim">
-        <span>告警阈值（逗号分隔 1-99）</span>
-        <span class="flex items-center gap-2">
+      <!-- 告警梯级 -->
+      <div class="flex items-center justify-between py-3">
+        <div class="pr-4">
+          <span class="text-xs font-medium text-ink">配额触发梯级</span>
+          <p class="text-[11px] text-faint">逗号分隔的百分比数值（1-99），跨越该刻度即向系统推送通知。</p>
+        </div>
+        <div class="flex items-center gap-2">
           <input
             v-model="form.thresholds"
             placeholder="如 50,60,80,90"
-            class="w-28 rounded-lg border border-edge bg-panel px-2.5 py-1 text-right text-ink outline-none placeholder:text-faint focus:border-brand disabled:opacity-50 tnum"
+            class="w-28 rounded-lg border border-edge bg-well/60 px-2.5 py-1 text-right text-xs text-ink outline-none placeholder:text-faint focus:border-brand focus:bg-panel tnum disabled:opacity-50"
             :disabled="readonly || busy.cfg"
             @keyup.enter="saveKey('thresholds', form.thresholds)"
           />
-          <span class="w-14 text-right text-faint tnum">当前 {{ (cfg?.thresholds ?? []).join(",") }}</span>
+          <span class="w-16 text-right text-[11px] text-dim tnum truncate" :title="(cfg?.thresholds ?? []).join(',')">
+            {{ (cfg?.thresholds ?? []).join(",") }}
+          </span>
           <button
-            class="rounded-md border border-edge px-2 py-1 text-dim transition-colors hover:bg-well disabled:opacity-40"
+            class="btn-press rounded-md border border-edge bg-panel px-2 py-1 text-xs font-medium text-ink hover:bg-panel-hover disabled:opacity-40"
             :disabled="readonly || busy.cfg || !form.thresholds"
             @click="saveKey('thresholds', form.thresholds)"
-          >保存</button>
-        </span>
-      </label>
-      <p v-if="msg.thresholds" class="text-[11px] text-crit">{{ msg.thresholds }}</p>
+          >
+            保存
+          </button>
+        </div>
+      </div>
+      <p v-if="msg.thresholds" class="py-1 text-[11px] text-crit">{{ msg.thresholds }}</p>
 
-      <label class="flex items-center justify-between gap-3 text-xs text-dim">
-        <span>滞回百分点（跌破最低档 − N 才重置告警）</span>
-        <span class="flex items-center gap-2">
+      <!-- 滞回容差 -->
+      <div class="flex items-center justify-between py-3">
+        <div class="pr-4">
+          <span class="text-xs font-medium text-ink">防抖滞回百分点</span>
+          <p class="text-[11px] text-faint">当用量跌破（最低警戒线 − N%）时才重置并允许再次触发该梯级告警。</p>
+        </div>
+        <div class="flex items-center gap-2">
           <input
             v-model="form.hysteresis"
             placeholder="如 5"
-            class="w-14 rounded-lg border border-edge bg-panel px-2.5 py-1 text-right text-ink outline-none placeholder:text-faint focus:border-brand disabled:opacity-50 tnum"
+            class="w-16 rounded-lg border border-edge bg-well/60 px-2.5 py-1 text-right text-xs text-ink outline-none placeholder:text-faint focus:border-brand focus:bg-panel tnum disabled:opacity-50"
             :disabled="readonly || busy.cfg"
             @keyup.enter="saveKey('hysteresis', form.hysteresis)"
           />
-          <span class="w-14 text-right text-faint tnum">当前 {{ cfg?.hysteresis }}</span>
+          <span class="w-16 text-right text-[11px] text-dim tnum">生效中: {{ cfg?.hysteresis }}%</span>
           <button
-            class="rounded-md border border-edge px-2 py-1 text-dim transition-colors hover:bg-well disabled:opacity-40"
+            class="btn-press rounded-md border border-edge bg-panel px-2 py-1 text-xs font-medium text-ink hover:bg-panel-hover disabled:opacity-40"
             :disabled="readonly || busy.cfg || !form.hysteresis"
             @click="saveKey('hysteresis', form.hysteresis)"
-          >保存</button>
-        </span>
-      </label>
-      <p v-if="msg.hysteresis" class="text-[11px] text-crit">{{ msg.hysteresis }}</p>
+          >
+            保存
+          </button>
+        </div>
+      </div>
+      <p v-if="msg.hysteresis" class="py-1 text-[11px] text-crit">{{ msg.hysteresis }}</p>
 
-      <label class="flex items-center justify-between text-xs text-dim">
-        <span>通知静音（仍弹通知，不响铃）</span>
+      <!-- 静默通知 -->
+      <div class="flex items-center justify-between py-3">
+        <div class="pr-4">
+          <span class="text-xs font-medium text-ink">静默通知推送</span>
+          <p class="text-[11px] text-faint">保留系统桌面弹窗横幅，但静默通知音效，适合专注编码环境。</p>
+        </div>
         <button
-          class="relative h-5 w-9 rounded-full transition-colors disabled:opacity-50"
-          :class="(cfg?.silent ?? false) ? 'bg-brand' : 'bg-faint/60'"
+          class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50"
+          :class="(cfg?.silent ?? false) ? 'bg-brand' : 'bg-edge-strong'"
           :disabled="readonly"
           @click="toggleSilent"
         >
           <span
-            class="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all"
-            :class="(cfg?.silent ?? false) ? 'left-4.5' : 'left-0.5'"
+            class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out"
+            :class="(cfg?.silent ?? false) ? 'translate-x-4' : 'translate-x-0'"
           />
         </button>
-      </label>
-      <p v-if="msg.silent" class="text-[11px] text-crit">{{ msg.silent }}</p>
-    </section>
+      </div>
+      <p v-if="msg.silent" class="py-1 text-[11px] text-crit">{{ msg.silent }}</p>
+    </div>
 
-    <!-- 系统集成 -->
-    <section class="flex flex-col gap-3 rounded-xl border border-edge bg-panel p-4 shadow-sm">
-      <h2 class="text-xs font-semibold text-ink">系统集成</h2>
-      <label class="flex items-center justify-between text-xs text-dim">
-        <span>开机自启（登录后托盘静默运行）</span>
+    <!-- 分组三：环境与桌面集成 -->
+    <div class="divide-y divide-edge/60 rounded-2xl border border-edge bg-panel px-4 py-1 shadow-card inset-highlight">
+      <!-- 开机自启 -->
+      <div class="flex items-center justify-between py-3">
+        <div class="pr-4">
+          <span class="text-xs font-medium text-ink">登录时自启动</span>
+          <p class="text-[11px] text-faint">跟随 Windows 系统启动并在后台以常驻托盘图标静默就绪。</p>
+        </div>
         <button
-          class="relative h-5 w-9 rounded-full transition-colors disabled:opacity-50"
-          :class="(store.state?.autostart ?? false) ? 'bg-brand' : 'bg-faint/60'"
+          class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-50"
+          :class="(store.state?.autostart ?? false) ? 'bg-brand' : 'bg-edge-strong'"
           @click="toggleAutostart"
         >
           <span
-            class="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all"
-            :class="(store.state?.autostart ?? false) ? 'left-4.5' : 'left-0.5'"
+            class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out"
+            :class="(store.state?.autostart ?? false) ? 'translate-x-4' : 'translate-x-0'"
           />
         </button>
-      </label>
-      <p v-if="msg.autostart" class="text-[11px] text-crit">{{ msg.autostart }}</p>
-      <div class="text-[11px] text-faint">
-        数据目录：<span class="tnum">{{ cfg?.dir }}</span>
       </div>
-    </section>
+      <p v-if="msg.autostart" class="py-1 text-[11px] text-crit">{{ msg.autostart }}</p>
+
+      <!-- 数据存储目录 -->
+      <div class="flex items-center justify-between py-3">
+        <span class="text-xs font-medium text-ink">本地缓存与数据库路径</span>
+        <span class="max-w-md truncate rounded bg-well px-2 py-0.5 text-[11px] text-dim tnum" :title="cfg?.dir">
+          {{ cfg?.dir }}
+        </span>
+      </div>
+    </div>
   </div>
 </template>

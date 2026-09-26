@@ -1,4 +1,4 @@
-# glmquotawatch-gui
+﻿# glmquotawatch-gui
 
 智谱 GLM（bigmodel）编码套餐用量监控的**桌面 GUI 工具**（Wails v3 + 托盘常驻）：定时采样各额度窗口用量，跨越阈值档位（默认 50/60/80/90%）时弹原生 Windows Toast 告警；主窗仪表盘 + 历史趋势曲线；内置 60 倍速演示模式。归档项目 `glmquotawatch`（CLI 版）的 GUI 复活版。
 
@@ -12,9 +12,15 @@
 
 ```powershell
 cd go_projects\glmquotawatch-gui
-npm install          # 首次，在 frontend/ 内（wails3 build 也会按需执行）
-wails3 build         # 产出 bin\glmquotawatch-gui.exe（含版本号注入）
-wails3 dev           # 开发模式（前端热更新）
+npm install                           # 首次，在 frontend/ 内
+
+# 生产构建（产出 bin\glmquotawatch-gui.exe，数据目录 \prod，启用开机自启）：
+.\scripts\build-prod.ps1
+
+# 开发构建（产出 bin\glmquotawatch-gui-dev.exe，数据目录 \dev，独立单例互斥，禁用开机自启）：
+.\scripts\build-dev.ps1
+
+wails3 dev                            # 开发调试模式（前端热更新）
 ```
 
 - exe 图标：`build/windows/icon.ico`（自定义青色用量环 + 珊瑚告警段），托盘图标与 exe 图标共用同一文件，经 `wails3 generate syso` 注入；wails 构建后自动清理根目录临时 `*.syso`，**不要提交静态 syso**。
@@ -49,7 +55,7 @@ wails3 dev           # 开发模式（前端热更新）
 
 ## 数据目录
 
-`%APPDATA%\language_projects\glmquotawatch-gui\`：`config.json`（token 明文本机保存）、`state.json`（已告警档位记录）、`samples-YYYY-MM.jsonl`（采样历史）；`demo\` 子目录为演示数据（每次进入演示清空重建）。环境变量 `GLMQUOTAWATCH_GUI_API_BASE` 可覆盖上游地址（默认 `https://open.bigmodel.cn`）。
+`%APPDATA%\language_projects\glmquotawatch-gui\<prod|dev>\`：根据运行版本自动路由隔离。含 `config.json`（token 明文本机保存）、`state.json`（已告警档位记录）、`samples-YYYY-MM.jsonl`（采样历史）；`demo\` 子目录为演示数据（每次进入演示清空重建）。环境变量 `GLMQUOTAWATCH_GUI_API_BASE` 可覆盖上游地址（默认 `https://open.bigmodel.cn`）。
 
 ## Wails beta 升级必回归项
 

@@ -1,21 +1,25 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 
-/* 浅色产品化设计令牌：贴近 CC Switch 的浅色 + 绿主色观感 */
+/* Raycast / Linear 质感浅色桌面设计令牌 */
 @theme {
-  --color-bg: #f6f8f7;
+  --color-bg: #f4f6f5;
   --color-panel: #ffffff;
-  --color-well: #eef2f0;
-  --color-edge: #e4e9e6;
-  --color-brand: #10b981;
-  --color-brand-deep: #059669;
-  --color-warn: #d97706;
-  --color-crit: #dc2626;
-  --color-ink: #1f2937;
-  --color-dim: #6b7280;
-  --color-faint: #9ca3af;
+  --color-panel-hover: #fafbfa;
+  --color-well: #eaeef0;
+  --color-edge: #e1e6e3;
+  --color-edge-strong: #d0d7d3;
+  --color-brand: #0d9468;
+  --color-brand-deep: #087451;
+  --color-brand-light: #e6f5ef;
+  --color-warn: #c25e00;
+  --color-warn-light: #fef3e6;
+  --color-crit: #be123c;
+  --color-crit-light: #fef1f2;
+  --color-ink: #111827;
+  --color-dim: #4b5563;
+  --color-faint: #8b97a2;
 }
 
-/* 浅色亮堂基调 */
 :root {
   color-scheme: light;
 }
@@ -28,32 +32,67 @@ body,
 }
 
 body {
-  background-color: #f6f8f7;
-  color: #1f2937;
-  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   user-select: none;
+  letter-spacing: -0.011em;
 }
 
 ::selection {
-  background: rgba(16, 185, 129, 0.22);
+  background: rgba(13, 148, 104, 0.18);
+  color: #087451;
 }
 
-/* 数字对齐：百分比与倒计时等宽展示 */
+/* 数字等宽与微排版 */
 .tnum {
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }
 
-/* 滚动条：浅色细条 */
+/* Linear/Raycast 质感桌面微阴影与内高光 */
+.shadow-subtle {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 3px 8px rgba(15, 23, 42, 0.03);
+}
+
+.shadow-card {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 6px 16px -2px rgba(15, 23, 42, 0.04);
+}
+
+.inset-highlight {
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.85);
+}
+
+.btn-press {
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-press:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+/* 呼吸动画 */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.65; transform: scale(0.92); }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2.4s ease-in-out infinite;
+}
+
+/* 优雅细滚动条 */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d5ddd8;
-  border-radius: 4px;
+  background: #d6ded9;
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #c2ccc6;
+  background: #bec9c3;
 }
 ::-webkit-scrollbar-track {
   background: transparent;

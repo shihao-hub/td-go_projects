@@ -1,4 +1,4 @@
-// autostart.go：开机自启薄封装。
+﻿// autostart.go：开机自启薄封装。
 // Wails v3 beta.25 内置 app.Autostart（Windows 实现为 HKCU\…\CurrentVersion\Run
 // 注册表值，与设计一致）；本文件只补 dev 期防呆：临时构建产物（go run /
 // go-build 缓存）拒绝注册，避免重启后留下失效自启项（评审 R-8）。
@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"glmquotawatch-gui/internal/env"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -20,6 +22,9 @@ const autostartValueName = "glmquotawatch-gui"
 func setAutostart(app *application.App, enabled bool) error {
 	if !enabled {
 		return app.Autostart.Disable()
+	}
+	if !env.AutostartAllowed() {
+		return fmt.Errorf("dev_mode: 开发版禁止注册开机自启，防止污染系统注册表与生产环境踩踏")
 	}
 	if err := devExecutableGuard(); err != nil {
 		return err

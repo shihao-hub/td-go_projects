@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { onMounted } from "vue";
 import { store, refreshState } from "./store";
 import { useEvents } from "./composables/useEvents";
@@ -8,8 +8,8 @@ import Settings from "./pages/Settings.vue";
 
 const tabs = [
   { key: "dashboard", label: "仪表盘" },
-  { key: "history", label: "历史" },
-  { key: "settings", label: "设置" },
+  { key: "history", label: "历史走势" },
+  { key: "settings", label: "偏好配置" },
 ] as const;
 
 useEvents({
@@ -24,7 +24,7 @@ onMounted(() => {
   void refreshState();
 });
 
-// 页脚状态栏：上次采样的本地时间（事件回流时整体 refreshState）
+// 页脚状态栏：上次采样的本地时间
 function lastSample(): string {
   const at = store.state?.status?.sampled_at;
   return at ? new Date(at).toLocaleTimeString() : "--:--:--";
@@ -32,25 +32,41 @@ function lastSample(): string {
 </script>
 
 <template>
-  <div class="flex h-full flex-col">
-    <!-- 顶栏：品牌名 + 演示徽标 + 分段导航 -->
-    <header class="flex items-center gap-3 border-b border-edge bg-panel px-5 py-3">
-      <h1 class="text-sm font-bold text-brand-deep">GLM 用量监控</h1>
-      <span
-        v-if="store.state?.mode === 'demo'"
-        class="flex items-center gap-1.5 rounded-full bg-warn/10 px-2.5 py-0.5 text-[11px] font-medium text-warn"
-      >
-        <span class="h-1.5 w-1.5 rounded-full bg-warn"></span>
-        演示模式 ×60
-      </span>
-      <nav class="ml-auto flex gap-1 rounded-lg bg-well p-1">
+  <div class="flex h-full flex-col bg-bg text-ink">
+    <!-- 顶栏：Raycast 质感桌面工具栏（内高光 + 悬浮胶囊 Tab + 状态微标） -->
+    <header class="flex h-12 shrink-0 items-center justify-between border-b border-edge bg-panel px-4 shadow-subtle inset-highlight">
+      <div class="flex items-center gap-2.5">
+        <!-- 精密微图标：脉冲状态指示器 -->
+        <div class="relative flex h-6 w-6 items-center justify-center rounded-md border border-edge-strong bg-well shadow-inner">
+          <svg class="h-3.5 w-3.5 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+          </svg>
+          <span
+            class="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full"
+            :class="store.state?.mode === 'demo' ? 'bg-warn animate-pulse-subtle' : (store.state?.config?.has_token ? 'bg-brand' : 'bg-faint')"
+          />
+        </div>
+        <div class="flex flex-col">
+          <span class="text-xs font-semibold tracking-tight text-ink">GLM 用量监控</span>
+        </div>
+        <span
+          v-if="store.state?.mode === 'demo'"
+          class="flex items-center gap-1.5 rounded-full border border-warn/25 bg-warn-light px-2 py-0.5 text-[10px] font-medium text-warn shadow-xs"
+        >
+          <span class="h-1 w-1 rounded-full bg-warn animate-pulse-subtle"></span>
+          演示 ×60
+        </span>
+      </div>
+
+      <!-- Linear 风格精巧分段导航 -->
+      <nav class="flex items-center gap-0.5 rounded-lg border border-edge bg-well/90 p-0.5 shadow-inner">
         <button
           v-for="t in tabs"
           :key="t.key"
-          class="rounded-md px-3 py-1 text-xs transition-colors"
+          class="btn-press rounded-[6px] px-3 py-1 text-xs font-medium transition-all"
           :class="
             store.tab === t.key
-              ? 'bg-panel font-medium text-ink shadow-sm'
+              ? 'bg-panel text-ink shadow-xs inset-highlight'
               : 'text-dim hover:text-ink'
           "
           @click="store.tab = t.key"
@@ -60,41 +76,41 @@ function lastSample(): string {
       </nav>
     </header>
 
-    <!-- 内容区 -->
+    <!-- 主展示区 -->
     <main class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <Dashboard v-show="store.tab === 'dashboard'" />
       <History v-show="store.tab === 'history'" />
       <Settings v-show="store.tab === 'settings'" />
     </main>
 
-    <!-- 页脚状态栏 -->
-    <footer class="flex items-center gap-5 border-t border-edge bg-panel px-5 py-1.5 text-[11px]">
-      <span>
-        <span class="text-faint">模式</span>
+    <!-- 精细状态状态栏（类似状态微调器） -->
+    <footer class="flex h-7 shrink-0 items-center justify-between border-t border-edge bg-panel px-4 text-[11px] text-dim select-none shadow-xs">
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-1.5">
+          <span class="h-1.5 w-1.5 rounded-full" :class="store.state?.mode === 'demo' ? 'bg-warn' : 'bg-brand'"></span>
+          <span class="font-medium text-ink">{{ store.state?.mode === "demo" ? "演示模式" : "持续监控中" }}</span>
+        </div>
+        <span class="text-edge-strong">|</span>
+        <div>
+          <span class="text-faint">周期 </span>
+          <span class="font-medium text-ink tnum">{{ store.state?.config?.interval ?? "--" }}</span>
+        </div>
+        <span class="text-edge-strong">|</span>
+        <div>
+          <span class="text-faint">上次快照 </span>
+          <span class="font-medium text-ink tnum">{{ lastSample() }}</span>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <span class="text-faint">API 凭据</span>
         <span
-          class="ml-1.5 font-semibold"
-          :class="store.state?.mode === 'demo' ? 'text-warn' : 'text-brand-deep'"
+          class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium"
+          :class="store.state?.config?.has_token ? 'bg-brand-light text-brand-deep' : 'bg-warn-light text-warn'"
         >
-          {{ store.state?.mode === "demo" ? "演示" : "监控中" }}
+          {{ store.state?.config?.has_token ? "已就绪" : "待配置" }}
         </span>
-      </span>
-      <span>
-        <span class="text-faint">间隔</span>
-        <span class="ml-1.5 text-dim tnum">{{ store.state?.config?.interval ?? "--" }}</span>
-      </span>
-      <span>
-        <span class="text-faint">上次采样</span>
-        <span class="ml-1.5 text-dim tnum">{{ lastSample() }}</span>
-      </span>
-      <span class="ml-auto">
-        <span class="text-faint">Token</span>
-        <span
-          class="ml-1.5 font-semibold"
-          :class="store.state?.config?.has_token ? 'text-brand-deep' : 'text-warn'"
-        >
-          {{ store.state?.config?.has_token ? "已配置" : "未配置" }}
-        </span>
-      </span>
+      </div>
     </footer>
   </div>
 </template>
