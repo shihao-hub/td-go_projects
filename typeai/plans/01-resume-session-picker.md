@@ -36,7 +36,7 @@ Plan for: "/resume 会话选择弹窗与本地摘要"
   - 验证：`go test ./internal/tui -run TestResumePicker -count=1`，预期打开弹窗、上下移动、Enter 选中目标会话、Esc 恢复原对话视图均通过。
   - Demo：启动 TUI 输入 `/resume`，弹窗显示最近会话摘要，上下选择后 Enter 恢复。
 
-- [ ] Task 3: 更新文档并完成验收
+- [x] Task 3: 更新文档并完成验收
   - 文件：`README.md`
   - 实现：在交互命令和按键说明中补充 `/resume` 的弹窗行为、`/resume <session-id>` 兼容行为、摘要来源与边界；不改变 CLI schema。
   - 验证：`go build ./...`、`python build.py -v dev`、`.\build\typeai.exe schema`，预期 build 成功且 schema 正常输出；`go test ./...` 作为回归备用命令。
@@ -45,4 +45,4 @@ Plan for: "/resume 会话选择弹窗与本地摘要"
 ---
 **最后更新：** 2026-09-27
 **作者：** AI & User
-**版本：** v1.0.0
+**版本：** v1.0.1
