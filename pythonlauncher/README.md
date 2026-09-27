@@ -19,7 +19,7 @@ uv run --project <项目目录> -- <命令名> <exe 收到的所有参数>
 
 ```powershell
 # 1. 编译通用件（产出 pythonlauncher\launcher.exe）
-.\build.ps1
+uv run build.py
 
 # 2a. 交互式复制：把已构建的 launcher.exe 复制到任意指定目录，按提示选名字
 #     （[1] 目标目录名 / [2] 自定义 / [3] launcher.exe；目标已存在时询问覆盖）
