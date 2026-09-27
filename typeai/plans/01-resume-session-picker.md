@@ -5,6 +5,7 @@ Plan for: "/resume 会话选择弹窗与本地摘要"
 **需求**：
 - `/resume` 不带参数时弹出会话选择列表；`/resume <session-id>` 保留手输恢复路径。
 - 摘要为本地规则生成，不联网、不调用模型、不新增 session schema 字段。
+- 若存在分支树，选择列表中需显示分支 ID 列表，避免 fork 会话不可见。
 - 弹窗交互为最小可用：上下选择、Enter 恢复、Esc 取消。
 - 会话按 `updated_at` 降序展示；当前进程所在会话不出现在列表中。
 - 单个损坏 session 文件不阻断其他会话展示。
@@ -37,6 +38,11 @@ Plan for: "/resume 会话选择弹窗与本地摘要"
   - Demo：启动 TUI 输入 `/resume`，弹窗显示最近会话摘要，上下选择后 Enter 恢复。
 
 - [x] Task 3: 更新文档并完成验收
+- [x] Task 4: 会话弹窗显示分支列表
+  - 文件：`internal/session/store.go`、`internal/tui/session_picker.go`、`README.md`
+  - 实现：`SessionSummary` 增加分支 ID 列表；弹窗条目增加 `branch:` 行，`visibleCount` 按 4 行条目计算。
+  - 验证：`python build.py -v dev` 成功；`go test ./...` 作为回归备用命令。
+  - Demo：打开 `/resume`，存在 fork 的会话可见分支列表。
   - 文件：`README.md`
   - 实现：在交互命令和按键说明中补充 `/resume` 的弹窗行为、`/resume <session-id>` 兼容行为、摘要来源与边界；不改变 CLI schema。
   - 验证：`go build ./...`、`python build.py -v dev`、`.\build\typeai.exe schema`，预期 build 成功且 schema 正常输出；`go test ./...` 作为回归备用命令。
@@ -45,4 +51,4 @@ Plan for: "/resume 会话选择弹窗与本地摘要"
 ---
 **最后更新：** 2026-09-27
 **作者：** AI & User
-**版本：** v1.0.1
+**版本：** v1.1.0
