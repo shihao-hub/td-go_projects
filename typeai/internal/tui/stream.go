@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"time"
 
 	"typeai/internal/llm"
 	"typeai/internal/service"
@@ -14,25 +15,44 @@ type sender interface {
 }
 
 type streamDeltaMsg struct {
-	Kind llm.DeltaKind
-	Text string
+	BranchID string
+	TurnID   string
+	Kind     llm.DeltaKind
+	Text     string
 }
 
 type streamResultMsg struct {
-	Err error
+	BranchID string
+	TurnID   string
+	Err      error
 }
 
 type elapsedTickMsg struct{}
 
-func startStream(commandSender sender, chat *service.Chat, ctx context.Context, input string) tea.Cmd {
-	return startStreamWithImages(commandSender, chat, ctx, input, nil)
+func scheduleElapsedTick() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return elapsedTickMsg{}
+	})
 }
 
-func startStreamWithImages(commandSender sender, chat *service.Chat, ctx context.Context, input string, images []service.Image) tea.Cmd {
+func startStream(commandSender sender, chat *service.Chat, ctx context.Context, branchID, turnID, input string) tea.Cmd {
+	return startStreamWithImages(commandSender, chat, ctx, branchID, turnID, input, nil)
+}
+
+func startStreamWithImages(commandSender sender, chat *service.Chat, ctx context.Context, branchID, turnID, input string, images []service.Image) tea.Cmd {
 	return func() tea.Msg {
-		err := chat.SendWithImages(ctx, input, images, func(delta llm.Delta) {
-			commandSender.Send(streamDeltaMsg{Kind: delta.Kind, Text: delta.Text})
+		err := chat.SendBranch(ctx, branchID, input, images, func(delta llm.Delta) {
+			commandSender.Send(streamDeltaMsg{
+				BranchID: branchID,
+				TurnID:   turnID,
+				Kind:     delta.Kind,
+				Text:     delta.Text,
+			})
 		})
-		return streamResultMsg{Err: err}
+		return streamResultMsg{
+			BranchID: branchID,
+			TurnID:   turnID,
+			Err:      err,
+		}
 	}
 }

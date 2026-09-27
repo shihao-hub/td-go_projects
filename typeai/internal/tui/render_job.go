@@ -13,6 +13,7 @@ const (
 
 type markdownRenderMsg struct {
 	Generation uint64
+	BranchID   string
 	Key        cacheKey
 	Output     string
 	Fallback   bool
@@ -93,6 +94,7 @@ func (m *model) startMarkdownRender(now time.Time, force bool) tea.Cmd {
 	m.renderDirty = false
 	m.renderGeneration++
 	generation := m.renderGeneration
+	branchID := m.activeBranchID
 	m.nextRenderAt = now.Add(markdownRenderInterval)
 	renderer := m.renderer
 	return func() tea.Msg {
@@ -103,6 +105,7 @@ func (m *model) startMarkdownRender(now time.Time, force bool) tea.Cmd {
 		}
 		return markdownRenderMsg{
 			Generation: generation,
+			BranchID:   branchID,
 			Key:        key,
 			Output:     output,
 			Fallback:   fallback,
@@ -114,7 +117,10 @@ func (m *model) applyRenderedMarkdown(msg markdownRenderMsg) tea.Cmd {
 	m.rendering = false
 	m.cache.put(msg.Key, msg.Output)
 	m.nextRenderAt = m.now().Add(markdownRenderInterval)
-	m.refreshViewport()
+
+	if msg.BranchID == m.activeBranchID {
+		m.refreshViewport()
+	}
 
 	if m.renderDirty {
 		return m.queueMarkdownRender(m.now(), false)

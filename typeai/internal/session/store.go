@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion 是 session JSON 的当前结构版本。
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // Message 是落盘的一条对话消息。
 type Message struct {
@@ -33,12 +33,66 @@ type Image struct {
 
 // Session 是单个 typeai 进程对应的完整会话。
 type Session struct {
-	SchemaVersion int       `json:"schema_version"`
-	ID            string    `json:"id"`
-	Model         string    `json:"model"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	Messages      []Message `json:"messages"`
+	SchemaVersion  int       `json:"schema_version"`
+	ID             string    `json:"id"`
+	Model          string    `json:"model"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	RootBranchID   string    `json:"root_branch_id,omitempty"`
+	ActiveBranchID string    `json:"active_branch_id,omitempty"`
+	Branches       []Branch  `json:"branches,omitempty"`
+	Messages       []Message `json:"messages,omitempty"`
+}
+
+// Normalize 规范化 Session 结构，将 schema v2 自动迁移到 v3，并验证分支树结构。
+func (s *Session) Normalize() error {
+	if s.SchemaVersion < 3 || len(s.Branches) == 0 {
+		if s.RootBranchID == "" {
+			s.RootBranchID = DefaultRootBranchID
+		}
+		if s.ActiveBranchID == "" {
+			s.ActiveBranchID = s.RootBranchID
+		}
+		if len(s.Branches) == 0 {
+			s.Branches = []Branch{
+				{
+					ID:               s.RootBranchID,
+					ParentID:         "",
+					ForkMessageIndex: 0,
+					Messages:         s.Messages,
+					CreatedAt:        s.CreatedAt,
+				},
+			}
+		}
+		s.SchemaVersion = SchemaVersion
+	}
+	if s.RootBranchID == "" {
+		s.RootBranchID = DefaultRootBranchID
+	}
+	if s.ActiveBranchID == "" {
+		s.ActiveBranchID = s.RootBranchID
+	}
+
+	if err := ValidateBranches(s.RootBranchID, s.Branches); err != nil {
+		return err
+	}
+
+	// 保持内存中 Messages 与激活分支解析后的历史一致，兼容旧调用
+	if resolved, err := ResolveMessages(s.ActiveBranchID, s.Branches); err == nil {
+		s.Messages = resolved
+	}
+	return nil
+}
+
+// UnmarshalJSON 自定义反序列化，自动将旧版本会话迁移为 v3 分支树结构。
+func (s *Session) UnmarshalJSON(data []byte) error {
+	type alias Session
+	var aux alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return fmt.Errorf("解析会话 JSON 失败: %w", err)
+	}
+	*s = Session(aux)
+	return s.Normalize()
 }
 
 // Store 管理一个 session 文件；创建时不写盘，首轮成功回答后才落盘。
@@ -73,7 +127,16 @@ func (s *Store) Save(session Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	raw, err := json.MarshalIndent(session, "", "  ")
+	if err := session.Normalize(); err != nil {
+		return fmt.Errorf("会话结构非法: %w", err)
+	}
+
+	// 落盘时剥离顶层冗余的 messages，保持 schema v3 干净分支树
+	toSave := session
+	toSave.Messages = nil
+	toSave.SchemaVersion = SchemaVersion
+
+	raw, err := json.MarshalIndent(toSave, "", "  ")
 	if err != nil {
 		return fmt.Errorf("序列化会话失败: %w", err)
 	}
@@ -82,6 +145,58 @@ func (s *Store) Save(session Session) error {
 		return fmt.Errorf("创建会话目录失败: %w", err)
 	}
 	return writeFileAtomic(s.path, raw, 0o600)
+}
+
+// IsValidSessionID 校验是否为合法的 8 位小写十六进制 session ID。
+func IsValidSessionID(id string) bool {
+	if len(id) != 8 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		b := id[i]
+		if !((b >= '0' && b <= '9') || (b >= 'a' && b <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// LoadByID 从 sessions 目录加载指定 session ID 的持久化会话。
+func LoadByID(dataDir string, id string) (*Store, *Session, error) {
+	if !IsValidSessionID(id) {
+		return nil, nil, fmt.Errorf("非法 session ID: 必须为 8 位小写十六进制字符")
+	}
+
+	sessionsDir := filepath.Join(dataDir, "sessions")
+	pattern := filepath.Join(sessionsDir, "*-"+id+".json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, nil, fmt.Errorf("查找会话文件失败: %w", err)
+	}
+	if len(matches) == 0 {
+		return nil, nil, fmt.Errorf("未找到 session ID 为 %s 的会话", id)
+	}
+	if len(matches) > 1 {
+		return nil, nil, fmt.Errorf("存在多个匹配 session ID 为 %s 的会话", id)
+	}
+
+	targetPath := matches[0]
+	raw, err := os.ReadFile(targetPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("读取会话文件失败: %w", err)
+	}
+
+	var sess Session
+	if err := json.Unmarshal(raw, &sess); err != nil {
+		return nil, nil, fmt.Errorf("解析会话失败: %w", err)
+	}
+
+	store := &Store{
+		dir:  sessionsDir,
+		path: targetPath,
+		id:   sess.ID,
+	}
+	return store, &sess, nil
 }
 
 func randomID() (string, error) {

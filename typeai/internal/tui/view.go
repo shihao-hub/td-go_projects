@@ -17,6 +17,8 @@ var assistantStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
 var dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 var errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 var inputBorderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+var activeTabStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4")).Padding(0, 1)
+var inactiveTabStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(0, 1)
 
 func (m *model) View() string {
 	if !m.ready {
@@ -34,6 +36,7 @@ func (m *model) View() string {
 		errorBar = errorStyle.Render(prefix + errorSummary(uiErr))
 	}
 	sections := []string{
+		m.tabBarView(),
 		m.viewport.View(),
 		m.inputView(),
 	}
@@ -42,10 +45,30 @@ func (m *model) View() string {
 	}
 	sections = append(sections,
 		m.statusView(),
-		dimStyle.Render("Enter 发送 · Ctrl+J 换行 · Ctrl+V 文本 · Alt+V 图片 · /image <路径> 添加图片 · Ctrl+T thinking · Ctrl+E 折叠 · PgUp/PgDn 滚动 · Ctrl+C 退出"),
+		dimStyle.Render("Enter 发送 · Ctrl+J 换行 · Alt+F (或 /fork) 分支 · Ctrl+Left/Right 切分支 · Ctrl+V 文本 · Alt+V 图片 · Ctrl+T thinking · Ctrl+E 折叠 · Ctrl+C 退出"),
 		errorBar,
 	)
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+func (m *model) tabBarView() string {
+	if len(m.branchOrder) == 0 {
+		return ""
+	}
+	tabs := make([]string, 0, len(m.branchOrder))
+	for _, id := range m.branchOrder {
+		title := id
+		b := m.branches[id]
+		if b != nil && b.Running {
+			title += "*"
+		}
+		if id == m.activeBranchID {
+			tabs = append(tabs, activeTabStyle.Render(title))
+		} else {
+			tabs = append(tabs, inactiveTabStyle.Render(title))
+		}
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 }
 
 // inputView renders the editor like a standalone prompt area: no per-line
@@ -82,9 +105,10 @@ func (m *model) statusView() string {
 		reasoningChars = m.messages[len(m.messages)-1].ReasoningChars
 	}
 	status := fmt.Sprintf(
-		"%s · %s · %s · thinking %d chars",
+		"%s · %s [%s] · %s · thinking %d chars",
 		m.chat.Model(),
 		truncateRunes(m.sessionLabel(), max(8, m.viewport.Width/3)),
+		m.activeBranchID,
 		m.currentStatus(),
 		reasoningChars,
 	)

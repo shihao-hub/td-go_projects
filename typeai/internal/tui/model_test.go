@@ -153,14 +153,17 @@ func TestInputHeightGrowsWithCtrlJ(t *testing.T) {
 func TestStreamingTurnStaysPlainTextUntilFinished(t *testing.T) {
 	m := newModel(nil, newMarkdownRenderer("notty"), false, 80, 24)
 	m.resize(80, 24)
-	m.active = &activeTurn{ID: "turn-0001"}
+	b := m.branches[m.activeBranchID]
+	b.Active = &activeTurn{ID: "turn-0001"}
+	b.Running = true
+	m.active = b.Active
 
-	m.applyDelta(streamDeltaMsg{Kind: llm.DeltaAnswer, Text: "# Heading"})
+	m.applyDelta(streamDeltaMsg{BranchID: m.activeBranchID, TurnID: "turn-0001", Kind: llm.DeltaAnswer, Text: "# Heading"})
 	if _, _, ok := m.renderTarget(); ok {
 		t.Fatal("active streaming turn should not be a Markdown render target")
 	}
 
-	cmd := m.finishStream(nil)
+	cmd := m.finishStream(m.activeBranchID, "turn-0001", nil)
 	if cmd == nil {
 		t.Fatal("finished stream should schedule Markdown rendering")
 	}
