@@ -1,0 +1,6 @@
+build/
+*.exe
+# AI 工具链本地产物（Codex/Claude 会话生成的 skills），不属于项目交付物
+.agents/
+.claude/
+skills-lock.json
