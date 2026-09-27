@@ -24,7 +24,7 @@ Plan for: "/resume 会话选择弹窗与本地摘要"
 
 **任务分解**：
 
-- [ ] Task 1: 提供本地会话列表与摘要
+- [x] Task 1: 提供本地会话列表与摘要
   - 文件：`internal/session/store.go`、`internal/session/store_test.go`
   - 实现：新增 `SessionSummary`（ID、文件路径、模型、更新时间、首条用户输入、最近一条 AI 回复、消息数）和 `ListSessions(dataDir)`；读取 `*.json`，跳过临时文件、损坏 JSON 与无法解析分支的文件；摘要统一压缩空白并限长。
   - 验证：`go test ./internal/session -run TestListSessions -count=1`，预期排序、字段摘要和损坏文件跳过均通过。
