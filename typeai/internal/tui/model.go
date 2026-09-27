@@ -1003,7 +1003,6 @@ func (m *model) finishStream(branchID, turnID string, err error) tea.Cmd {
 		m.active = nil
 		m.operationErr = b.OperationErr
 		m.messages = resolveBranchUIMessages(branchID, m.branches)
-		m.follow = true
 		m.markRenderDirty()
 		m.markViewportDirty()
 		m.refreshViewport()
