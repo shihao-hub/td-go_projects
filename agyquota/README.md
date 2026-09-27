@@ -16,13 +16,13 @@
 
 ```powershell
 # 构建 agyquota.exe（版本与 buildID 由 git describe --tags --always --dirty 注入）
-.\scripts\build.ps1
+uv run scripts/build.py
 
 # 发布构建：仅干净 tag 检出（describe 形如 agyquota/v1.2.3）允许通过
-.\scripts\build.ps1 -Release
+uv run scripts/build.py --release
 
 # 构建并自动安装部署至系统 PATH
-.\scripts\install.ps1
+uv run scripts/install.py
 ```
 
 ### 2. 手动构建
@@ -109,7 +109,7 @@ Zed 凭据目录（`~/.gemini/antigravity-acp/`）对本工具**只读**。
 ```text
 git tag -a agyquota/v1.2.3 -m "agyquota v1.2.3"   # 父仓多项目共存，tag 带项目前缀
 git push --tags
-.\scripts\build.ps1 -Release                       # 仅干净 tag 检出可构建
+uv run scripts/build.py --release                   # 仅干净 tag 检出可构建
 ```
 
 `git describe --tags --always --dirty` 一份来源四处使用：开发指纹、握手 buildID（附 Unix 秒时间戳）、`--version` 输出、升级检测。
@@ -162,5 +162,5 @@ daemon 化改造（spec `02-daemon-architecture`）实测结果：
 
 待提交后补做（需要干净检出）：
 
-- 干净检出打临时 annotated tag `agyquota/v0.0.0` + `.\scripts\build.ps1` 的生产验收，完成后删除临时 tag；
+- 干净检出打临时 annotated tag `agyquota/v0.0.0` + `uv run scripts/build.py` 的生产验收，完成后删除临时 tag；
 - 静默副本缺失回退路径的「无可见窗口」人工核对（需故障注入删除 `bin\agy_silent.exe`）。
