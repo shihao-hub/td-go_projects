@@ -30,7 +30,7 @@ Plan for: "/resume 会话选择弹窗与本地摘要"
   - 验证：`go test ./internal/session -run TestListSessions -count=1`，预期排序、字段摘要和损坏文件跳过均通过。
   - Demo：在测试数据目录写入两个不同时间更新的 session，能返回两个摘要且按最近更新在前。
 
-- [ ] Task 2: 实现 TUI 会话选择弹窗
+- [x] Task 2: 实现 TUI 会话选择弹窗
   - 文件：`internal/tui/model.go`、`internal/tui/session_picker.go`、`internal/tui/view.go`、`internal/tui/session_picker_test.go`
   - 实现：model 增加选择态、候选列表与选中索引；`/resume` 无参数时先校验当前运行/暂存状态，再从 `Chat` 加载摘要；弹窗内拦截 Up/Down/Enter/Esc，Enter 后关闭弹窗并复用 `model.resume(id)`；视图渲染居中卡片、标题、会话摘要与底部提示。
   - 验证：`go test ./internal/tui -run TestResumePicker -count=1`，预期打开弹窗、上下移动、Enter 选中目标会话、Esc 恢复原对话视图均通过。
