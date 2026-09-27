@@ -58,6 +58,6 @@ include 先缩小范围，exclude 最终否决。`*`、`?`、字符类匹配单�
 ## 构建
 
 ```powershell
-.\scripts\build.ps1 -Version 1.0.0
+uv run scripts/build.py --version 1.0.0
 go build ./...
 ```
