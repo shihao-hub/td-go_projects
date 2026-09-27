@@ -15,7 +15,7 @@ import (
 	"quickask/internal/store"
 )
 
-// version 由 build.ps1 之外的手动构建注入位；默认 dev。
+// version 由 build.py 之外的手动构建注入位；默认 dev。
 var version = "dev"
 
 func main() {

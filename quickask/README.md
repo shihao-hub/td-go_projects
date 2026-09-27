@@ -31,7 +31,7 @@ quickask help
 ```
 go build ./cmd/quickask    # CLI 客户端
 go build ./cmd/quickaskd   # 后端守护
-./build.ps1                # 两个一起
+uv run build.py                # 两个一起
 ```
 
 ## 与 aiquick 的关系
