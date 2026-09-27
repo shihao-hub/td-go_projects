@@ -47,7 +47,7 @@ sublimefolders/
    - 纯内部函数（showText/showCurrent/captureOnce/pruneOnce、Store 的查询方法等）保持小写
 2. 原单文件 `main.go`（练习版）与 `main_by_ai.go`（托盘版）各自成为 `cmd/` 下的真入口；
    托盘版入口调用共享包：`import app "sublimefolders"`，然后 `app.OpenStore()` 等。
-3. 构建 `build.ps1` 拆为 `scripts/build-*.ps1` 两个，用 `$PSScriptRoot` 定位仓库根，
+3. 构建入口拆为 `scripts/build-*.py` 两个，用脚本自身路径定位仓库根，
    **从任意目录执行都不会跑偏**；产物统一输出到 `build/`。
 
 ## 四、日常命令
@@ -57,8 +57,8 @@ sublimefolders/
 | 跑练习版 | `go run ./cmd/practice` |
 | 本地跑托盘版（调试） | `go run ./cmd/sublimefolders -no-tray` |
 | 跑托盘版（带托盘） | `go run ./cmd/sublimefolders` |
-| 构建托盘版 exe | `.\scripts\build-tray.ps1` |
-| 构建练习版 exe | `.\scripts\build-practice.ps1` |
+| 构建托盘版 exe | `uv run scripts/build-tray.py` |
+| 构建练习版 exe | `uv run scripts/build-practice.py` |
 | 全量检查 | `gofmt -l .` + `go vet ./...` + `go build ./...` |
 
 练习版想调用现成实现：`import app "sublimefolders"` 后直接 `app.LoadAutoSession()` 等。
@@ -68,7 +68,7 @@ sublimefolders/
 1. `mkdir cmd/<新名字>`，写 `main.go`（`package main` + `func main()`）
 2. 复用共享包：`import app "sublimefolders"`
 3. 需要新命令行参数就用 `flag`，需要新共享逻辑就加到根目录 `app` 包并导出
-4. 需要独立构建就加 `scripts/build-<新名字>.ps1`（GUI 程序记得 `-H windowsgui`）
+4. 需要独立构建就加 `scripts/build-<新名字>.py`（GUI 程序记得 `-H windowsgui`）
 
 ## 六、给未来项目的初始结构模板
 
@@ -81,7 +81,7 @@ sublimefolders/
 ├── assets/                 # embed 资源，跟引用它的 .go 放一起
 ├── cmd/<入口A>/main.go     # 每个入口一个子目录，package main
 ├── cmd/<入口B>/main.go
-├── scripts/build-*.ps1     # 一个入口一个脚本，$PSScriptRoot 定位根目录
+├── scripts/build-*.py     # 一个入口一个脚本，脚本自身路径定位根目录
 └── build/                  # 产物目录，配合 .gitignore 的 *.exe
 ```
 

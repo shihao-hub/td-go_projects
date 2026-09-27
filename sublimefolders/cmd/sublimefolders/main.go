@@ -9,7 +9,7 @@
 // 数据与日志: %APPDATA%\sublimefolders\
 // 托盘菜单: 查看当前目录 / 最新 10 条记录 / 全部记录 / 打开数据目录 / 退出
 //
-// 构建脚本: scripts/build-tray.ps1
+// 构建脚本: scripts/build-tray.py
 package main
 
 import (
