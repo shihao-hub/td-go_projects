@@ -23,7 +23,7 @@
 
 ```powershell
 cd go_projects\liteconf
-.\scripts\build.ps1              # 产物 build/liteconf-server.exe + build/liteconf.exe
+uv run scripts/build.py               # 产物 build/liteconf-server.exe + build/liteconf.exe
 .\build\liteconf-server.exe      # 默认监听 :8646
 ```
 
@@ -252,13 +252,13 @@ liteconf/
 │   │   ├── api.go         # apiClient：HTTP 调 server /api/* 与统一业务错误
 │   │   ├── tools.go       # 三个工具的输入/输出类型、handler、点路径下钻
 │   │   └── view.go        # ToolSpecs：in-memory 读注册视图（供 schema 同源导出）
-│   └── version/           # 版本号注入点（build.ps1 -ldflags -X）
+│   └── version/           # 版本号注入点（build.py -ldflags -X）
 ├── client/                # SDK（公开路径，供业务 import）
 │   ├── client.go          # 初始化与公开 API
 │   ├── cache.go           # copy-on-write 快照缓存与点路径读取
 │   ├── poll.go            # 长轮询循环 + 指数退避重连
 │   └── callback.go        # OnChange 注册与异步派发
-└── scripts/build.ps1      # 构建脚本，产物输出 build/
+└── scripts/build.py       # 构建脚本，产物输出 build/
 ```
 
 ## 定位与边界
