@@ -86,7 +86,7 @@ clictl completion powershell --uninstall  # 卸载
 ## 构建
 
 ```powershell
-uv run scripts/build.py --version 1.0.0  # 产出单文件 clictl.exe，版本号注入
+uv run scripts/build.py  # 产出单文件 clictl.exe；--version 1.0.0 可指定版本（默认 dev）
 ```
 
 依赖 `modernc.org/sqlite`（纯 Go 无 CGO）与 `golang.org/x/sys`（Win32 探活）。完整设计见 `PLAN.md`，使用文档见父仓 `docs/projects/go_projects/clictl/clictl 使用指南.md`，表结构变更存档见父仓 `docs/projects/go_projects/clictl/migrations/`；其他 CLI 项目想复用本 JSON 输出模式，参考父仓 `docs/projects/go_projects/clictl/Go CLI JSON 输出模式参考.md`。
