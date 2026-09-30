@@ -74,6 +74,10 @@ type model struct {
 	status   string
 	cancel   context.CancelFunc
 
+	resumePicker      bool
+	resumeSummaries   []session.SessionSummary
+	resumePickerIndex int
+
 	renderer *markdownRenderer
 	cache    *markdownCache
 	style    string
@@ -232,6 +236,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) handleKey(msg tea.KeyMsg) (tea.Cmd, bool) {
+	if m.resumePicker {
+		switch msg.String() {
+		case "up":
+			m.moveResumePicker(-1)
+			return nil, false
+		case "down":
+			m.moveResumePicker(1)
+			return nil, false
+		case "enter":
+			return m.selectResumePicker()
+		case "esc":
+			m.closeResumePicker()
+			return nil, false
+		}
+	}
 	if msg.Paste {
 		m.settlePendingEnter()
 		text := strings.ReplaceAll(string(msg.Runes), "\r\n", "\n")
@@ -646,21 +665,25 @@ func (m *model) renameBranch(oldID, newName string) tea.Cmd {
 	return nil
 }
 
-func (m *model) resume(sessionID string) tea.Cmd {
+func (m *model) resumeBlocked() error {
 	// 任意分支（含后台 Tab）存在流式请求时都必须拒绝，防止替换分支树后丢失在途事件
 	for id, b := range m.branches {
 		if b.Running {
-			m.operationErr = fmt.Errorf("无法恢复会话: 分支 %s 请求正在运行中", id)
-			m.status = "error"
-			m.refreshViewport()
-			return nil
+			return fmt.Errorf("无法恢复会话: 分支 %s 请求正在运行中", id)
 		}
 		if len(b.Staged) > 0 {
-			m.operationErr = fmt.Errorf("无法恢复会话: 分支 %s 存在暂存的图片，请先 /detach", id)
-			m.status = "error"
-			m.refreshViewport()
-			return nil
+			return fmt.Errorf("无法恢复会话: 分支 %s 存在暂存的图片，请先 /detach", id)
 		}
+	}
+	return nil
+}
+
+func (m *model) resume(sessionID string) tea.Cmd {
+	if err := m.resumeBlocked(); err != nil {
+		m.operationErr = err
+		m.status = "error"
+		m.refreshViewport()
+		return nil
 	}
 
 	sessionID = strings.TrimSpace(sessionID)
@@ -795,10 +818,7 @@ func (m *model) submit() tea.Cmd {
 		m.input.Reset()
 		m.syncInputLayout()
 		if arg == "" {
-			m.operationErr = fmt.Errorf("用法: /resume <session-id>")
-			m.status = "error"
-			m.refreshViewport()
-			return nil
+			return m.openResumePicker()
 		}
 		return m.resume(arg)
 	}

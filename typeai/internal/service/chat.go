@@ -237,6 +237,22 @@ func (c *Chat) Resume(sessionID string) (*session.Session, error) {
 	return loadedSess, nil
 }
 
+// SessionSummaries 返回可选择的持久化会话摘要，并隐藏当前进程所在会话。
+func (c *Chat) SessionSummaries() ([]session.SessionSummary, error) {
+	summaries, err := session.ListSessions(c.dataDir)
+	if err != nil {
+		return nil, coded("internal", err.Error())
+	}
+
+	selectable := make([]session.SessionSummary, 0, len(summaries))
+	for _, summary := range summaries {
+		if summary.ID != c.session.ID {
+			selectable = append(selectable, summary)
+		}
+	}
+	return selectable, nil
+}
+
 // Send 发送一轮消息。请求使用历史副本，只有 AI 完整回答且 session 落盘成功后才提交历史。
 func (c *Chat) Send(ctx context.Context, input string, onDelta func(delta llm.Delta)) error {
 	return c.SendWithImages(ctx, input, nil, onDelta)

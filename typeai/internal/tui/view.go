@@ -25,6 +25,10 @@ func (m *model) View() string {
 		return "终端尺寸至少需要 20x8"
 	}
 
+	if m.resumePicker {
+		return m.sessionPickerView()
+	}
+
 	errorBar := ""
 	uiErr := m.operationErr
 	prefix := "error: "

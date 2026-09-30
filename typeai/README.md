@@ -24,6 +24,7 @@ typeai help
 /branch <id>                      切换到指定分支（如 /branch main、/branch fork-01）
 /branch rm [id]                   删除指定分支（缺省删除当前分支；根分支或存在子分支时受保护）
 /branch rename [old-id] <new-name> 重命名分支（支持别名 /rename <new-name>）
+/resume                           打开会话选择弹窗；按最近更新时间排序并显示本地摘要
 /resume <id>                      恢复指定 session ID（8 位小写十六进制）的持久化会话
 /image <路径>                     添加本地图片
 /detach                           清空已暂存图片
@@ -43,7 +44,7 @@ Alt+V               读取剪贴板图片并插入图片标记
 Ctrl+T              展开或折叠当前 thinking
 Ctrl+E              展开或折叠超过 2000 字符或 40 行的 user/assistant 文本
 PgUp/PgDn           翻页滚动
-Up/Down             多行输入中移动光标；已到边界时逐行滚动
+Up/Down             多行输入中移动光标；已到边界时逐行滚动；会话弹窗中切换选择
 Ctrl+C              请求进行中先取消；空闲时退出
 /exit/quit          退出
 ```
@@ -151,7 +152,7 @@ session JSON 采用 **Schema Version 3** 结构：
 
 - `fork_message_index` 遵循半开区间 `[0, fork_message_index)`，表示继承父分支解析后历史的前 N 条消息。子分支在此基础上追加本地新增消息。
 - **向后兼容**：读取已有的 `schema_version: 2` 会话时，系统自动在内存中将其映射为 `main` 根分支，后续写盘时升级为 version 3。
-- **会话恢复**：在 TUI 空闲时通过 `/resume <session-id>` 命令恢复已有会话。只接受 8 位小写十六进制短 ID，不向 TUI 暴露文件路径或目录列表。
+- **会话恢复**：在 TUI 空闲时执行 `/resume` 打开选择弹窗，显示会话的本地摘要（首条用户输入、最近一条 AI 回复、模型、消息数和分支列表）；按 `Up/Down` 选择，`Enter` 恢复，`Esc` 取消。执行 `/resume <session-id>` 仍恢复指定会话，只接受 8 位小写十六进制短 ID，不向 TUI 暴露文件路径或目录列表。列表不包含当前进程所在会话；损坏 JSON 文件会被跳过。摘要只来自本地 session 文件，不联网、不调用模型。
 
 ## 功能范围与后续规划
 

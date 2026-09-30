@@ -5,9 +5,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,6 +45,19 @@ type Session struct {
 	ActiveBranchID string    `json:"active_branch_id,omitempty"`
 	Branches       []Branch  `json:"branches,omitempty"`
 	Messages       []Message `json:"messages,omitempty"`
+}
+
+// SessionSummary 是会话选择列表使用的只读快照。
+type SessionSummary struct {
+	ID            string
+	Path          string
+	Model         string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	FirstUser     string
+	LastAssistant string
+	MessageCount  int
+	Branches      []string
 }
 
 // Normalize 规范化 Session 结构，将 schema v2 自动迁移到 v3，并验证分支树结构。
@@ -197,6 +213,99 @@ func LoadByID(dataDir string, id string) (*Store, *Session, error) {
 		id:   sess.ID,
 	}
 	return store, &sess, nil
+}
+
+// ListSessions 枚举 sessions 目录中的完整会话，并按最近更新时间降序返回摘要。
+func ListSessions(dataDir string) ([]SessionSummary, error) {
+	sessionsDir := filepath.Join(dataDir, "sessions")
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []SessionSummary{}, nil
+		}
+		return nil, fmt.Errorf("读取会话目录失败: %w", err)
+	}
+
+	summaries := make([]SessionSummary, 0)
+	seen := make(map[string]bool)
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(sessionsDir, entry.Name())
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		var sess Session
+		if err := json.Unmarshal(raw, &sess); err != nil {
+			continue
+		}
+		if !IsValidSessionID(sess.ID) || seen[sess.ID] {
+			continue
+		}
+		history, err := ResolveMessages(sess.ActiveBranchID, sess.Branches)
+		if err != nil {
+			continue
+		}
+		seen[sess.ID] = true
+		summaries = append(summaries, SessionSummary{
+			ID:            sess.ID,
+			Path:          path,
+			Model:         sess.Model,
+			CreatedAt:     sess.CreatedAt,
+			UpdatedAt:     sess.UpdatedAt,
+			FirstUser:     firstMessageText(history, "user"),
+			LastAssistant: lastMessageText(history, "assistant"),
+			MessageCount:  len(history),
+			Branches:      branchIDs(sess.Branches),
+		})
+	}
+
+	sort.SliceStable(summaries, func(i, j int) bool {
+		if !summaries[i].UpdatedAt.Equal(summaries[j].UpdatedAt) {
+			return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
+		}
+		return summaries[i].Path < summaries[j].Path
+	})
+	return summaries, nil
+}
+
+func firstMessageText(messages []Message, role string) string {
+	for _, message := range messages {
+		if message.Role == role {
+			return summarizeMessage(message)
+		}
+	}
+	return ""
+}
+
+func lastMessageText(messages []Message, role string) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == role {
+			return summarizeMessage(messages[i])
+		}
+	}
+	return ""
+}
+
+func summarizeMessage(message Message) string {
+	text := strings.Join(strings.Fields(message.Content), " ")
+	runes := []rune(text)
+	const limit = 120
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit]) + "..."
+}
+
+func branchIDs(branches []Branch) []string {
+	ids := make([]string, 0, len(branches))
+	for _, branch := range branches {
+		ids = append(ids, branch.ID)
+	}
+	return ids
 }
 
 func randomID() (string, error) {
