@@ -2,3 +2,9 @@
 
 ---
 
+20260929
+
+agyquota 目前已经遵循 docs\projects\go_projects\CLI 工具开发标准 v2.md 原则，但是我没有阅读源代码去深度理解一下，这个很有必要，必然过度依赖 ai 了。
+
+---
+
