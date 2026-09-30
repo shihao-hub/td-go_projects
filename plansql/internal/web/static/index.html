@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plan/Spec 状态看板 - plansql</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <span class="icon">📑</span>
+            <h1>plansql Dashboard</h1>
+        </div>
+        <div class="header-actions">
+            <button id="btn-scan" class="btn btn-secondary">🔍 磁盘对齐扫描</button>
+            <button id="btn-check" class="btn btn-secondary">🛡️ 校验 SQL</button>
+            <button id="btn-refresh" class="btn btn-primary">🔄 刷新</button>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- 统计面板 -->
+        <section class="stats-bar">
+            <div class="stat-card">
+                <div class="stat-num" id="stat-total">0</div>
+                <div class="stat-label">全部登记</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num text-warning" id="stat-pending">0</div>
+                <div class="stat-label">待办 / 未开始</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num text-info" id="stat-progress">0</div>
+                <div class="stat-label">进行中</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num text-success" id="stat-completed">0</div>
+                <div class="stat-label">已完成</div>
+            </div>
+        </section>
+
+        <!-- 扫描提醒栏（未登记或悬空） -->
+        <div id="alert-banner" class="alert-banner hidden"></div>
+
+        <!-- 看板列 -->
+        <div class="board">
+            <div class="board-column" id="col-pending">
+                <div class="column-header">
+                    <h2>待办 (Pending)</h2>
+                    <span class="badge" id="badge-pending">0</span>
+                </div>
+                <div class="cards-list" id="cards-pending"></div>
+            </div>
+
+            <div class="board-column" id="col-progress">
+                <div class="column-header">
+                    <h2>进行中 (In Progress)</h2>
+                    <span class="badge" id="badge-progress">0</span>
+                </div>
+                <div class="cards-list" id="cards-progress"></div>
+            </div>
+
+            <div class="board-column" id="col-completed">
+                <div class="column-header">
+                    <h2>已完成 (Completed)</h2>
+                    <span class="badge" id="badge-completed">0</span>
+                </div>
+                <div class="cards-list" id="cards-completed"></div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 弹窗：状态修改 -->
+    <div id="modal-edit" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>更新状态</h3>
+                <span class="close" id="modal-close">&times;</span>
+            </div>
+            <form id="form-update">
+                <input type="hidden" id="edit-type">
+                <div class="form-group">
+                    <label>文档路径:</label>
+                    <input type="text" id="edit-path" readonly class="input-readonly">
+                </div>
+                <div class="form-group">
+                    <label>状态流转:</label>
+                    <select id="edit-state" class="input">
+                        <option value="pending">待办 (pending)</option>
+                        <option value="in_progress">进行中 (in_progress)</option>
+                        <option value="completed">已完成 (completed)</option>
+                        <option value="abandoned">已作废 (abandoned)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>状态 JSON 详情:</label>
+                    <textarea id="edit-json" rows="4" class="input" placeholder='{"state":"completed","note":"ok"}'></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel">取消</button>
+                    <button type="submit" class="btn btn-primary" id="btn-save">生成并追加 SQL</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>
