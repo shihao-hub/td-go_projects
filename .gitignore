@@ -21,3 +21,6 @@ vendor/
 # Go workspace 文件
 go.work
 go.work.sum
+
+# agy 下载到仓根了，先排除掉
+ComfyUI/
