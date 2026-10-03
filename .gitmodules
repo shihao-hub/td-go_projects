@@ -6,3 +6,5 @@
 [submodule "nginx-ai-proxy"]
 	branch = main
 	ignore = all
+	path = nginx-ai-proxy
+	url = git@github.com:shihao-hub/td-go_projects-nginx-ai-proxy.git
