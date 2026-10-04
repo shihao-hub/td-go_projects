@@ -16,7 +16,7 @@ go_projects/taskbarguard/
 ├── TASK_SCHEDULER.md           # Windows 计划任务完整管理手册 + 当前活跃任务清单
 └── scripts/                    # 应用图标脚本资产库
     ├── README.md               # 脚本库全量款式、生成工序揭秘与手动运行速查手册
-    ├── deepseek_harness/       # DeepSeek Harness 模块（款式 5 钛金属立体款已设为首选）
+    ├── deepseek_harness/       # DeepSeek Harness 模块（款式 8 环形底光通透款已设为首选 ⭐）
     └── vscode/                 # VS Code 模块（科技蓝微光 / 极客银白）
 ```
 
@@ -28,8 +28,8 @@ go_projects/taskbarguard/
 
 ### DeepSeek Harness
 ```powershell
-# 【款式 5 · 当前首选】应用钛金属立体雕刻款
-uv run scripts/deepseek_harness/patch_deepseek_harness_icon.py --custom-icon scripts/deepseek_harness/custom_icons/5_titanium_sculpted.ico --kill
+# 【款式 8 · 当前首选】应用环形底光立体款（上下通透）
+uv run scripts/deepseek_harness/patch_deepseek_harness_icon.py --custom-icon scripts/deepseek_harness/custom_icons/8_underlit_chrome.ico --kill
 
 # 恢复官方默认
 uv run scripts/deepseek_harness/patch_deepseek_harness_icon.py --restore
