@@ -10,7 +10,7 @@ TaskbarGuard - Windows 任务栏应用质感图标守卫与自动恢复引擎
 解决 Electron / InnoSetup 应用（如 VS Code、DeepSeek Harness 等）在后台自动静默更新后，
 PE 图标资源被官方默认图标覆盖导致任务栏视觉撕裂的痛点。
 
-【架构设计蓝图 (待实现)】
+【当前实现】
 1. 调度层 (Runner):
    - 默认扫描 `./scripts/<app>/` 目录。
    - 若指定 app 存在对应补丁脚本，通过 `uv run` 或嵌入式执行器调起执行。
@@ -113,9 +113,13 @@ func listApps(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	jsonOutput := fs.Bool("json", false, "输出 JSON")
+	schemaOutput := fs.Bool("schema", false, "输出当前命令的 JSON 契约")
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *schemaOutput {
+		return writeCommandSchema(stdout, "list")
 	}
 	apps, err := discoverApps(*scriptsDir)
 	if err != nil {
@@ -134,11 +138,15 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	jsonOutput := fs.Bool("json", false, "输出 JSON")
+	schemaOutput := fs.Bool("schema", false, "输出当前命令的 JSON 契约")
 	style := fs.String("style", "", "图标款式")
 	customIcon := fs.String("custom-icon", "", "自定义 ICO 路径")
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *schemaOutput {
+		return writeCommandSchema(stdout, "run")
 	}
 	if fs.NArg() != 1 {
 		return reportError(stdout, stderr, *jsonOutput, "invalid_arguments", "run 需要一个应用名")
@@ -156,7 +164,12 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 	}
 	argsForScript := []string{app.Script}
 	if *style != "" {
-		argsForScript = append(argsForScript, "--style", *style)
+		customStylePath := filepath.Join(*scriptsDir, appName, "custom_icons", *style+".ico")
+		if _, statErr := os.Stat(customStylePath); statErr == nil {
+			argsForScript = append(argsForScript, "--custom-icon", customStylePath)
+		} else {
+			argsForScript = append(argsForScript, "--style", *style)
+		}
 	}
 	if *customIcon != "" {
 		argsForScript = append(argsForScript, "--custom-icon", *customIcon)
@@ -175,12 +188,16 @@ func installScheduledTask(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("install-task", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	jsonOutput := fs.Bool("json", false, "输出 JSON")
+	schemaOutput := fs.Bool("schema", false, "输出当前命令的 JSON 契约")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *schemaOutput {
+		return writeCommandSchema(stdout, "install-task")
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return reportError(stdout, stderr, *jsonOutput, "executable_failed", err.Error())
-	}
-	if err := fs.Parse(args); err != nil {
-		return 2
 	}
 	if runtime.GOOS != "windows" {
 		return reportError(stdout, stderr, *jsonOutput, "unsupported_platform", "计划任务仅支持 Windows")
@@ -250,6 +267,15 @@ func inspectApp(dir, name string) (appInfo, error) {
 			app.Styles = append(app.Styles, strings.TrimSuffix(strings.TrimPrefix(file, "vscode_dark_"), ".ico"))
 		}
 	}
+	customIconDir := filepath.Join(dir, "custom_icons")
+	if iconEntries, readErr := os.ReadDir(customIconDir); readErr == nil {
+		for _, iconEntry := range iconEntries {
+			if iconEntry.IsDir() || !strings.HasSuffix(strings.ToLower(iconEntry.Name()), ".ico") {
+				continue
+			}
+			app.Styles = append(app.Styles, strings.TrimSuffix(iconEntry.Name(), filepath.Ext(iconEntry.Name())))
+		}
+	}
 	sort.Strings(app.Styles)
 	return app, nil
 }
@@ -267,12 +293,40 @@ func writeSchema(stdout io.Writer) int {
 	schema := map[string]interface{}{
 		"name": toolName, "version": schemaVersion, "interface": "cli",
 		"commands": []map[string]interface{}{
-			{"name": "list", "options": []string{"--json", "--scripts-dir"}},
-			{"name": "run", "options": []string{"--style", "--custom-icon", "--json", "--scripts-dir"}},
-			{"name": "install-task", "options": []string{"--json"}},
+			{"name": "list", "schema": "taskbarguard list --schema"},
+			{"name": "run", "schema": "taskbarguard run --schema"},
+			{"name": "install-task", "schema": "taskbarguard install-task --schema"},
 		},
 	}
 	return writeJSON(stdout, schema)
+}
+
+func writeCommandSchema(stdout io.Writer, command string) int {
+	commands := map[string]interface{}{
+		"list": map[string]interface{}{
+			"name": "list", "interface": "cli",
+			"arguments": map[string]interface{}{"positionals": 0},
+			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--scripts-dir": "string"},
+			"output":    "{ok:true,data:appInfo[]}",
+		},
+		"run": map[string]interface{}{
+			"name": "run", "interface": "cli",
+			"arguments": map[string]interface{}{"positionals": 1, "positionalName": "app"},
+			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--style": "string", "--custom-icon": "path", "--scripts-dir": "string"},
+			"output":    "{ok:true,data:{app:string}}",
+		},
+		"install-task": map[string]interface{}{
+			"name": "install-task", "interface": "cli",
+			"arguments": map[string]interface{}{"positionals": 0},
+			"options":   map[string]string{"--json": "boolean", "--schema": "boolean"},
+			"output":    "{ok:true,data:{task:string}}",
+		},
+	}
+	definition, ok := commands[command]
+	if !ok {
+		return reportError(stdout, io.Discard, false, "unknown_command", "未知命令: "+command)
+	}
+	return writeJSON(stdout, definition)
 }
 
 func writeJSON(w io.Writer, value interface{}) int {

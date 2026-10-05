@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,6 +28,16 @@ func TestDiscoverApps(t *testing.T) {
 	}
 	if !contains(apps[0].Styles, "blue") || !contains(apps[0].Styles, "silver") {
 		t.Fatalf("unexpected styles: %#v", apps[0].Styles)
+	}
+}
+
+func TestCommandSchemaDoesNotReadScripts(t *testing.T) {
+	var stdout bytes.Buffer
+	if code := run([]string{"list", "--schema", "--scripts-dir", filepath.Join(t.TempDir(), "missing")}, &stdout, discardWriter{}); code != 0 {
+		t.Fatalf("list schema returned %d", code)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte(`"name":"list"`)) {
+		t.Fatalf("unexpected schema: %s", stdout.String())
 	}
 }
 
