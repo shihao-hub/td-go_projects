@@ -70,6 +70,11 @@ type cliError struct {
 	Message string `json:"message"`
 }
 
+var (
+	version    = schemaVersion
+	commitHash = "unknown"
+)
+
 var commandRunner = func(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
@@ -87,7 +92,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if args[0] == "--version" || args[0] == "version" {
-		fmt.Fprintln(stdout, schemaVersion)
+		fmt.Fprintln(stdout, version)
 		return 0
 	}
 	if args[0] == "--schema" || args[0] == "schema" {
@@ -99,6 +104,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return listApps(args[1:], stdout, stderr)
 	case "run":
 		return runPatch(args[1:], stdout, stderr)
+	case "config":
+		return showConfig(args[1:], stdout, stderr)
+	case "set":
+		return setConfig(args[1:], stdout, stderr)
+	case "apply":
+		return applyConfig(args[1:], stdout, stderr)
 	case "install-task":
 		return installScheduledTask(args[1:], stdout, stderr)
 	case "help", "--help", "-h":
@@ -115,7 +126,7 @@ func listApps(args []string, stdout, stderr io.Writer) int {
 	jsonOutput := fs.Bool("json", false, "输出 JSON")
 	schemaOutput := fs.Bool("schema", false, "输出当前命令的 JSON 契约")
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeArgs(args)); err != nil {
 		return 2
 	}
 	if *schemaOutput {
@@ -141,17 +152,32 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 	schemaOutput := fs.Bool("schema", false, "输出当前命令的 JSON 契约")
 	style := fs.String("style", "", "图标款式")
 	customIcon := fs.String("custom-icon", "", "自定义 ICO 路径")
+	configPath := fs.String("config", defaultConfigFile, "配置文件路径")
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeArgs(args)); err != nil {
 		return 2
 	}
 	if *schemaOutput {
 		return writeCommandSchema(stdout, "run")
 	}
-	if fs.NArg() != 1 {
+	positionals, err := parsePositionals(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(positionals) != 1 {
 		return reportError(stdout, stderr, *jsonOutput, "invalid_arguments", "run 需要一个应用名")
 	}
-	appName := fs.Arg(0)
+	appName := positionals[0]
+	if *style == "" && *customIcon == "" {
+		config, err := LoadConfig(*configPath)
+		if err != nil {
+			return reportError(stdout, stderr, *jsonOutput, "config_failed", err.Error())
+		}
+		if preference, ok := config.Apps[appName]; ok {
+			*style = preference.Style
+			*customIcon = preference.CustomIcon
+		}
+	}
 	app, err := findApp(*scriptsDir, appName)
 	if err != nil {
 		return reportError(stdout, stderr, *jsonOutput, "app_not_found", err.Error())
@@ -211,6 +237,163 @@ func installScheduledTask(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "已注册计划任务: %s\n", scheduledTask)
 	return 0
+}
+
+func showConfig(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("config", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("file", defaultConfigFile, "配置文件路径")
+	jsonOutput := fs.Bool("json", false, "输出 JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	config, err := LoadConfig(*configPath)
+	if err != nil {
+		return reportError(stdout, stderr, *jsonOutput, "config_failed", err.Error())
+	}
+	return writeJSON(stdout, config)
+}
+
+func setConfig(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("set", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", defaultConfigFile, "配置文件路径")
+	style := fs.String("style", "", "预设款式")
+	customIcon := fs.String("custom-icon", "", "自定义 ICO 路径")
+	enabled := fs.Bool("enabled", true, "启用该应用")
+	if err := fs.Parse(normalizeArgs(args)); err != nil {
+		return 2
+	}
+	positionals, err := parsePositionals(fs, normalizeArgs(args))
+	if err != nil {
+		return 2
+	}
+	if len(positionals) != 1 || (*style == "" && *customIcon == "") {
+		return reportError(stdout, stderr, false, "invalid_arguments", "用法: set APP (--style NAME | --custom-icon PATH) [--enabled=false]")
+	}
+	appName := positionals[0]
+	config, err := LoadConfig(*configPath)
+	if err != nil {
+		return reportError(stdout, stderr, false, "config_failed", err.Error())
+	}
+	preference := config.Apps[appName]
+	preference.Enabled = *enabled
+	if *style != "" {
+		preference.Style = *style
+		preference.CustomIcon = ""
+	}
+	if *customIcon != "" {
+		preference.CustomIcon = *customIcon
+		preference.Style = ""
+	}
+	config.Apps[appName] = preference
+	if err := SaveConfig(*configPath, config); err != nil {
+		return reportError(stdout, stderr, false, "config_failed", err.Error())
+	}
+	return writeJSON(stdout, output{OK: true, Data: map[string]interface{}{"app": appName, "config": preference}})
+}
+
+func applyConfig(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("apply", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", defaultConfigFile, "配置文件路径")
+	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
+	jsonOutput := fs.Bool("json", false, "输出 JSON")
+	if err := fs.Parse(normalizeArgs(args)); err != nil {
+		return 2
+	}
+	positionals, err := parsePositionals(fs, normalizeArgs(args))
+	if err != nil {
+		return 2
+	}
+	if len(positionals) > 1 {
+		return reportError(stdout, stderr, *jsonOutput, "invalid_arguments", "用法: apply [APP]")
+	}
+	config, err := LoadConfig(*configPath)
+	if err != nil {
+		return reportError(stdout, stderr, *jsonOutput, "config_failed", err.Error())
+	}
+	apps := make([]string, 0, len(config.Apps))
+	if len(positionals) == 1 {
+		apps = append(apps, positionals[0])
+	} else {
+		for name, preference := range config.Apps {
+			if preference.Enabled {
+				apps = append(apps, name)
+			}
+		}
+		sort.Strings(apps)
+	}
+	applied := make([]string, 0, len(apps))
+	for _, name := range apps {
+		preference, ok := config.Apps[name]
+		if !ok {
+			return reportError(stdout, stderr, *jsonOutput, "app_not_configured", "配置中没有应用: "+name)
+		}
+		if !preference.Enabled {
+			continue
+		}
+		command := []string{"run", "--config", *configPath, "--scripts-dir", *scriptsDir}
+		if preference.Style != "" {
+			command = append(command, "--style", preference.Style)
+		}
+		if preference.CustomIcon != "" {
+			command = append(command, "--custom-icon", preference.CustomIcon)
+		}
+		command = append(command, name)
+		childStdout := stdout
+		if *jsonOutput {
+			childStdout = io.Discard
+		}
+		if code := runPatch(command[1:], childStdout, stderr); code != 0 {
+			return code
+		}
+		applied = append(applied, name)
+	}
+	if *jsonOutput {
+		return writeJSON(stdout, output{OK: true, Data: map[string][]string{"applied": applied}})
+	}
+	return 0
+}
+
+func normalizeArgs(args []string) []string {
+	valueFlags := map[string]bool{"--config": true, "--scripts-dir": true, "--style": true, "--custom-icon": true, "--file": true, "--enabled": true}
+	flags := make([]string, 0, len(args))
+	positionals := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if !strings.HasPrefix(arg, "--") {
+			positionals = append(positionals, arg)
+			continue
+		}
+		flags = append(flags, arg)
+		name := strings.SplitN(arg, "=", 2)[0]
+		if valueFlags[name] && !strings.Contains(arg, "=") && index+1 < len(args) {
+			index++
+			flags = append(flags, args[index])
+		}
+	}
+	return append(flags, positionals...)
+}
+
+func parsePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
+	positionals := append([]string(nil), fs.Args()...)
+	if len(positionals) > 0 {
+		return positionals, nil
+	}
+	knownFlags := map[string]bool{"--config": true, "--scripts-dir": true, "--style": true, "--custom-icon": true, "--file": true, "--json": true, "--schema": true, "--enabled": true}
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if strings.HasPrefix(arg, "--") {
+			name := strings.SplitN(arg, "=", 2)[0]
+			if knownFlags[name] && !strings.Contains(arg, "=") && name != "--json" && name != "--schema" {
+				index++
+			}
+			continue
+		}
+		positionals = append(positionals, arg)
+	}
+	return positionals, nil
 }
 
 func discoverApps(scriptsDir string) ([]appInfo, error) {
@@ -295,6 +478,9 @@ func writeSchema(stdout io.Writer) int {
 		"commands": []map[string]interface{}{
 			{"name": "list", "schema": "taskbarguard list --schema"},
 			{"name": "run", "schema": "taskbarguard run --schema"},
+			{"name": "config", "usage": "taskbarguard config"},
+			{"name": "set", "usage": "taskbarguard set APP --style NAME"},
+			{"name": "apply", "usage": "taskbarguard apply [APP]"},
 			{"name": "install-task", "schema": "taskbarguard install-task --schema"},
 		},
 	}
@@ -314,6 +500,18 @@ func writeCommandSchema(stdout io.Writer, command string) int {
 			"arguments": map[string]interface{}{"positionals": 1, "positionalName": "app"},
 			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--style": "string", "--custom-icon": "path", "--scripts-dir": "string"},
 			"output":    "{ok:true,data:{app:string}}",
+		},
+		"config": map[string]interface{}{
+			"name": "config", "interface": "cli", "arguments": map[string]interface{}{"positionals": 0},
+			"options": map[string]string{"--file": "path", "--json": "boolean"}, "output": "Config",
+		},
+		"set": map[string]interface{}{
+			"name": "set", "interface": "cli", "arguments": map[string]interface{}{"positionals": 1, "positionalName": "app"},
+			"options": map[string]string{"--config": "path", "--style": "string", "--custom-icon": "path", "--enabled": "boolean"}, "output": "{ok:true,data:{app:string,config:AppConfig}}",
+		},
+		"apply": map[string]interface{}{
+			"name": "apply", "interface": "cli", "arguments": map[string]interface{}{"positionals": "0..1", "positionalName": "app"},
+			"options": map[string]string{"--config": "path", "--scripts-dir": "path", "--json": "boolean"}, "output": "{ok:true,data:{applied:string[]}}",
 		},
 		"install-task": map[string]interface{}{
 			"name": "install-task", "interface": "cli",
@@ -347,9 +545,14 @@ func reportError(stdout, stderr io.Writer, jsonOutput bool, code, message string
 
 func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "TaskbarGuard - Windows 任务栏应用质感图标守卫")
-	fmt.Fprintln(w, "用法: taskbarguard <list|run|install-task|schema>")
+	fmt.Fprintln(w, "用法: taskbarguard <list|run|config|set|apply|install-task|schema>")
 	fmt.Fprintln(w, "  list          列出脚本目录中的支持应用")
-	fmt.Fprintln(w, "  run APP       调度指定应用的补丁脚本")
+	fmt.Fprintln(w, "  run APP       调度指定应用的补丁脚本（未传 --style 时回退读取配置）")
+	fmt.Fprintln(w, "  config        打印当前生效的配置 (config.json)")
+	fmt.Fprintln(w, "  set APP       更新偏好并自动落盘: --style NAME | --custom-icon PATH | --enabled=false")
+	fmt.Fprintln(w, "  apply [APP]   按配置一键打补丁，缺省应用所有已启用应用")
 	fmt.Fprintln(w, "  install-task  注册用户登录时的守护计划任务")
 	fmt.Fprintln(w, "  schema        输出 CLI 契约 JSON")
+	fmt.Fprintln(w, "")
+	fmt.Fprintln(w, "构建: python build.py --dev | python build.py --release")
 }
