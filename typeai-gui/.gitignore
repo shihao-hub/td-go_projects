@@ -1,0 +1,13 @@
+# 前端构建与依赖（生成物不入库）
+frontend/node_modules/
+frontend/dist/
+frontend/bindings/
+
+# 构建产物
+build/
+bin/
+*.exe
+*.exe~
+
+# 图标流水线中间产物（.syso 与最终 ico 入库，中间 PNG/脚本产物不入库）
+scripts/out/

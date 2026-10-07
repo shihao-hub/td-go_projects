@@ -1,0 +1,48 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #0c0c0c;
+  overflow: hidden;
+}
+
+#terminal {
+  height: 100%;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+#terminal .xterm {
+  height: 100%;
+}
+
+/* 会话结束 / 启动失败覆盖层 */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 12, 12, 0.92);
+  color: #cccccc;
+  font-family: "Cascadia Mono", Consolas, "Microsoft YaHei", monospace;
+  font-size: 14px;
+  white-space: pre-wrap;
+  text-align: center;
+  padding: 32px;
+  z-index: 10;
+}
+
+.overlay.hidden {
+  display: none;
+}
+
+.overlay .error {
+  color: #f48771;
+}
+
+.overlay .hint {
+  color: #8a8a8a;
+  font-size: 12px;
+  margin-top: 12px;
+}
