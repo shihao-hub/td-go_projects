@@ -17,6 +17,7 @@ go_projects/taskbarguard/
 └── scripts/                    # 应用图标脚本资产库
     ├── README.md               # 脚本库全量款式、生成工序揭秘与手动运行速查手册
     ├── deepseek_harness/       # DeepSeek Harness 模块（款式 8 环形底光通透款已设为首选 ⭐）
+    ├── idea/                   # IntelliJ IDEA 模块（经典微光彩极款 ⭐ / 极客银白 / 冰蓝科技）
     └── vscode/                 # VS Code 模块（科技蓝微光 / 极客银白）
 ```
 
@@ -29,8 +30,9 @@ CLI 默认在当前工作目录读写 `config.json`。首次执行 `config`、`r
 ```json
 {
   "apps": {
-    "vscode": { "enabled": true, "style": "blue" },
-    "deepseek_harness": { "enabled": true, "style": "8_underlit_chrome" }
+    "deepseek_harness": { "enabled": true, "style": "8_underlit_chrome" },
+    "idea": { "enabled": true, "style": "brand" },
+    "vscode": { "enabled": true, "style": "blue" }
   }
 }
 ```
@@ -107,6 +109,21 @@ uv run scripts/deepseek_harness/patch_deepseek_harness_icon.py --custom-icon scr
 
 # 恢复官方默认
 uv run scripts/deepseek_harness/patch_deepseek_harness_icon.py --restore
+```
+
+### IntelliJ IDEA
+```powershell
+# 【强烈推荐 🏆】应用环形底光通透立雕款（与 DeepSeek 8号同源底光技术，体量饱满，对齐 Zed）
+uv run scripts/idea/patch_idea_icon.py --style underlit_chrome --kill
+
+# 【极简立雕】应用纯粹微光立体徽标款
+uv run scripts/idea/patch_idea_icon.py --style pure_sculpted --kill
+
+# 【高光光刃】应用钛金高对比光刃款
+uv run scripts/idea/patch_idea_icon.py --style titanium_prism --kill
+
+# 恢复官方默认
+uv run scripts/idea/patch_idea_icon.py --restore
 ```
 
 ### VS Code

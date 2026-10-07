@@ -23,6 +23,7 @@ func defaultConfig() Config {
 	return Config{Apps: map[string]AppConfig{
 		"vscode":           {Enabled: true, Style: "blue"},
 		"deepseek_harness": {Enabled: true, Style: "8_underlit_chrome"},
+		"idea":             {Enabled: true, Style: "brand"},
 	}}
 }
 

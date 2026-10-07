@@ -1,0 +1,43 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="mono_bg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#24272D"/>
+    <stop offset="40%" stop-color="#16181C"/>
+    <stop offset="100%" stop-color="#0E0F12"/>
+  </linearGradient>
+  <linearGradient id="mono_border" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#3F4552" stop-opacity="0.9"/>
+    <stop offset="100%" stop-color="#1A1C22" stop-opacity="0.4"/>
+  </linearGradient>
+  <linearGradient id="blue_poly1" x1="-0.7" y1="7.6" x2="24.1" y2="61.2" gradientUnits="userSpaceOnUse">
+    <stop offset="0.1" stop-color="#005A9E"/>
+    <stop offset="0.65" stop-color="#007ACC"/>
+  </linearGradient>
+  <linearGradient id="blue_poly2" x1="4.2" y1="60.0" x2="62.9" y2="1.3" gradientUnits="userSpaceOnUse">
+    <stop offset="0.2" stop-color="#007ACC"/>
+    <stop offset="0.8" stop-color="#38B6FF"/>
+  </linearGradient>
+  <filter id="blue_glow" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse">
+    <feDropShadow dx="0" dy="6" stdDeviation="14" flood-color="#007ACC" flood-opacity="0.35"/>
+    <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000000" flood-opacity="0.55"/>
+  </filter>
+  <filter id="tile_shadow" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse">
+    <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.75"/>
+  </filter>
+</defs>
+
+<rect x="18" y="18" width="988" height="988" rx="150" fill="url(#mono_bg)" stroke="url(#mono_border)" stroke-width="14"/>
+
+<g transform="translate(512, 512) scale(10.6) translate(-32, -32)" filter="url(#blue_glow)">
+  <path d="M15.9476 5.81836L4.07215 5.8201C1.82284 5.8201 0 7.64352 0 9.89283V21.3994C0 22.5881 0.519564 23.718 1.42196 24.4918L39.5828 57.2016C40.3212 57.8341 41.2614 58.182 42.2336 58.182H54.1091C56.3584 58.182 58.1818 56.3586 58.1818 54.1093V42.6009C58.1818 41.4123 57.6623 40.2824 56.7599 39.5085L18.599 6.7993C17.8607 6.16629 16.9204 5.81894 15.9476 5.81894V5.81836Z" fill="#004E8C"/>
+  <path d="M14.5193 5.81836H4.07273C1.82342 5.81836 0 7.64178 0 9.89109V22.9837C0 23.1763 0.0139636 23.3689 0.0407273 23.5597L5.31782 60.5035C5.60465 62.5101 7.32276 64.0002 9.34982 64.0002H25.0228C27.2727 64.0002 29.0961 62.1762 29.0956 59.9263L29.0909 41.3878C29.0909 40.9503 29.0205 40.5157 28.882 40.1008L18.3825 8.60294C17.8281 6.9401 16.2717 5.81836 14.5187 5.81836H14.5193Z" fill="url(#blue_poly1)"/>
+  <path d="M59.9275 0H25.9592C24.3301 0 22.8575 0.971054 22.2157 2.46807L6.14767 39.9587C5.93065 40.4655 5.81836 41.0118 5.81836 41.5633V59.9273C5.81836 62.1766 7.64178 64 9.89109 64H27.8571C28.6617 64 29.4483 63.7615 30.118 63.3146L62.1866 41.9113C63.3189 41.1561 63.9984 39.8848 63.9984 38.5239L64.0002 4.07273C64.0002 1.82342 62.1768 0 59.9275 0Z" fill="url(#blue_poly2)"/>
+
+  <g filter="url(#tile_shadow)">
+    <rect x="12" y="12" width="40" height="40" rx="3.5" fill="#0F141C" stroke="#1F364D" stroke-width="0.8"/>
+    <path d="M17.0001 29.3856H19.9789V19.6144H17.0001V17H25.8391V19.6144H22.8603V29.3856H25.8391V32H17.0001V29.3856Z" fill="#FFFFFF"/>
+    <path d="M27.3391 29.3002H29.4928C29.9282 29.3002 30.3161 29.2074 30.6553 29.0218C30.9945 28.8361 31.2569 28.5737 31.4426 28.2345C31.6282 27.8953 31.721 27.508 31.721 27.072V17H34.646V27.2748C34.646 28.1749 34.4386 28.984 34.0243 29.7019C33.6101 30.4198 33.0388 30.9824 32.31 31.3892C31.5812 31.7966 30.7636 32 29.8566 32H27.3391V29.3002Z" fill="#FFFFFF"/>
+    <path d="M33 44H17V47H33V44Z" fill="#FFFFFF"/>
+  </g>
+</g>
+</svg>

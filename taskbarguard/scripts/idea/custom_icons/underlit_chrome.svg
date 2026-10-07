@@ -1,0 +1,59 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="mono_bg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#24272D"/>
+    <stop offset="40%" stop-color="#16181C"/>
+    <stop offset="100%" stop-color="#0E0F12"/>
+  </linearGradient>
+  <linearGradient id="mono_border" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#3F4552" stop-opacity="0.9"/>
+    <stop offset="100%" stop-color="#1A1C22" stop-opacity="0.4"/>
+  </linearGradient>
+
+  <!-- 8号底光环形双向渐变：顶纯白 -> 腹部银灰 -> 底部被地面底光重新照亮为纯白 -->
+  <linearGradient id="underlit_metal" x1="25%" y1="0%" x2="75%" y2="100%">
+    <stop offset="0%" stop-color="#FFFFFF"/>
+    <stop offset="35%" stop-color="#E5EAF0"/>
+    <stop offset="65%" stop-color="#9BA5B4"/>
+    <stop offset="88%" stop-color="#DCE3EC"/>
+    <stop offset="100%" stop-color="#FFFFFF"/>
+  </linearGradient>
+
+  <linearGradient id="underlit_stroke" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+    <stop offset="50%" stop-color="#A4AFBE" stop-opacity="0.75"/>
+    <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.95"/>
+  </linearGradient>
+
+  <!-- 衬底精致斜向 JetBrains 晶体微反光倒角，营造深邃空间层次而不抢眼 -->
+  <linearGradient id="crystal_facet" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#2E333D" stop-opacity="0.8"/>
+    <stop offset="50%" stop-color="#1B1D22" stop-opacity="0.5"/>
+    <stop offset="100%" stop-color="#121317" stop-opacity="0.9"/>
+  </linearGradient>
+
+  <filter id="underlit_glow" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse">
+    <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#FFFFFF" flood-opacity="0.28"/>
+    <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.65"/>
+  </filter>
+  <filter id="crystal_shadow" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse">
+    <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#000000" flood-opacity="0.7"/>
+  </filter>
+</defs>
+
+<rect x="18" y="18" width="988" height="988" rx="150" fill="url(#mono_bg)" stroke="url(#mono_border)" stroke-width="14"/>
+
+<!-- 背后 JetBrains 经典钻石折角暗晶底座（柔和低调，不形成泥泞感） -->
+<g filter="url(#crystal_shadow)">
+  <rect x="232" y="232" width="560" height="560" rx="90" fill="url(#crystal_facet)" stroke="#383E4B" stroke-width="6"/>
+  <!-- 右上角极简光泽折角切线 -->
+  <path d="M 640 234 L 790 384 L 740 434 L 590 284 Z" fill="#424A58" fill-opacity="0.25"/>
+</g>
+
+<!-- 前景主体：通透底光立雕 IJ _，体量饱满，清晰锐利 -->
+<g transform="translate(512, 516) scale(18) translate(-25.8, -32)" filter="url(#underlit_glow)">
+  <path d="M17.0001 29.3856H19.9789V19.6144H17.0001V17H25.8391V19.6144H22.8603V29.3856H25.8391V32H17.0001V29.3856Z" fill="url(#underlit_metal)" stroke="url(#underlit_stroke)" stroke-width="0.35" stroke-linejoin="round"/>
+  <path d="M27.3391 29.3002H29.4928C29.9282 29.3002 30.3161 29.2074 30.6553 29.0218C30.9945 28.8361 31.2569 28.5737 31.4426 28.2345C31.6282 27.8953 31.721 27.508 31.721 27.072V17H34.646V27.2748C34.646 28.1749 34.4386 28.984 34.0243 29.7019C33.6101 30.4198 33.0388 30.9824 32.31 31.3892C31.5812 31.7966 30.7636 32 29.8566 32H27.3391V29.3002Z" fill="url(#underlit_metal)" stroke="url(#underlit_stroke)" stroke-width="0.35" stroke-linejoin="round"/>
+  <path d="M33 44H17V47H33V44Z" fill="url(#underlit_metal)" stroke="url(#underlit_stroke)" stroke-width="0.35" stroke-linejoin="round"/>
+</g>
+</svg>

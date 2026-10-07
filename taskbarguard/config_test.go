@@ -17,6 +17,9 @@ func TestLoadConfigInitializesDefaults(t *testing.T) {
 	if !config.Apps["vscode"].Enabled || config.Apps["vscode"].Style != "blue" {
 		t.Fatalf("unexpected defaults: %#v", config.Apps)
 	}
+	if !config.Apps["idea"].Enabled || config.Apps["idea"].Style != "brand" {
+		t.Fatalf("unexpected idea defaults: %#v", config.Apps)
+	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("default config not persisted: %v", err)
 	}

@@ -15,7 +15,11 @@
   - [1. 支持款式说明](#1-支持款式说明)
   - [2. 各款式手动切换命令](#2-各款式手动切换命令)
   - [3. 恢复官方原始状态](#3-恢复官方原始状态)
-- [四、执行须知与安全准则](#四执行须知与安全准则)
+- [四、IntelliJ IDEA 模块](#四intellij-idea-模块)
+  - [1. 支持款式说明](#1-支持款式说明-1)
+  - [2. 各款式手动切换命令](#2-各款式手动切换命令-1)
+  - [3. 恢复官方原始状态](#3-恢复官方原始状态-1)
+- [五、执行须知与安全准则](#五执行须知与安全准则)
 
 ---
 
@@ -116,7 +120,52 @@ uv run scripts/vscode/patch_vscode_icon.py --restore
 
 ---
 
-## 四、执行须知与安全准则
+## 四、IntelliJ IDEA 模块
+
+模块路径：`go_projects\taskbarguard\scripts\idea\`
+
+### 1. 支持款式说明
+
+所有图标均保存在 `custom_icons/` 目录下（底板尺寸 `988x988`，圆角半径 `rx=150`，与 Zed / VS Code / DSH 1:1 绝对对齐）：
+
+| 款式参数 (`--style`) | 图标文件路径 | 特色说明 |
+| :--- | :--- | :--- |
+| **`underlit_chrome` (环形底光通透立雕款 · 终极首选 🏆)** | `custom_icons/underlit_chrome.ico` | **与 DeepSeek 8号底光款技术同源**。彻底剔除多层碎色块与晦暗方框，放大并提纯 `IJ _` 核心徽标，引入汽车工业级双向地面反弹底光（顶反光 #FFFFFF ➔ 腹收敛 #9BA5B4 ➔ 底光打亮 #FFFFFF），搭配极简暗晶微倒角衬底，体量饱满大气，与 Zed、DBeaver 达成 100% 现代任务栏呼吸感！ |
+| **`pure_sculpted` (极简微光立体徽标款)** | `custom_icons/pure_sculpted.ico` | 剔除所有背景杂物，仅将极度放大的钛金立雕 `IJ _` 悬浮在黑曜石底板正中央，白光微晕漫反射，视觉焦点最纯粹、最锐利 |
+| **`titanium_prism` (钛金高对比光刃款)** | `custom_icons/titanium_prism.ico` | 保留 JetBrains 标志性折角光刃几何，但整体尺寸放大 28%，将晦暗色块重塑为高光镜面钛金双面刃，核心卡片黑金分明，摆脱“缩成一团”的憋屈感 |
+| **`silver` (极客银白金属原版)** | `custom_icons/silver.ico` | 原版等比缩放银白款（多层几何背景 + 中心暗色方块） |
+| **`brand` (经典微光彩极款)** | `custom_icons/brand.ico` | 保持 JetBrains 经典标志性彩极光渐变（暖橙 ➔ 玫红 ➔ 电光蓝） |
+| **`dark_blue` (冰蓝微光科技款)** | `custom_icons/dark_blue.ico` | 深邃冰蓝流光渐变（#004E8C ➔ #007ACC ➔ #38B6FF） |
+
+---
+
+### 2. 各款式手动切换命令
+
+```powershell
+# 【强烈推荐 🏆】应用环形底光通透立雕款（对标 DeepSeek 8号底光款与 Zed）
+uv run scripts/idea/patch_idea_icon.py --style underlit_chrome --kill
+
+# 应用极简微光立体立徽款（纯粹大体量雕塑）
+uv run scripts/idea/patch_idea_icon.py --style pure_sculpted --kill
+
+# 应用钛金高对比光刃款
+uv run scripts/idea/patch_idea_icon.py --style titanium_prism --kill
+
+# 恢复官方默认
+uv run scripts/idea/patch_idea_icon.py --restore
+```
+
+---
+
+### 3. 恢复官方原始状态
+
+```powershell
+uv run scripts/idea/patch_idea_icon.py --restore
+```
+
+---
+
+## 五、执行须知与安全准则
 
 1. **零黑屏安全刷新**：
    坚决不调用 `taskkill explorer.exe`。补丁写入后，脚本仅会触碰任务栏 `.lnk` 快捷方式时间戳 + 调用系统原生 `ie4uinit.exe -show` + 广播系统外壳 API `SHChangeNotify(SHCNE_ASSOCCHANGED)`。
