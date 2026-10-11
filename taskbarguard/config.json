@@ -1,0 +1,20 @@
+{
+  "apps": {
+    "deepseek_harness": {
+      "enabled": true,
+      "style": "8_underlit_chrome"
+    },
+    "idea": {
+      "enabled": false,
+      "style": "underlit_chrome"
+    },
+    "vscode": {
+      "enabled": true,
+      "style": "silver"
+    },
+    "wt": {
+      "enabled": true,
+      "style": "pure_dark"
+    }
+  }
+}

@@ -21,10 +21,10 @@ type Config struct {
 
 func defaultConfig() Config {
 	return Config{Apps: map[string]AppConfig{
-		"vscode":           {Enabled: true, Style: "blue"},
+		"vscode":           {Enabled: true, Style: "silver"},
 		"deepseek_harness": {Enabled: true, Style: "8_underlit_chrome"},
-		"idea":             {Enabled: true, Style: "brand"},
-		"wt":               {Enabled: true, Style: "underlit_chrome"},
+		"idea":             {Enabled: false, Style: "underlit_chrome"},
+		"wt":               {Enabled: true, Style: "pure_dark"},
 	}}
 }
 

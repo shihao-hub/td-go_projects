@@ -14,13 +14,13 @@ func TestLoadConfigInitializesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !config.Apps["vscode"].Enabled || config.Apps["vscode"].Style != "blue" {
+	if !config.Apps["vscode"].Enabled || config.Apps["vscode"].Style != "silver" {
 		t.Fatalf("unexpected defaults: %#v", config.Apps)
 	}
-	if !config.Apps["idea"].Enabled || config.Apps["idea"].Style != "brand" {
+	if config.Apps["idea"].Enabled || config.Apps["idea"].Style != "underlit_chrome" {
 		t.Fatalf("unexpected idea defaults: %#v", config.Apps)
 	}
-	if !config.Apps["wt"].Enabled || config.Apps["wt"].Style != "underlit_chrome" {
+	if !config.Apps["wt"].Enabled || config.Apps["wt"].Style != "pure_dark" {
 		t.Fatalf("unexpected wt defaults: %#v", config.Apps)
 	}
 	if _, err := os.Stat(path); err != nil {
