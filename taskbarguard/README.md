@@ -100,6 +100,14 @@ VS Code、DeepSeek Harness 等应用后台静默更新后会覆盖 PE 图标资�
 .\taskbarguard-dev.exe apply
 ```
 
+**Windows Terminal 独立版（wt）是另一类情况**：免安装版不带自动更新器，不会自己变新（Store 版才会，但那是被拒绝的影子入口）。升级请用幂等命令 —— 已是最新则直接退出 0，失败自动回滚且旧版始终可用：
+
+```powershell
+uv run scripts\wt\patch_wt_icon.py --update
+```
+
+注意：`--auto-setup` 只在安装目录为空时联网部署，**在已装机上不会升级**，仅重放定制（易误用成“更新命令”）。
+
 注意：
 
 - 必须在 `go_projects\taskbarguard` 目录下执行（`config.json` 与 `scripts\` 均按当前工作目录解析）；

@@ -20,8 +20,12 @@ Windows Terminal (wt) 任务栏与可执行文件图标定制与自动恢复守�
 4. 全链路接管：
    - 接管 Win+R (App Paths) 阻断系统劫持回 Store 原版；
    - 接管 Nilesoft Shell 右键菜单；
-   - 支持 --auto-setup 自动拉取官方最新免安装版独立终端并配置 PATH。
-5. 深度离线缓存重构与 100% 官方原生无损复原：
+   - 支持 --auto-setup 自动拉取官方最新免安装版独立终端并配置 PATH（仅目录为空时联网部署）。
+5. 独立版幂等升级（--update）：
+   - 比对本地 exe VersionInfo 与 GitHub 最新稳定版，已是最新则直接退出 0，可安全重复执行；
+   - 暂存目录解压 + 完整性校验 + 目录级原子换入，失败自动回滚，旧版始终可用；
+   - 升级后自动沿用 state.json 记录的图标款式重放全链路定制。
+6. 深度离线缓存重构与 100% 官方原生无损复原：
    - 支持 --restart-explorer 离线清空全部 30 个 iconcache_*.db 彻底重构外壳图标缓存；
    - 支持 --revert 一键无损复原所有配置。
 ========================================================================================
@@ -59,8 +63,26 @@ DEFAULT_TARGET_DIRS = [
     Path(r"D:\Users\tools\WindowsTerminal"),
 ]
 
+GITHUB_LATEST_WT_API = "https://api.github.com/repos/microsoft/terminal/releases/latest"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+WT_ASSET_PREFIX = "Microsoft.WindowsTerminal_"
+WT_ASSET_SUFFIX = "_x64.zip"
+FALLBACK_WT_VERSION = "1.25.2733.0"
+FALLBACK_WT_ASSET = f"Microsoft.WindowsTerminal_{FALLBACK_WT_VERSION}_x64.zip"
+FALLBACK_WT_URL = (
+    f"https://github.com/microsoft/terminal/releases/download/v{FALLBACK_WT_VERSION}/{FALLBACK_WT_ASSET}"
+)
+UPGRADE_STAGING_SUFFIX = ".new"
+UPGRADE_BACKUP_SUFFIX = ".old"
+UPGRADE_MAIN_EXE = "WindowsTerminal.exe"
+UPGRADE_REQUIRED_FILES = ("WindowsTerminal.exe", "wt.exe")
+
 STATE_FILE = Path(os.path.expandvars(r"%APPDATA%\language_projects\taskbarguard\state.json"))
 APP_PATHS_KEY = r"Software\Microsoft\Windows\CurrentVersion\App Paths\wt.exe"
+CONSOLE_STARTUP_KEY = r"Console\%%Startup"
+GUID_CONHOST = "{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}"
+GUID_WT = "{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}"
+GUID_AUTO = "{00000000-0000-0000-0000-000000000000}"
 
 NILESOFT_CANDIDATE_DIRS = [
     Path(r"D:\Program Files\Nilesoft Shell\imports"),
@@ -90,6 +112,26 @@ kernel32.UpdateResourceW.restype = wintypes.BOOL
 
 kernel32.EndUpdateResourceW.argtypes = [wintypes.HANDLE, wintypes.BOOL]
 kernel32.EndUpdateResourceW.restype = wintypes.BOOL
+
+
+class VS_FIXEDFILEINFO(ctypes.Structure):
+    """Win32 版本资源固定信息块（用于提取 dwFileVersionMS/LS 四段版本号）"""
+
+    _fields_ = [
+        ("dwSignature", wintypes.DWORD),
+        ("dwStrucVersion", wintypes.DWORD),
+        ("dwFileVersionMS", wintypes.DWORD),
+        ("dwFileVersionLS", wintypes.DWORD),
+        ("dwProductVersionMS", wintypes.DWORD),
+        ("dwProductVersionLS", wintypes.DWORD),
+        ("dwFileFlagsMask", wintypes.DWORD),
+        ("dwFileFlags", wintypes.DWORD),
+        ("dwFileOS", wintypes.DWORD),
+        ("dwFileType", wintypes.DWORD),
+        ("dwFileSubtype", wintypes.DWORD),
+        ("dwFileDateMS", wintypes.DWORD),
+        ("dwFileDateLS", wintypes.DWORD),
+    ]
 
 
 def load_state() -> dict:
@@ -298,6 +340,62 @@ def remove_from_user_path(directory: Path) -> bool:
         return False
 
 
+def read_exe_version(exe_path: Path) -> str:
+    """读取 PE 文件的 Win32 版本号（如 1.25.2609.30003），失败返回空串"""
+    if os.name != "nt" or not exe_path.is_file():
+        return ""
+    try:
+        version_dll = ctypes.WinDLL("version", use_last_error=True)
+        size = version_dll.GetFileVersionInfoSizeW(str(exe_path), None)
+        if not size:
+            return ""
+        buffer = ctypes.create_string_buffer(size)
+        if not version_dll.GetFileVersionInfoW(str(exe_path), 0, size, buffer):
+            return ""
+        value = ctypes.c_void_p()
+        length = ctypes.c_uint()
+        if not version_dll.VerQueryValueW(buffer, "\\", ctypes.byref(value), ctypes.byref(length)):
+            return ""
+        info = ctypes.cast(value, ctypes.POINTER(VS_FIXEDFILEINFO)).contents
+        if info.dwSignature != 0xFEEF04BD:
+            return ""
+        return "{}.{}.{}.{}".format(
+            info.dwFileVersionMS >> 16,
+            info.dwFileVersionMS & 0xFFFF,
+            info.dwFileVersionLS >> 16,
+            info.dwFileVersionLS & 0xFFFF,
+        )
+    except Exception:
+        return ""
+
+
+def parse_version_tuple(text: str) -> tuple[int, ...]:
+    """把 1.25.2609.30003 之类的版本串解析为可比较的整数元组"""
+    return tuple(int(chunk) for chunk in re.findall(r"\d+", text or ""))
+
+
+def version_from_asset_name(asset_name: str) -> str:
+    """从 Microsoft.WindowsTerminal_1.25.2733.0_x64.zip 中提取版本号"""
+    matched = re.search(r"WindowsTerminal_([\d.]+)_", asset_name or "")
+    return matched.group(1) if matched else ""
+
+
+def query_latest_wt_release() -> tuple[str, str]:
+    """查询 GitHub 最新稳定版免安装包，返回 (asset_name, download_url)；不可用时退化到固定推荐版"""
+    try:
+        request = urllib.request.Request(GITHUB_LATEST_WT_API, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        for asset in data.get("assets", []):
+            name = asset.get("name", "")
+            if name.startswith(WT_ASSET_PREFIX) and name.endswith(WT_ASSET_SUFFIX) and "msixbundle" not in name:
+                return name, asset.get("browser_download_url", "")
+        print("[-] GitHub API 未返回可用的 x64 免安装包，改用固定推荐稳定版。")
+    except Exception as e:
+        print(f"[-] 查询 GitHub API 异常: {e}，改用固定推荐稳定版。")
+    return FALLBACK_WT_ASSET, FALLBACK_WT_URL
+
+
 def download_file(url: str, dest_path: Path, desc: str = "文件") -> bool:
     print(f"[*] 正在自动下载 {desc}...")
     print(f"    来源: {url}")
@@ -341,27 +439,7 @@ def auto_setup_windows_terminal(custom_dir: str | None = None) -> Path | None:
 
     print(f"[*] 准备安装 Windows Terminal 独立版至: {target_dir}")
 
-    api_url = "https://api.github.com/repos/microsoft/terminal/releases/latest"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    download_url = None
-    asset_name = None
-
-    try:
-        req = urllib.request.Request(api_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            for asset in data.get("assets", []):
-                name = asset.get("name", "")
-                if name.startswith("Microsoft.WindowsTerminal_") and name.endswith("_x64.zip") and "msixbundle" not in name:
-                    download_url = asset.get("browser_download_url")
-                    asset_name = name
-                    break
-    except Exception as e:
-        print(f"[-] 查询 GitHub API 异常: {e}，使用固定推荐稳定版下载源...")
-
-    if not download_url:
-        download_url = "https://github.com/microsoft/terminal/releases/download/v1.25.2733.0/Microsoft.WindowsTerminal_1.25.2733.0_x64.zip"
-        asset_name = "Microsoft.WindowsTerminal_1.25.2733.0_x64.zip"
+    asset_name, download_url = query_latest_wt_release()
 
     temp_zip = target_dir.parent / (asset_name or "WindowsTerminal_x64.zip")
     if not download_file(download_url, temp_zip, "Windows Terminal 官方免安装包"):
@@ -384,6 +462,60 @@ def auto_setup_windows_terminal(custom_dir: str | None = None) -> Path | None:
 
     add_to_user_path(target_dir)
     return target_dir
+
+
+def upgrade_install_dir(target_dir: Path, asset_name: str, download_url: str) -> bool:
+    """下载新版并原子换入目标目录（暂存解压 + 完整性校验 + 目录级重命名，失败回滚保留旧版）"""
+    staging_dir = target_dir.parent / (target_dir.name + UPGRADE_STAGING_SUFFIX)
+    backup_dir = target_dir.parent / (target_dir.name + UPGRADE_BACKUP_SUFFIX)
+    temp_zip = target_dir.parent / (asset_name or "WindowsTerminal_x64.zip")
+
+    # 清理上一次失败残留下来的暂存/备份目录
+    for residue in (staging_dir, backup_dir):
+        if residue.exists():
+            shutil.rmtree(residue, ignore_errors=True)
+
+    if not download_file(download_url, temp_zip, f"Windows Terminal 免安装包 {asset_name}"):
+        return False
+
+    print(f"[*] 正在解压至暂存目录: {staging_dir}")
+    try:
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(temp_zip, "r") as zf:
+            zf.extractall(staging_dir)
+    except Exception as e:
+        print(f"[-] 解压失败: {e}")
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        return False
+    finally:
+        temp_zip.unlink(missing_ok=True)
+
+    # 完整性校验：关键入口 exe 必须齐全，否则拒绝换入，避免装出半残版本
+    missing = [name for name in UPGRADE_REQUIRED_FILES if not (staging_dir / name).is_file()]
+    if missing:
+        print(f"[-] 新版本包缺少关键文件 {missing}，已放弃换入，旧版本保持可用。")
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        return False
+
+    # 换入前必须关闭 WT：Windows 不允许重命名包含运行中 exe 的目录
+    ensure_wt_processes_closed(True)
+
+    try:
+        target_dir.rename(backup_dir)
+        staging_dir.rename(target_dir)
+    except OSError as e:
+        print(f"[-] 目录原子换入失败: {e}")
+        if not target_dir.exists() and backup_dir.exists():
+            backup_dir.rename(target_dir)
+            print("[*] 已回滚至旧版本，环境保持可用。")
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        return False
+
+    shutil.rmtree(backup_dir, ignore_errors=True)
+
+    # 不变式：整目录换入天然重置 Images/*.ico.bak（旧目录连同旧版备份一起被丢弃），
+    # 因此 --revert 只会还原与当前版本匹配的原版图标；若日后改为逐文件替换，必须显式清 bak。
+    return True
 
 
 def resolve_icon_path(style: str | None, custom_icon: str | None) -> Path:
@@ -481,6 +613,53 @@ def revert_app_paths() -> None:
             print(f"[+] 已恢复注册表 App Paths wt.exe -> {orig}")
         except Exception as e:
             print(f"[-] 恢复 App Paths 失败: {e}")
+
+
+def get_defterm() -> tuple[str, str]:
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, CONSOLE_STARTUP_KEY, 0, winreg.KEY_READ) as k:
+            c, _ = winreg.QueryValueEx(k, "DelegationConsole")
+            t, _ = winreg.QueryValueEx(k, "DelegationTerminal")
+            return str(c), str(t)
+    except Exception:
+        return "", ""
+
+
+def apply_defterm(mode: str = "conhost") -> None:
+    guid = GUID_CONHOST if mode == "conhost" else (GUID_WT if mode == "wt" else GUID_AUTO)
+    state = load_state()
+    cur_c, cur_t = get_defterm()
+    if "original_defterm_console" not in state and cur_c:
+        state["original_defterm_console"] = cur_c
+        state["original_defterm_terminal"] = cur_t
+        save_state(state)
+
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, CONSOLE_STARTUP_KEY) as k:
+            winreg.SetValueEx(k, "DelegationConsole", 0, winreg.REG_SZ, guid)
+            winreg.SetValueEx(k, "DelegationTerminal", 0, winreg.REG_SZ, guid)
+        mode_desc = (
+            "Windows 控制台主机 (conhost - 阻断静默脚本弹窗与焦点抢占，强烈推荐)"
+            if mode == "conhost"
+            else ("Windows Terminal" if mode == "wt" else "让 Windows 决定 (系统默认)")
+        )
+        print(f"[+] 已将系统默认终端 (DefTerm) 配置为: {mode_desc} (GUID: {guid})")
+    except Exception as e:
+        print(f"[-] 配置 DefTerm 失败: {e}")
+
+
+def revert_defterm() -> None:
+    state = load_state()
+    orig_c = state.get("original_defterm_console")
+    orig_t = state.get("original_defterm_terminal")
+    if orig_c and orig_t:
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, CONSOLE_STARTUP_KEY) as k:
+                winreg.SetValueEx(k, "DelegationConsole", 0, winreg.REG_SZ, orig_c)
+                winreg.SetValueEx(k, "DelegationTerminal", 0, winreg.REG_SZ, orig_t)
+            print(f"[+] 已恢复系统默认终端 (DefTerm) 为原值: {orig_t}")
+        except Exception as e:
+            print(f"[-] 恢复 DefTerm 失败: {e}")
 
 
 def update_shortcut(lnk_path: Path, ico_target: str, exe_target: str, desc: str = "") -> bool:
@@ -696,6 +875,7 @@ def apply_patch(
     restart_exp: bool,
     kill: bool = False,
     auto_setup: bool = False,
+    defterm: str | None = None,
 ) -> int:
     ico_path = resolve_icon_path(style, custom_icon)
     print(f"[*] 选定定制图标: {ico_path.name} (路径: {ico_path})")
@@ -703,7 +883,11 @@ def apply_patch(
     ensure_wt_processes_closed(kill)
 
     target_exes = find_target_exes(target_dir, target_exe)
-    if not target_exes:
+    if target_exes:
+        if auto_setup:
+            print("[!] 已检测到现有独立版安装：--auto-setup 只在目录为空时联网部署，本次不会升级版本。")
+            print("    如需升级到 GitHub 最新稳定版，请改用 --update。")
+    else:
         if auto_setup:
             print("[*] 正在全自动下载部署 Windows Terminal 独立版...")
             installed_dir = auto_setup_windows_terminal(target_dir)
@@ -731,7 +915,11 @@ def apply_patch(
     # 1. 注册表 App Paths
     apply_app_paths(wt_bin)
 
-    # 2. 快捷方式 (仅管理开始菜单，严禁强写 User Pinned TaskBar 以防任务栏注册表脱节致使固定功能失效)
+    # 2. 系统默认终端 DefTerm (可选设置，conhost 阻断静默脚本弹窗抢焦点)
+    if defterm:
+        apply_defterm(defterm)
+
+    # 3. 快捷方式 (仅管理开始菜单，严禁强写 User Pinned TaskBar 以防任务栏注册表脱节致使固定功能失效)
     updated_shortcuts: list[Path] = []
     orphaned_taskbar_lnk = Path(os.path.expandvars(r"%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\Windows Terminal.lnk"))
     if orphaned_taskbar_lnk.is_file():
@@ -753,6 +941,10 @@ def apply_patch(
     state = load_state()
     state["installed_dir_wt"] = str(wt_base_dir)
     state["style_wt"] = ico_path.stem
+    version_source = next(
+        (exe for exe in target_exes if exe.name.lower() == UPGRADE_MAIN_EXE.lower()), target_exes[0]
+    )
+    state["version_wt"] = read_exe_version(version_source) or state.get("version_wt", "")
     save_state(state)
 
     # 4. 外壳与缓存刷新
@@ -786,16 +978,76 @@ def apply_patch(
     return 0
 
 
+def update_windows_terminal(
+    style: str | None,
+    custom_icon: str | None,
+    target_dir: str | None,
+    restart_exp: bool,
+    defterm: str | None = None,
+) -> int:
+    """幂等升级已部署的独立版：已是最新则直接返回 0；升级成功后自动重放全链路定制"""
+    state = load_state()
+    if target_dir:
+        install_dir = Path(target_dir).resolve()
+    else:
+        recorded = state.get("installed_dir_wt")
+        install_dir = Path(recorded).resolve() if recorded else DEFAULT_TARGET_DIRS[0]
+
+    local_exe = install_dir / UPGRADE_MAIN_EXE
+    if not local_exe.is_file():
+        print(f"[-] 未发现已部署的独立版终端: {install_dir}")
+        print("💡 首次部署请使用 --auto-setup；安装目录不同时请用 --target-dir 指定。")
+        return 1
+
+    local_version = read_exe_version(local_exe)
+    asset_name, download_url = query_latest_wt_release()
+    remote_version = version_from_asset_name(asset_name)
+    print(f"[*] 本地版本: {local_version or '未知'}    远端版本: {remote_version or '未知'}")
+
+    if local_version and remote_version and parse_version_tuple(remote_version) <= parse_version_tuple(local_version):
+        print(f"[=] 已是最新版本 v{local_version}，无需升级。")
+        return 0
+
+    if not remote_version:
+        print("[!] 无法比对远端版本号，将按请求执行覆盖升级。")
+
+    if not upgrade_install_dir(install_dir, asset_name, download_url):
+        print("[-] 升级失败，旧版本保持可用。")
+        return 1
+
+    print(f"[+] 已升级: v{local_version or '未知'} → v{read_exe_version(local_exe) or '未知'}")
+
+    # 复刻既有款式：优先命令行显式指定，其次沿用 state 记录的款式，避免把用户款式改回默认
+    effective_style = style or state.get("style_wt") or "pure_dark"
+    print(f"[*] 正在重放定制与全链路守卫（图标款式: {effective_style}）...")
+    code = apply_patch(
+        effective_style,
+        custom_icon,
+        str(install_dir),
+        None,
+        restart_exp,
+        False,
+        False,
+        defterm,
+    )
+    if code != 0:
+        print("[-] 定制重放失败，请手动重新执行 patch_wt_icon.py 复核。")
+    return code
+
+
 def revert_patch(restart_exp: bool = False, remove_path: bool = False) -> int:
     print("[*] 正在执行 Windows Terminal 定制回退与 100% 官方原生复原...")
 
     # 1. 还原 App Paths
     revert_app_paths()
 
-    # 2. 还原 Nilesoft Shell
+    # 2. 还原系统默认终端 DefTerm
+    revert_defterm()
+
+    # 3. 还原 Nilesoft Shell
     revert_nilesoft()
 
-    # 3. 还原 Images 对比度图标
+    # 4. 还原 Images 对比度图标
     state = load_state()
     installed_dir = state.get("installed_dir_wt")
     if installed_dir:
@@ -840,16 +1092,18 @@ def revert_patch(restart_exp: bool = False, remove_path: bool = False) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="Windows Terminal 任务栏图标定制与全链路恢复守卫")
-    parser.add_argument("--style", type=str, default="pure_dark", help="图标风格 (pure_dark, titanium, underlit_chrome, dark_blue, cyan_matrix)")
+    parser.add_argument("--style", type=str, default=None, help="图标风格 (pure_dark, titanium, underlit_chrome, dark_blue, cyan_matrix)；缺省沿用 state.json 记录的款式")
     parser.add_argument("--custom-icon", type=str, default=None, help="自定义 .ico 文件绝对路径")
     parser.add_argument("--target-exe", type=str, default=None, help="目标 EXE 绝对路径")
     parser.add_argument("--target-dir", type=str, default=None, help="Windows Terminal 免安装独立版解压目录")
     parser.add_argument("--kill", action="store_true", help="若 Windows Terminal 正在运行，先强制关闭再注入（默认采用原子重命名热替换）")
     parser.add_argument("--restart-explorer", action="store_true", help="修改完成后自动离线重建图标缓存并重启 Explorer")
-    parser.add_argument("--auto-setup", action="store_true", help="新电脑全自动部署模式：自动从 GitHub 下载最新免安装终端，并自动配置 PATH")
+    parser.add_argument("--auto-setup", action="store_true", help="新电脑全自动部署模式：自动从 GitHub 下载最新免安装终端，并自动配置 PATH（仅目录为空时联网部署）")
+    parser.add_argument("--update", action="store_true", help="幂等升级已部署的独立版到 GitHub 最新稳定版（已是最新则直接退出 0），随后自动重放全链路定制")
     parser.add_argument("--revert", action="store_true", help="一键彻底撤销修改并还原为系统官方原生状态")
     parser.add_argument("--remove-path", action="store_true", help="复原时一并从用户环境变量 Path 中移除独立版目录")
     parser.add_argument("--list-styles", action="store_true", help="列出全部可用图标风格")
+    parser.add_argument("--defterm", type=str, choices=["conhost", "wt", "auto"], default=None, help="配置系统默认终端 (DefTerm)：conhost (推荐开发者环境，阻断静默脚本弹窗抢焦点), wt, auto")
 
     args = parser.parse_args()
 
@@ -859,6 +1113,21 @@ def main():
         for name, p in styles.items():
             print(f"  - {name:<16} ({p.name})")
         return
+
+    if args.defterm and len(sys.argv) <= 3:
+        apply_defterm(args.defterm)
+        return
+
+    if args.update:
+        sys.exit(
+            update_windows_terminal(
+                args.style,
+                args.custom_icon,
+                args.target_dir,
+                args.restart_explorer,
+                args.defterm,
+            )
+        )
 
     if args.revert:
         sys.exit(revert_patch(args.restart_explorer, args.remove_path))
@@ -871,6 +1140,7 @@ def main():
         args.restart_explorer,
         args.kill,
         args.auto_setup,
+        args.defterm,
     ))
 
 
