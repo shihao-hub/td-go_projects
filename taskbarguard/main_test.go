@@ -76,23 +76,50 @@ func TestRunPatchUsesMockRunner(t *testing.T) {
 
 func TestFindAppAlias(t *testing.T) {
 	root := t.TempDir()
-	appDir := filepath.Join(root, "powershell")
-	if err := os.Mkdir(appDir, 0o755); err != nil {
+	wtDir := filepath.Join(root, "wt")
+	if err := os.Mkdir(wtDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(appDir, "patch_powershell_icon.py")
-	if err := os.WriteFile(script, []byte{}, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(wtDir, "patch_wt_icon.py"), []byte{}, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	customIcons := filepath.Join(appDir, "custom_icons")
-	if err := os.Mkdir(customIcons, 0o755); err != nil {
+	wtIcons := filepath.Join(wtDir, "custom_icons")
+	if err := os.Mkdir(wtIcons, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(customIcons, "underlit_chrome.ico"), []byte{}, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(wtIcons, "underlit_chrome.ico"), []byte{}, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, alias := range []string{"powershell", "wt", "terminal", "wt.exe", "windowsterminal"} {
+	psDir := filepath.Join(root, "powershell")
+	if err := os.Mkdir(psDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(psDir, "patch_powershell_icon.py"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	psIcons := filepath.Join(psDir, "custom_icons")
+	if err := os.Mkdir(psIcons, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(psIcons, "dark_blue.ico"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, alias := range []string{"wt", "terminal", "wt.exe", "windowsterminal"} {
+		app, err := findApp(root, alias)
+		if err != nil {
+			t.Fatalf("alias %q failed: %v", alias, err)
+		}
+		if app.Name != "wt" {
+			t.Fatalf("expected wt, got %q", app.Name)
+		}
+		if !contains(app.Styles, "underlit_chrome") {
+			t.Fatalf("expected style underlit_chrome in %#v", app.Styles)
+		}
+	}
+
+	for _, alias := range []string{"powershell", "pwsh"} {
 		app, err := findApp(root, alias)
 		if err != nil {
 			t.Fatalf("alias %q failed: %v", alias, err)
@@ -100,9 +127,36 @@ func TestFindAppAlias(t *testing.T) {
 		if app.Name != "powershell" {
 			t.Fatalf("expected powershell, got %q", app.Name)
 		}
-		if !contains(app.Styles, "underlit_chrome") {
-			t.Fatalf("expected style underlit_chrome in %#v", app.Styles)
+	}
+}
+
+func TestRevertPatchUsesMockRunner(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "wt")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(appDir, "patch_wt_icon.py")
+	if err := os.WriteFile(script, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	original := commandRunner
+	commandRunner = func(name string, args ...string) error {
+		called = true
+		if name != "uv" || len(args) != 3 || args[0] != "run" || args[2] != "--revert" {
+			t.Fatalf("unexpected mocked command: %s %#v", name, args)
 		}
+		return nil
+	}
+	t.Cleanup(func() { commandRunner = original })
+
+	if code := run([]string{"revert", "--scripts-dir", root, "wt"}, discardWriter{}, discardWriter{}); code != 0 {
+		t.Fatalf("revert returned %d", code)
+	}
+	if !called {
+		t.Fatal("expected mocked command runner to be called")
 	}
 }
 

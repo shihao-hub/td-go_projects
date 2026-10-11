@@ -6,35 +6,31 @@
 # ///
 """
 ========================================================================================
-PowerShell / Windows Terminal 任务栏与快捷方式图标定制与自动恢复守卫引擎
+PowerShell 7 (pwsh.exe) 任务栏与快捷方式质感图标守卫引擎 (精准安全版)
 ========================================================================================
-【功能特性】
-1. 智能定位 Windows Terminal (wt.exe) 与 PowerShell 相关的快捷方式与可执行文件：
-   - 任务栏固定目录 (%APPDATA%\\Microsoft\\Internet Explorer\\Quick Launch\\User Pinned\\TaskBar)
-   - 开始菜单程序目录 (%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs)
-   - 用户桌面快捷方式 (%USERPROFILE%\\Desktop)
-2. 自动化快捷方式创建与属性自愈：
-   - 若任务栏尚未存在 Windows Terminal 快捷方式，自动创建规范快捷方式并绑定质感图标。
-   - 自动更新已存在快捷方式的 IconLocation 属性。
-3. 绿色独立版 PE 图标注入支持：
-   - 若检测到独立免安装版 WindowsTerminal.exe 或 PowerShell 7 (pwsh.exe)，支持 rcedit 注入。
-4. 官方原生零风险外壳刷新三连击（绝不 taskkill explorer.exe）：
-   - os.utime 触碰快捷方式时间戳
-   - ie4uinit.exe -show 原生刷新图标缓存
-   - SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_FLUSH) 广播外壳变更通知
+【安全规范】
+1. 精准目标过滤：
+   - 快捷方式 TargetPath 必须严格以 \\pwsh.exe 结尾。
+   - 严禁通过文件名模糊匹配，严禁触碰 Windows Terminal、XTerminal、PowerShell 5.1。
+2. 初态只读锁定与基线备份：
+   - 快捷方式初态记录于 %APPDATA%\\language_projects\\taskbarguard\\state.json。
+   - EXE 注入前备份原版到 %APPDATA%\\language_projects\\taskbarguard\\backups\\pwsh.pristine.exe。
+   - 重复执行绝不覆写初态备份。
+3. 一键撤销恢复 (--revert)：
+   - 快捷方式恢复 pristine_icon。
+   - EXE 使用 pristine 备份或官方图标无损复原。
 ========================================================================================
 """
 
 import argparse
 import ctypes
-import glob
 import io
+import json
 import os
 import shutil
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
 # 控制台 UTF-8 输出防乱码
@@ -48,41 +44,49 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 CUSTOM_ICONS_DIR = SCRIPT_DIR / "custom_icons"
 
 RCEDIT_DEFAULT_PATH = Path(r"D:\Users\language_projects_bin\rcedit.exe")
-RCEDIT_DOWNLOAD_URL = "https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe"
 
 DEFAULT_STYLE_MAP = {
     ico.stem: ico for ico in CUSTOM_ICONS_DIR.glob("*.ico")
 } if CUSTOM_ICONS_DIR.is_dir() else {}
 
 
-def ensure_rcedit(custom_path: str | None = None) -> Path | None:
-    """按需查找或下载 rcedit 工具 (仅在需要对 PE exe 注入时使用)"""
-    if custom_path:
-        p = Path(custom_path).resolve()
-        if p.is_file():
-            return p
-        return None
+def get_base_dir() -> Path:
+    app_data = os.environ.get("APPDATA")
+    if app_data:
+        base_dir = Path(app_data) / "language_projects" / "taskbarguard"
+    else:
+        base_dir = Path.home() / ".language_projects" / "taskbarguard"
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir
 
+
+def load_state() -> dict:
+    state_file = get_base_dir() / "state.json"
+    if state_file.is_file():
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_state(state: dict) -> None:
+    state_file = get_base_dir() / "state.json"
+    with open(state_file, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def ensure_rcedit() -> Path | None:
     if RCEDIT_DEFAULT_PATH.is_file():
         return RCEDIT_DEFAULT_PATH
-
     path_which = shutil.which("rcedit") or shutil.which("rcedit-x64")
     if path_which:
         return Path(path_which)
-
-    try:
-        dest = RCEDIT_DEFAULT_PATH
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        print(f"[*] 未检测到 rcedit 工具，正在自动从 GitHub 下载: {RCEDIT_DOWNLOAD_URL}")
-        urllib.request.urlretrieve(RCEDIT_DOWNLOAD_URL, dest)
-        print(f"[+] 下载完成: {dest}")
-        return dest
-    except Exception:
-        return None
+    return None
 
 
 def resolve_icon_path(style: str | None, custom_icon: str | None) -> Path:
-    """解析最终生效的 .ico 文件绝对路径"""
     if custom_icon:
         p = Path(custom_icon).resolve()
         if not p.is_file():
@@ -104,10 +108,40 @@ def resolve_icon_path(style: str | None, custom_icon: str | None) -> Path:
     raise ValueError(f"未知图标款式: {target_style}。可用款式: {available}")
 
 
-def find_target_shortcuts() -> list[Path]:
-    """定位系统中所有与 Terminal / PowerShell 相关的快捷方式"""
+def inspect_shortcut(lnk_path: Path) -> tuple[str, str] | None:
+    ps_cmd = f"""
+$wsh = New-Object -ComObject WScript.Shell
+$sc = $wsh.CreateShortcut('{str(lnk_path)}')
+Write-Output "$($sc.TargetPath)||$($sc.IconLocation)"
+"""
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            parts = res.stdout.strip().split("||", 1)
+            target = parts[0].strip() if len(parts) > 0 else ""
+            icon = parts[1].strip() if len(parts) > 1 else ""
+            return target, icon
+    except Exception:
+        pass
+    return None
+
+
+def is_pwsh_target(target_path: str) -> bool:
+    if not target_path:
+        return False
+    lower = target_path.strip().lower()
+    return lower == "pwsh.exe" or lower.endswith("\\pwsh.exe") or lower.endswith("/pwsh.exe")
+
+
+def find_pwsh_shortcuts() -> list[Path]:
+    """严格通过 TargetPath 仅匹配 PowerShell 7 (pwsh.exe) 快捷方式"""
     found: list[Path] = []
-    seen_paths = set()
+    seen = set()
 
     search_dirs = [
         Path(os.path.expandvars(r"%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar")),
@@ -116,31 +150,39 @@ def find_target_shortcuts() -> list[Path]:
         Path(os.path.expandvars(r"%ProgramData%\Microsoft\Windows\Start Menu\Programs")),
     ]
 
-    keywords = ["terminal", "powershell", "wt", "终端"]
-
     for sdir in search_dirs:
         if not sdir.is_dir():
             continue
         try:
             for lnk in sdir.rglob("*.lnk"):
-                name_lower = lnk.stem.lower()
-                if any(kw in name_lower for kw in keywords):
-                    resolved = lnk.resolve()
-                    if resolved not in seen_paths:
-                        seen_paths.add(resolved)
-                        found.append(resolved)
+                resolved = lnk.resolve()
+                if resolved in seen:
+                    continue
+                info = inspect_shortcut(resolved)
+                if not info:
+                    continue
+                target, _ = info
+                if is_pwsh_target(target):
+                    if ":" in target and not Path(target).exists():
+                        print(f"[!] 跳过 PowerShell 7 死链: {resolved}")
+                        continue
+                    seen.add(resolved)
+                    found.append(resolved)
         except Exception:
             continue
 
     return found
 
 
-def update_shortcut_icon(lnk_path: Path, ico_path: Path) -> bool:
-    """使用 PowerShell WScript.Shell 安全更新快捷方式的图标属性"""
+def update_shortcut_icon(lnk_path: Path, ico_path_or_spec: str) -> bool:
+    val = ico_path_or_spec
+    if not val.endswith(",0") and not val.endswith(", 0") and val.endswith(".ico"):
+        val = f"{val}, 0"
+
     ps_cmd = f"""
 $wsh = New-Object -ComObject WScript.Shell
 $sc = $wsh.CreateShortcut('{str(lnk_path)}')
-$sc.IconLocation = '{str(ico_path)}, 0'
+$sc.IconLocation = '{val}'
 $sc.Save()
 """
     try:
@@ -156,45 +198,7 @@ $sc.Save()
         return False
 
 
-def ensure_taskbar_wt_shortcut(ico_path: Path) -> Path | None:
-    """如果任务栏固定目录下没有 Windows Terminal 快捷方式，自动创建一个标准的快捷方式"""
-    taskbar_dir = Path(os.path.expandvars(r"%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"))
-    if not taskbar_dir.exists():
-        taskbar_dir.mkdir(parents=True, exist_ok=True)
-
-    target_lnk = taskbar_dir / "Windows Terminal.lnk"
-
-    # 确定 wt.exe 路径
-    wt_candidate = Path(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe"))
-    wt_target = str(wt_candidate) if wt_candidate.exists() else "wt.exe"
-    user_home = str(Path.home())
-
-    ps_cmd = f"""
-$wsh = New-Object -ComObject WScript.Shell
-$sc = $wsh.CreateShortcut('{str(target_lnk)}')
-$sc.TargetPath = '{wt_target}'
-$sc.WorkingDirectory = '{user_home}'
-$sc.Description = 'Windows Terminal (TaskbarGuard Custom Icon)'
-$sc.IconLocation = '{str(ico_path)}, 0'
-$sc.Save()
-"""
-    try:
-        res = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", ps_cmd],
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-        if res.returncode == 0 and target_lnk.is_file():
-            return target_lnk
-    except Exception as exc:
-        print(f"[-] 创建任务栏快捷方式失败: {exc}")
-
-    return None
-
-
-def find_standalone_exes(custom_exe: str | None = None) -> list[Path]:
-    """发现可进行 PE 资源注入的独立 EXE (如绿色版 Terminal 或 pwsh.exe)"""
+def find_standalone_pwsh_exes(custom_exe: str | None = None) -> list[Path]:
     exes = []
     if custom_exe:
         p = Path(custom_exe).resolve()
@@ -202,25 +206,36 @@ def find_standalone_exes(custom_exe: str | None = None) -> list[Path]:
             exes.append(p)
         return exes
 
-    # 常见 PowerShell 7 与独立终端路径
     candidates = [
         Path(r"C:\Program Files\PowerShell\7\pwsh.exe"),
         Path(os.path.expandvars(r"%LOCALAPPDATA%\Programs\PowerShell\7\pwsh.exe")),
-        Path(r"D:\Tools\WindowsTerminal\WindowsTerminal.exe"),
-        Path(r"C:\Tools\WindowsTerminal\WindowsTerminal.exe"),
     ]
-
     for cand in candidates:
         if cand.is_file():
             exes.append(cand)
-
     return exes
 
 
+def backup_exe_if_needed(exe_path: Path) -> Path | None:
+    backup_dir = get_base_dir() / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_file = backup_dir / f"{exe_path.stem}.pristine.exe"
+
+    if not backup_file.is_file():
+        try:
+            shutil.copy2(exe_path, backup_file)
+            print(f"[+] 首次执行，已锁定并建立 PE 二进制纯净基线备份: {backup_file}")
+            return backup_file
+        except Exception as exc:
+            print(f"[-] 备份 EXE 失败: {exc}")
+            return None
+    return backup_file
+
+
 def patch_pe_exe(exe_path: Path, ico_path: Path, rcedit_bin: Path) -> bool:
-    """使用 rcedit 安全注入 PE 资源"""
+    backup_exe_if_needed(exe_path)
     cmd = [str(rcedit_bin), str(exe_path), "--set-icon", str(ico_path)]
-    for attempt in range(1, 4):
+    for _ in range(3):
         try:
             res = subprocess.run(
                 cmd,
@@ -238,8 +253,6 @@ def patch_pe_exe(exe_path: Path, ico_path: Path, rcedit_bin: Path) -> bool:
 
 
 def refresh_windows_shell(touched_files: list[Path]) -> None:
-    """零风险外壳刷新三连击 (绝不 taskkill explorer.exe)"""
-    # 1. 碰触快捷方式时间戳
     now = time.time()
     for f in touched_files:
         try:
@@ -248,7 +261,6 @@ def refresh_windows_shell(touched_files: list[Path]) -> None:
         except Exception:
             pass
 
-    # 2. ie4uinit.exe -show 刷新图标缓存
     try:
         subprocess.run(
             ["ie4uinit.exe", "-show"],
@@ -258,7 +270,6 @@ def refresh_windows_shell(touched_files: list[Path]) -> None:
     except Exception:
         pass
 
-    # 3. 广播 SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_FLUSH)
     try:
         SHCNE_ASSOCCHANGED = 0x08000000
         SHCNF_FLUSH = 0x1000
@@ -267,33 +278,107 @@ def refresh_windows_shell(touched_files: list[Path]) -> None:
         print(f"[-] 广播外壳刷新失败: {exc}")
 
 
+def apply_patch(style: str | None, custom_icon: str | None, target_exe: str | None) -> int:
+    ico_path = resolve_icon_path(style, custom_icon)
+    print(f"[*] 选定 PowerShell 7 图标资源: {ico_path} (款式: {style or 'custom'})")
+
+    state = load_state()
+    ps_state = state.setdefault("apps", {}).setdefault("powershell", {})
+    shortcuts_state = ps_state.setdefault("shortcuts", {})
+
+    shortcuts = find_pwsh_shortcuts()
+    updated: list[Path] = []
+
+    for lnk in shortcuts:
+        lnk_key = str(lnk.resolve())
+        if lnk_key not in shortcuts_state:
+            info = inspect_shortcut(lnk)
+            orig_icon = info[1] if info else ""
+            shortcuts_state[lnk_key] = {
+                "pristine_icon": orig_icon,
+                "first_seen": time.time(),
+            }
+            print(f"[+] 锁定原生快捷方式基线图标: {lnk.name} -> {orig_icon or '(默认)'}")
+
+        if update_shortcut_icon(lnk, str(ico_path)):
+            shortcuts_state[lnk_key]["current_icon"] = str(ico_path)
+            updated.append(lnk)
+            print(f"[+] 已更新快捷方式图标: {lnk.name} -> {lnk}")
+
+    standalone_exes = find_standalone_pwsh_exes(target_exe)
+    if standalone_exes:
+        rcedit_bin = ensure_rcedit()
+        if rcedit_bin:
+            for exe in standalone_exes:
+                patch_pe_exe(exe, ico_path, rcedit_bin)
+
+    save_state(state)
+    refresh_windows_shell(updated)
+    print("\n" + "=" * 70)
+    print("✅ PowerShell 7 图标守卫已应用！")
+    print(f"   生效图标: {ico_path.name}")
+    print(f"   更新快捷方式数: {len(updated)}")
+    print("=" * 70)
+    return 0
+
+
+def revert_patch() -> int:
+    print("[*] 正在执行 PowerShell 7 图标回退与恢复...")
+    state = load_state()
+    ps_state = state.get("apps", {}).get("powershell", {})
+    shortcuts_state = ps_state.get("shortcuts", {})
+
+    touched: list[Path] = []
+    for lnk_str, meta in list(shortcuts_state.items()):
+        lnk = Path(lnk_str)
+        if not lnk.exists():
+            continue
+        orig = meta.get("pristine_icon", "")
+        if not orig:
+            info = inspect_shortcut(lnk)
+            target = info[0] if info else ""
+            orig = f"{target}, 0" if target else ""
+        if update_shortcut_icon(lnk, orig):
+            touched.append(lnk)
+            print(f"[+] 已恢复原生快捷方式图标: {lnk.name} -> {orig or '(默认)'}")
+
+    # 恢复 EXE
+    backup_file = get_base_dir() / "backups" / "pwsh.pristine.exe"
+    rcedit_bin = ensure_rcedit()
+    for exe in find_standalone_pwsh_exes():
+        if backup_file.is_file():
+            try:
+                shutil.copy2(backup_file, exe)
+                print(f"[+] 已从纯净基线文件还原 EXE: {exe}")
+            except Exception as exc:
+                print(f"[-] 还原 EXE 失败: {exc}")
+        elif rcedit_bin:
+            # 回退官方图标
+            official_ico = get_base_dir() / "assets" / "Powershell_black.ico"
+            if official_ico.is_file():
+                patch_pe_exe(exe, official_ico, rcedit_bin)
+                print(f"[+] 已注入微软官方图标恢复 EXE: {exe}")
+
+    if "powershell" in state.get("apps", {}):
+        del state["apps"]["powershell"]
+        save_state(state)
+
+    refresh_windows_shell(touched)
+    print("\n" + "=" * 70)
+    print("✅ PowerShell 7 已彻底回退恢复为原生状态！")
+    print("=" * 70)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="PowerShell / Windows Terminal 任务栏与快捷方式图标定制与恢复守卫"
+        description="PowerShell 7 (pwsh.exe) 任务栏与快捷方式图标定制与恢复守卫"
     )
-    parser.add_argument(
-        "--style",
-        type=str,
-        default="underlit_chrome",
-        help="图标预设款式 (如 underlit_chrome, dark_blue, titanium, cyan_matrix, pure_dark)",
-    )
-    parser.add_argument(
-        "--custom-icon",
-        type=str,
-        default=None,
-        help="自定义 .ico 文件绝对路径",
-    )
-    parser.add_argument(
-        "--target-exe",
-        type=str,
-        default=None,
-        help="可选指定的独立 EXE 路径",
-    )
-    parser.add_argument(
-        "--list-styles",
-        action="store_true",
-        help="列出所有可用预设款式并退出",
-    )
+    parser.add_argument("--style", type=str, default="underlit_chrome", help="图标预设款式")
+    parser.add_argument("--custom-icon", type=str, default=None, help="自定义 .ico 文件绝对路径")
+    parser.add_argument("--target-exe", type=str, default=None, help="可选指定的独立 EXE 路径")
+    parser.add_argument("--revert", action="store_true", help="一键撤销并回退到原生初始基线状态")
+    parser.add_argument("--list-styles", action="store_true", help="列出所有可用预设款式并退出")
 
     args = parser.parse_args()
 
@@ -304,48 +389,10 @@ def main():
             print(f"  - {s}")
         return
 
-    ico_path = resolve_icon_path(args.style, args.custom_icon)
-    print(f"[*] 选定图标资源: {ico_path} (款式/来源: {args.style or args.custom_icon})")
+    if args.revert:
+        sys.exit(revert_patch())
 
-    # 1. 查找并更新快捷方式
-    shortcuts = find_target_shortcuts()
-    updated_shortcuts: list[Path] = []
-
-    for lnk in shortcuts:
-        # 跳过 VS Code 相关的 powershell 工具脚本快捷方式以防干扰
-        if "visual studio" in str(lnk).lower():
-            continue
-        if update_shortcut_icon(lnk, ico_path):
-            updated_shortcuts.append(lnk)
-            print(f"[+] 已更新快捷方式图标: {lnk.name} -> {lnk}")
-
-    # 2. 确保任务栏固定目录有专用的 Windows Terminal 快捷方式
-    taskbar_lnk = ensure_taskbar_wt_shortcut(ico_path)
-    if taskbar_lnk and taskbar_lnk not in updated_shortcuts:
-        updated_shortcuts.append(taskbar_lnk)
-        print(f"[+] 已创建/同步任务栏快捷方式: {taskbar_lnk}")
-
-    # 3. 如果有可注入的独立 EXE，尝试注入
-    standalone_exes = find_standalone_exes(args.target_exe)
-    if standalone_exes:
-        rcedit_bin = ensure_rcedit()
-        if rcedit_bin:
-            for exe in standalone_exes:
-                patch_pe_exe(exe, ico_path, rcedit_bin)
-
-    # 4. 刷新系统外壳
-    refresh_windows_shell(updated_shortcuts)
-    print("[+] 已广播 Windows 外壳与图标缓存刷新通知 (SHChangeNotify FLUSH)")
-
-    print("\n" + "=" * 70)
-    print("✅ PowerShell / Windows Terminal 图标守卫与应用完成！")
-    print(f"   生效图标: {ico_path.name}")
-    print(f"   更新快捷方式数: {len(updated_shortcuts)}")
-    print("💡 任务栏提示：")
-    print("   若任务栏原先固定的是 Windows Store 原版应用，建议在任务栏右键原图标")
-    print("   选择「从任务栏取消固定」，随后点击桌面或开始菜单中已换上质感图标的")
-    print("   Windows Terminal 并选择「固定到任务栏」，即可享受长效自愈的统一质感！")
-    print("=" * 70)
+    sys.exit(apply_patch(args.style, args.custom_icon, args.target_exe))
 
 
 if __name__ == "__main__":

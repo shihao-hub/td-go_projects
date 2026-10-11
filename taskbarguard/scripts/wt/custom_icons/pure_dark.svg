@@ -1,0 +1,28 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="mono_bg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#202227"/>
+    <stop offset="40%" stop-color="#141518"/>
+    <stop offset="100%" stop-color="#0B0C0E"/>
+  </linearGradient>
+  <linearGradient id="mono_border" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#334155" stop-opacity="0.75"/>
+    <stop offset="100%" stop-color="#0F172A" stop-opacity="0.3"/>
+  </linearGradient>
+  <linearGradient id="dark_metal" x1="0%" y1="0%" x2="100%" y2="100%">
+    <stop offset="0%" stop-color="#CBD5E1"/>
+    <stop offset="60%" stop-color="#94A3B8"/>
+    <stop offset="100%" stop-color="#475569"/>
+  </linearGradient>
+  <filter id="dark_shadow" x="-20%" y="-20%" width="140%" height="140%" filterUnits="userSpaceOnUse">
+    <feDropShadow dx="0" dy="5" stdDeviation="10" flood-color="#000000" flood-opacity="0.75"/>
+  </filter>
+</defs>
+
+<rect x="18" y="18" width="988" height="988" rx="160" fill="url(#mono_bg)" stroke="url(#mono_border)" stroke-width="14"/>
+
+<g filter="url(#dark_shadow)">
+  <path d="M 260 280 C 260 260 282 248 300 260 L 570 492 C 584 502 584 522 570 532 L 300 764 C 282 776 260 764 260 744 L 260 655 C 260 644 266 634 275 627 L 435 512 L 275 397 C 266 390 260 380 260 369 Z" fill="url(#dark_metal)"/>
+  <rect x="525" y="660" width="235" height="74" rx="20" fill="url(#dark_metal)"/>
+</g>
+</svg>

@@ -24,7 +24,8 @@ func defaultConfig() Config {
 		"vscode":           {Enabled: true, Style: "blue"},
 		"deepseek_harness": {Enabled: true, Style: "8_underlit_chrome"},
 		"idea":             {Enabled: true, Style: "brand"},
-		"powershell":       {Enabled: true, Style: "underlit_chrome"},
+		"wt":               {Enabled: true, Style: "underlit_chrome"},
+		"powershell":       {Enabled: false, Style: "underlit_chrome"},
 	}}
 }
 

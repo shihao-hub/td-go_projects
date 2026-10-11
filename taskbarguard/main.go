@@ -104,6 +104,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return listApps(args[1:], stdout, stderr)
 	case "run":
 		return runPatch(args[1:], stdout, stderr)
+	case "revert":
+		return revertPatch(args[1:], stdout, stderr)
 	case "config":
 		return showConfig(args[1:], stdout, stderr)
 	case "set":
@@ -207,6 +209,44 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 		return writeJSON(stdout, output{OK: true, Data: map[string]string{"app": appName}})
 	}
 	fmt.Fprintf(stdout, "已完成 %s 补丁调度\n", appName)
+	return 0
+}
+
+func revertPatch(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("revert", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOutput := fs.Bool("json", false, "输出 JSON")
+	schemaOutput := fs.Bool("schema", false, "输出当前命令的 JSON 契约")
+	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
+	if err := fs.Parse(normalizeArgs(args)); err != nil {
+		return 2
+	}
+	if *schemaOutput {
+		return writeCommandSchema(stdout, "revert")
+	}
+	positionals, err := parsePositionals(fs, args)
+	if err != nil {
+		return 2
+	}
+	if len(positionals) != 1 {
+		return reportError(stdout, stderr, *jsonOutput, "invalid_arguments", "revert 需要一个应用名")
+	}
+	appName := normalizeAppName(positionals[0])
+	app, err := findApp(*scriptsDir, appName)
+	if err != nil {
+		return reportError(stdout, stderr, *jsonOutput, "app_not_found", err.Error())
+	}
+	if app.Script == "" {
+		return reportError(stdout, stderr, *jsonOutput, "script_not_found", "应用没有可执行补丁脚本")
+	}
+	argsForScript := []string{app.Script, "--revert"}
+	if err := commandRunner("uv", append([]string{"run"}, argsForScript...)...); err != nil {
+		return reportError(stdout, stderr, *jsonOutput, "script_failed", err.Error())
+	}
+	if *jsonOutput {
+		return writeJSON(stdout, output{OK: true, Data: map[string]string{"reverted": appName}})
+	}
+	fmt.Fprintf(stdout, "已完成 %s 图标回退与恢复调度\n", appName)
 	return 0
 }
 
@@ -422,6 +462,8 @@ func normalizeAppName(name string) string {
 	normalized := strings.ToLower(strings.TrimSuffix(name, ".exe"))
 	switch normalized {
 	case "wt", "terminal", "windowsterminal", "windows_terminal":
+		return "wt"
+	case "pwsh", "powershell7", "powershell_7":
 		return "powershell"
 	default:
 		return name
@@ -489,6 +531,7 @@ func writeSchema(stdout io.Writer) int {
 		"commands": []map[string]interface{}{
 			{"name": "list", "schema": "taskbarguard list --schema"},
 			{"name": "run", "schema": "taskbarguard run --schema"},
+			{"name": "revert", "schema": "taskbarguard revert --schema"},
 			{"name": "config", "usage": "taskbarguard config"},
 			{"name": "set", "usage": "taskbarguard set APP --style NAME"},
 			{"name": "apply", "usage": "taskbarguard apply [APP]"},
@@ -511,6 +554,12 @@ func writeCommandSchema(stdout io.Writer, command string) int {
 			"arguments": map[string]interface{}{"positionals": 1, "positionalName": "app"},
 			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--style": "string", "--custom-icon": "path", "--scripts-dir": "string"},
 			"output":    "{ok:true,data:{app:string}}",
+		},
+		"revert": map[string]interface{}{
+			"name": "revert", "interface": "cli",
+			"arguments": map[string]interface{}{"positionals": 1, "positionalName": "app"},
+			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--scripts-dir": "string"},
+			"output":    "{ok:true,data:{reverted:string}}",
 		},
 		"config": map[string]interface{}{
 			"name": "config", "interface": "cli", "arguments": map[string]interface{}{"positionals": 0},
@@ -556,9 +605,10 @@ func reportError(stdout, stderr io.Writer, jsonOutput bool, code, message string
 
 func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "TaskbarGuard - Windows 任务栏应用质感图标守卫")
-	fmt.Fprintln(w, "用法: taskbarguard <list|run|config|set|apply|install-task|schema>")
+	fmt.Fprintln(w, "用法: taskbarguard <list|run|revert|config|set|apply|install-task|schema>")
 	fmt.Fprintln(w, "  list          列出脚本目录中的支持应用")
 	fmt.Fprintln(w, "  run APP       调度指定应用的补丁脚本（未传 --style 时回退读取配置）")
+	fmt.Fprintln(w, "  revert APP    撤销指定应用的图标定制并恢复原生基线状态")
 	fmt.Fprintln(w, "  config        打印当前生效的配置 (config.json)")
 	fmt.Fprintln(w, "  set APP       更新偏好并自动落盘: --style NAME | --custom-icon PATH | --enabled=false")
 	fmt.Fprintln(w, "  apply [APP]   按配置一键打补丁，缺省应用所有已启用应用")
