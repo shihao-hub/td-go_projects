@@ -461,7 +461,7 @@ func discoverApps(scriptsDir string) ([]appInfo, error) {
 func normalizeAppName(name string) string {
 	normalized := strings.ToLower(strings.TrimSuffix(name, ".exe"))
 	switch normalized {
-	case "wt", "terminal", "windowsterminal", "windows_terminal":
+	case "wt", "terminal", "windowsterminal", "windows_terminal", "powershell":
 		return "wt"
 	default:
 		return name

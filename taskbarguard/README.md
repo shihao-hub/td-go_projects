@@ -18,23 +18,23 @@ go_projects/taskbarguard/
     ├── README.md               # 脚本库全量款式、生成工序揭秘与手动运行速查手册
     ├── deepseek_harness/       # DeepSeek Harness 模块（款式 8 环形底光通透款已设为首选 ⭐）
     ├── idea/                   # IntelliJ IDEA 模块（经典微光彩极款 ⭐ / 极客银白 / 冰蓝科技）
-    ├── powershell/             # PowerShell / Windows Terminal 模块（环形底光通透款 ⭐ / 科技蓝 / 钛白）
-    └── vscode/                 # VS Code 模块（科技蓝微光 / 极客银白）
+    ├── vscode/                 # VS Code 模块（科技蓝微光 / 极客银白）
+    └── wt/                     # Windows Terminal 模块（环形底光通透款 ⭐ / 钛金极客白 / 科技蓝）
 ```
 
 ---
 
 ## 配置持久化
 
-CLI 默认在当前工作目录读写 `config.json`。首次执行 `config`、`run` 或 `apply` 时，如果文件不存在，会生成包含 VS Code、DeepSeek Harness、IntelliJ IDEA 与 PowerShell 的默认偏好配置：
+CLI 默认在当前工作目录读写 `config.json`。首次执行 `config`、`run` 或 `apply` 时，如果文件不存在，会生成包含 VS Code、DeepSeek Harness、IntelliJ IDEA 与 Windows Terminal 的默认偏好配置：
 
 ```json
 {
   "apps": {
     "deepseek_harness": { "enabled": true, "style": "8_underlit_chrome" },
     "idea": { "enabled": true, "style": "brand" },
-    "powershell": { "enabled": true, "style": "underlit_chrome" },
-    "vscode": { "enabled": true, "style": "blue" }
+    "vscode": { "enabled": true, "style": "blue" },
+    "wt": { "enabled": true, "style": "titanium" }
   }
 }
 ```
