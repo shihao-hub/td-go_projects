@@ -26,33 +26,33 @@ go_projects/taskbarguard/
 
 ## 配置持久化
 
-CLI 默认在当前工作目录读写 `config.json`。首次执行 `config`、`run` 或 `apply` 时，如果文件不存在，会生成包含 VS Code、DeepSeek Harness、IntelliJ IDEA 与 Windows Terminal 的默认偏好配置：
+CLI 默认在当前工作目录读写 `config.json`（该路径相对工作目录解析，请在项目根目录执行命令）。仓库内的 `config.json` 已纳入版本管理，作为偏好快照随仓库分发；当前生效偏好：
 
 ```json
 {
   "apps": {
     "deepseek_harness": { "enabled": true, "style": "8_underlit_chrome" },
-    "idea": { "enabled": true, "style": "brand" },
-    "vscode": { "enabled": true, "style": "blue" },
-    "wt": { "enabled": true, "style": "titanium" }
+    "idea": { "enabled": false, "style": "underlit_chrome" },
+    "vscode": { "enabled": true, "style": "silver" },
+    "wt": { "enabled": true, "style": "pure_dark" }
   }
 }
 ```
 
-字段说明：`enabled` 控制 `apply` 是否批量执行；`style` 为脚本支持的款式名；`custom_icon` 为自定义 ICO 路径，设置它会替代 `style`。
+字段说明：`enabled` 控制 `apply` 是否批量执行；`style` 为脚本支持的款式名；`custom_icon` 为自定义 ICO 路径，设置它会替代 `style`。仅当该文件缺失时（如在仓库外首次运行）才会按上表自动生成。
 
 ```powershell
-# 查看并初始化配置
- go run . config
+# 查看当前配置
+go run . config
 # 修改预设款式（选项可以写在 APP 前后）
 go run . set vscode --style silver
 # 指定自定义 ICO
 go run . set deepseek_harness --custom-icon scripts/deepseek_harness/custom_icons/custom.ico
-# 一键应用指定应用，或应用所有 enabled 应用
+# 一键应用指定应用，或应用所有 enabled 应用（--kill 强制关闭占用进程）
 go run . apply vscode
-go run . apply
+go run . apply --kill
 # run 未指定 --style / --custom-icon 时自动回退配置
- go run . run vscode
+go run . run vscode
 ```
 
 配置文件可通过 `--config PATH`（`config` 命令使用 `--file PATH`）切换。
@@ -81,12 +81,30 @@ go run . run --style blue vscode
 # 调度 DeepSeek Harness 的自定义图标款式
 go run . run --style 8_underlit_chrome deepseek_harness
 
-# 调度 PowerShell / Windows Terminal (支持别名 powershell, wt, terminal)
-go run . run --style underlit_chrome powershell
+# 调度 Windows Terminal (别名 wt / terminal；--kill 强制关闭占用进程)
+go run . run --kill --style pure_dark wt
 go run . run --style dark_blue wt
 ```
 
-`run` 只负责发现脚本、校验参数并调度 `uv run`；不会在 Go 进程内执行 Python 逻辑。`install-task` 仅在 Windows 下注册登录触发的计划任务，实际脚本仍由守卫命令调用。
+`run` 只负责发现脚本、校验参数并调度 `uv run`；不会在 Go 进程内执行 Python 逻辑。`install-task` 仅在 Windows 下注册登录触发的计划任务（执行 `apply`），实际脚本仍由守卫命令调用；开发版 exe 注册时会给出警告，正式启用请使用 release 版。
+
+## 应用自动更新后的恢复
+
+VS Code、DeepSeek Harness 等应用后台静默更新后会覆盖 PE 图标资源，导致任务栏视觉回退。确认更新完成后，在项目根目录执行：
+
+```powershell
+# 推荐：强制关闭占用进程并批量恢复所有已启用应用
+.\taskbarguard-dev.exe apply --kill
+
+# 或先手动完全退出目标应用，再执行
+.\taskbarguard-dev.exe apply
+```
+
+注意：
+
+- 必须在 `go_projects\taskbarguard` 目录下执行（`config.json` 与 `scripts\` 均按当前工作目录解析）；
+- `idea` 当前在配置中禁用，`apply` 会自动跳过；需要时用 `go run . set idea --style underlit_chrome` 重新启用；
+- 也可以直接用 Go 运行：`go run . apply --kill`。
 
 ## 双轨构建
 

@@ -154,6 +154,7 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 	schemaOutput := fs.Bool("schema", false, "输出当前命令的 JSON 契约")
 	style := fs.String("style", "", "图标款式")
 	customIcon := fs.String("custom-icon", "", "自定义 ICO 路径")
+	kill := fs.Bool("kill", false, "强制关闭正在运行的目标应用")
 	configPath := fs.String("config", defaultConfigFile, "配置文件路径")
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
 	if err := fs.Parse(normalizeArgs(args)); err != nil {
@@ -201,6 +202,9 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 	}
 	if *customIcon != "" {
 		argsForScript = append(argsForScript, "--custom-icon", *customIcon)
+	}
+	if *kill {
+		argsForScript = append(argsForScript, "--kill")
 	}
 	if err := commandRunner("uv", append([]string{"run"}, argsForScript...)...); err != nil {
 		return reportError(stdout, stderr, *jsonOutput, "script_failed", err.Error())
@@ -268,7 +272,10 @@ func installScheduledTask(args []string, stdout, stderr io.Writer) int {
 	if runtime.GOOS != "windows" {
 		return reportError(stdout, stderr, *jsonOutput, "unsupported_platform", "计划任务仅支持 Windows")
 	}
-	cmdArgs := []string{"/Create", "/TN", scheduledTask, "/TR", fmt.Sprintf(`"%s" list`, executable), "/SC", "ONLOGON", "/F"}
+	if strings.Contains(strings.ToLower(filepath.Base(executable)), "-dev") {
+		fmt.Fprintln(stderr, "警告: 当前为开发版可执行文件，注册的任务将指向开发版；正式启用前请改用 release 版重新注册。")
+	}
+	cmdArgs := []string{"/Create", "/TN", scheduledTask, "/TR", fmt.Sprintf(`"%s" apply`, executable), "/SC", "ONLOGON", "/F"}
 	if err := commandRunner("schtasks", cmdArgs...); err != nil {
 		return reportError(stdout, stderr, *jsonOutput, "task_failed", err.Error())
 	}
@@ -339,6 +346,7 @@ func applyConfig(args []string, stdout, stderr io.Writer) int {
 	configPath := fs.String("config", defaultConfigFile, "配置文件路径")
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
 	jsonOutput := fs.Bool("json", false, "输出 JSON")
+	kill := fs.Bool("kill", false, "强制关闭正在运行的目标应用")
 	if err := fs.Parse(normalizeArgs(args)); err != nil {
 		return 2
 	}
@@ -379,6 +387,9 @@ func applyConfig(args []string, stdout, stderr io.Writer) int {
 		}
 		if preference.CustomIcon != "" {
 			command = append(command, "--custom-icon", preference.CustomIcon)
+		}
+		if *kill {
+			command = append(command, "--kill")
 		}
 		command = append(command, name)
 		childStdout := stdout
@@ -550,7 +561,7 @@ func writeCommandSchema(stdout io.Writer, command string) int {
 		"run": map[string]interface{}{
 			"name": "run", "interface": "cli",
 			"arguments": map[string]interface{}{"positionals": 1, "positionalName": "app"},
-			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--style": "string", "--custom-icon": "path", "--scripts-dir": "string"},
+			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--style": "string", "--custom-icon": "path", "--scripts-dir": "string", "--kill": "boolean"},
 			"output":    "{ok:true,data:{app:string}}",
 		},
 		"revert": map[string]interface{}{
@@ -569,7 +580,7 @@ func writeCommandSchema(stdout io.Writer, command string) int {
 		},
 		"apply": map[string]interface{}{
 			"name": "apply", "interface": "cli", "arguments": map[string]interface{}{"positionals": "0..1", "positionalName": "app"},
-			"options": map[string]string{"--config": "path", "--scripts-dir": "path", "--json": "boolean"}, "output": "{ok:true,data:{applied:string[]}}",
+			"options": map[string]string{"--config": "path", "--scripts-dir": "path", "--json": "boolean", "--kill": "boolean"}, "output": "{ok:true,data:{applied:string[]}}",
 		},
 		"install-task": map[string]interface{}{
 			"name": "install-task", "interface": "cli",
@@ -605,11 +616,11 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "TaskbarGuard - Windows 任务栏应用质感图标守卫")
 	fmt.Fprintln(w, "用法: taskbarguard <list|run|revert|config|set|apply|install-task|schema>")
 	fmt.Fprintln(w, "  list          列出脚本目录中的支持应用")
-	fmt.Fprintln(w, "  run APP       调度指定应用的补丁脚本（未传 --style 时回退读取配置）")
+	fmt.Fprintln(w, "  run APP       调度补丁脚本（--kill 强制关闭占用进程后写入）")
 	fmt.Fprintln(w, "  revert APP    撤销指定应用的图标定制并恢复原生基线状态")
 	fmt.Fprintln(w, "  config        打印当前生效的配置 (config.json)")
 	fmt.Fprintln(w, "  set APP       更新偏好并自动落盘: --style NAME | --custom-icon PATH | --enabled=false")
-	fmt.Fprintln(w, "  apply [APP]   按配置一键打补丁，缺省应用所有已启用应用")
+	fmt.Fprintln(w, "  apply [APP]   按配置一键打补丁（--kill 强制关进程），缺省全部已启用应用")
 	fmt.Fprintln(w, "  install-task  注册用户登录时的守护计划任务")
 	fmt.Fprintln(w, "  schema        输出 CLI 契约 JSON")
 	fmt.Fprintln(w, "")

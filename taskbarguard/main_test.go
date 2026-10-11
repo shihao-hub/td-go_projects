@@ -74,6 +74,38 @@ func TestRunPatchUsesMockRunner(t *testing.T) {
 	}
 }
 
+func TestRunPatchPassesKillFlag(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "vscode")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "patch_vscode_icon.py"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "vscode_dark_blue.ico"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	called := false
+	original := commandRunner
+	commandRunner = func(name string, args ...string) error {
+		called = true
+		if name != "uv" || len(args) != 5 || args[0] != "run" || args[2] != "--style" || args[3] != "blue" || args[4] != "--kill" {
+			t.Fatalf("unexpected mocked command: %s %#v", name, args)
+		}
+		return nil
+	}
+	t.Cleanup(func() { commandRunner = original })
+
+	if code := run([]string{"run", "--kill", "--style", "blue", "--scripts-dir", root, "vscode"}, discardWriter{}, discardWriter{}); code != 0 {
+		t.Fatalf("run returned %d", code)
+	}
+	if !called {
+		t.Fatal("expected mocked command runner to be called")
+	}
+}
+
 func TestFindAppAlias(t *testing.T) {
 	root := t.TempDir()
 	wtDir := filepath.Join(root, "wt")
@@ -132,6 +164,41 @@ func TestRevertPatchUsesMockRunner(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("expected mocked command runner to be called")
+	}
+}
+
+func TestApplyPassesKillFlag(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "vscode")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "patch_vscode_icon.py"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "vscode_dark_silver.ico"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "config.json")
+	if err := SaveConfig(configPath, Config{Apps: map[string]AppConfig{
+		"vscode": {Enabled: true, Style: "silver"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var seen []string
+	original := commandRunner
+	commandRunner = func(name string, args ...string) error {
+		seen = args
+		return nil
+	}
+	t.Cleanup(func() { commandRunner = original })
+
+	if code := run([]string{"apply", "--kill", "--config", configPath, "--scripts-dir", root}, discardWriter{}, discardWriter{}); code != 0 {
+		t.Fatalf("apply returned %d", code)
+	}
+	if len(seen) != 5 || seen[0] != "run" || seen[2] != "--style" || seen[3] != "silver" || seen[4] != "--kill" {
+		t.Fatalf("unexpected args: %#v", seen)
 	}
 }
 

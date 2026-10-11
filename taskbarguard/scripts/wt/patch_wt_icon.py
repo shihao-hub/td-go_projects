@@ -12,6 +12,7 @@ Windows Terminal (wt) 任务栏与可执行文件图标定制与自动恢复守�
 1. 独立 Win32 免安装版 PE 资源直注：
    - 目标：D:\\Users\\Softwares\\WindowsTerminal\\WindowsTerminal.exe & wt.exe
    - 彻底解除 UWP Store 打包限制，运行状态任务栏图标 100% 保持质感一致。
+   - 支持 --kill 强制关闭占用中的终端进程后写入。
 2. 快捷方式智能维护与安全初态备份：
    - 维护任务栏与开始菜单 Windows Terminal.lnk。
    - 记录初态，支持 --revert 一键无损复原。
@@ -138,6 +139,27 @@ def find_target_exes(custom_exe: str | None = None) -> list[Path]:
                 exes.append(companion)
 
     return exes
+
+
+def ensure_wt_processes_closed(kill: bool) -> None:
+    """--kill 时强制结束 Windows Terminal 进程，释放 EXE 文件占用"""
+    if not kill:
+        return
+    closed: list[str] = []
+    for name in ("WindowsTerminal.exe", "wt.exe"):
+        result = subprocess.run(
+            ["taskkill", "/F", "/IM", name, "/T"],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if result.returncode == 0:
+            closed.append(name)
+    if closed:
+        print(f"[*] 已强制关闭: {', '.join(closed)}")
+        time.sleep(0.8)
+    else:
+        print("[*] 未检测到运行中的 Windows Terminal 进程")
 
 
 def patch_pe_exe(exe_path: Path, ico_path: Path, rcedit_bin: Path) -> bool:
@@ -352,9 +374,11 @@ def revert_nilesoft_patch() -> None:
                 print(f"[-] 还原 {f.name} 失败: {e}")
 
 
-def apply_patch(style: str | None, custom_icon: str | None, custom_exe: str | None) -> int:
+def apply_patch(style: str | None, custom_icon: str | None, custom_exe: str | None, kill: bool = False) -> int:
     ico_path = resolve_icon_path(style, custom_icon)
     print(f"[*] 选定 Windows Terminal 图标资源: {ico_path} (款式: {style or 'custom'})")
+
+    ensure_wt_processes_closed(kill)
 
     target_exes = find_target_exes(custom_exe)
     if not target_exes:
@@ -421,9 +445,10 @@ def revert_patch() -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="Windows Terminal 任务栏图标定制与恢复守卫")
-    parser.add_argument("--style", type=str, default="titanium", help="图标款式 (titanium, underlit_chrome, dark_blue, cyan_matrix, pure_dark)")
+    parser.add_argument("--style", type=str, default="pure_dark", help="图标款式 (pure_dark, titanium, underlit_chrome, dark_blue, cyan_matrix)")
     parser.add_argument("--custom-icon", type=str, default=None, help="自定义 .ico 文件路径")
     parser.add_argument("--target-exe", type=str, default=None, help="目标 EXE 路径")
+    parser.add_argument("--kill", action="store_true", help="若 Windows Terminal 正在运行，先强制关闭（会关闭所有终端窗口）再注入")
     parser.add_argument("--revert", action="store_true", help="一键撤销并回退状态")
     parser.add_argument("--list-styles", action="store_true", help="列出可用款式")
 
@@ -439,7 +464,7 @@ def main():
     if args.revert:
         sys.exit(revert_patch())
 
-    sys.exit(apply_patch(args.style, args.custom_icon, args.target_exe))
+    sys.exit(apply_patch(args.style, args.custom_icon, args.target_exe, args.kill))
 
 
 if __name__ == "__main__":
