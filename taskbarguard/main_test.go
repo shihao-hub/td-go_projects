@@ -91,21 +91,6 @@ func TestFindAppAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	psDir := filepath.Join(root, "powershell")
-	if err := os.Mkdir(psDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(psDir, "patch_powershell_icon.py"), []byte{}, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	psIcons := filepath.Join(psDir, "custom_icons")
-	if err := os.Mkdir(psIcons, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(psIcons, "dark_blue.ico"), []byte{}, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	for _, alias := range []string{"wt", "terminal", "wt.exe", "windowsterminal"} {
 		app, err := findApp(root, alias)
 		if err != nil {
@@ -116,16 +101,6 @@ func TestFindAppAlias(t *testing.T) {
 		}
 		if !contains(app.Styles, "underlit_chrome") {
 			t.Fatalf("expected style underlit_chrome in %#v", app.Styles)
-		}
-	}
-
-	for _, alias := range []string{"powershell", "pwsh"} {
-		app, err := findApp(root, alias)
-		if err != nil {
-			t.Fatalf("alias %q failed: %v", alias, err)
-		}
-		if app.Name != "powershell" {
-			t.Fatalf("expected powershell, got %q", app.Name)
 		}
 	}
 }

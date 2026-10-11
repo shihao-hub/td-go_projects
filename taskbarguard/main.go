@@ -463,8 +463,6 @@ func normalizeAppName(name string) string {
 	switch normalized {
 	case "wt", "terminal", "windowsterminal", "windows_terminal":
 		return "wt"
-	case "pwsh", "powershell7", "powershell_7":
-		return "powershell"
 	default:
 		return name
 	}

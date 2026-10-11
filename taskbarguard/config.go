@@ -25,7 +25,6 @@ func defaultConfig() Config {
 		"deepseek_harness": {Enabled: true, Style: "8_underlit_chrome"},
 		"idea":             {Enabled: true, Style: "brand"},
 		"wt":               {Enabled: true, Style: "underlit_chrome"},
-		"powershell":       {Enabled: false, Style: "underlit_chrome"},
 	}}
 }
 
