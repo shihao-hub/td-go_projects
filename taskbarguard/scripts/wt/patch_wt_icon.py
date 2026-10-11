@@ -262,8 +262,19 @@ def safe_patch_pe_binary(target_exe: Path, ico_path: Path, group_ids: list[int])
         return False
 
 
+def detect_wt_session() -> str:
+    """返回当前进程所在的 Windows Terminal 会话 ID（WT_SESSION 由 WT 注入给所有子进程），不在 WT 内则返回空串"""
+    return os.environ.get("WT_SESSION", "").strip()
+
+
 def ensure_wt_processes_closed(kill: bool) -> None:
     if not kill:
+        return
+    # 自身就在 WT 进程树内时，taskkill /T 会连当前会话一起终结；
+    # 降级为不杀进程，让上层转走“原子重命名热替换”路径。
+    if detect_wt_session():
+        print("[!] 当前进程运行在 Windows Terminal 会话内，已跳过强制关闭以免终止自身会话。")
+        print("    PE 注入将改用原子重命名热替换路径，无需关闭终端。")
         return
     closed: list[str] = []
     for name in ("WindowsTerminal.exe", "wt.exe"):
@@ -465,7 +476,11 @@ def auto_setup_windows_terminal(custom_dir: str | None = None) -> Path | None:
 
 
 def upgrade_install_dir(target_dir: Path, asset_name: str, download_url: str) -> bool:
-    """下载新版并原子换入目标目录（暂存解压 + 完整性校验 + 目录级重命名，失败回滚保留旧版）"""
+    """下载新版并原子换入目标目录（暂存解压 + 完整性校验 + 目录级重命名，失败回滚保留旧版）
+
+    前置条件：调用方必须先确认当前进程不在 Windows Terminal 会话内（参见 detect_wt_session）。
+    目录级重命名要求 WT 完全退出，而 taskkill /T 会连带终结同树内的调用方会话。
+    """
     staging_dir = target_dir.parent / (target_dir.name + UPGRADE_STAGING_SUFFIX)
     backup_dir = target_dir.parent / (target_dir.name + UPGRADE_BACKUP_SUFFIX)
     temp_zip = target_dir.parent / (asset_name or "WindowsTerminal_x64.zip")
@@ -1010,6 +1025,19 @@ def update_windows_terminal(
 
     if not remote_version:
         print("[!] 无法比对远端版本号，将按请求执行覆盖升级。")
+
+    # 安全闸门：升级必须关闭 WT 并重命名其安装目录，而若本进程就在某个 WT 窗口的进程树内，
+    # taskkill /T 会连当前会话一起杀死。故在下载之前就拦下，并给出可执行的绕行方式。
+    wt_session = detect_wt_session()
+    if wt_session:
+        print(f"[!] 检测到当前进程运行在 Windows Terminal 会话内 (WT_SESSION={wt_session})。")
+        print("    升级需关闭全部 Windows Terminal 窗口，而本进程正属于其中一个窗口的进程树，")
+        print("    继续执行会强杀当前会话自身、导致升级流程中途夭折。已中止升级，未做任何修改。")
+        print("    请改用以下方式之一重跑：")
+        print("      1) 先手动关闭所有 Windows Terminal 窗口，再从 Windows 控制台主机（conhost）执行；")
+        print("      2) 在 Win+R 打开的独立终端窗口中执行本命令。")
+        print("    注：本条仅拦住“升级”（需重命名安装目录）；日常图标定制不受影响。")
+        return 1
 
     if not upgrade_install_dir(install_dir, asset_name, download_url):
         print("[-] 升级失败，旧版本保持可用。")
