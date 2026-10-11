@@ -74,6 +74,38 @@ func TestRunPatchUsesMockRunner(t *testing.T) {
 	}
 }
 
+func TestFindAppAlias(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "powershell")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(appDir, "patch_powershell_icon.py")
+	if err := os.WriteFile(script, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	customIcons := filepath.Join(appDir, "custom_icons")
+	if err := os.Mkdir(customIcons, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(customIcons, "underlit_chrome.ico"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, alias := range []string{"powershell", "wt", "terminal", "wt.exe", "windowsterminal"} {
+		app, err := findApp(root, alias)
+		if err != nil {
+			t.Fatalf("alias %q failed: %v", alias, err)
+		}
+		if app.Name != "powershell" {
+			t.Fatalf("expected powershell, got %q", app.Name)
+		}
+		if !contains(app.Styles, "underlit_chrome") {
+			t.Fatalf("expected style underlit_chrome in %#v", app.Styles)
+		}
+	}
+}
+
 type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }

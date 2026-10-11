@@ -1,4 +1,4 @@
-﻿# TaskbarGuard 脚本资产库 (scripts/) 使用指南
+# TaskbarGuard 脚本资产库 (scripts/) 使用指南
 
 本文档介绍 `go_projects\taskbarguard\scripts\` 下各应用模块的脚本用途、全量可选图标款式说明、一键切换命令，以及图标的高清工业级生成工序流水线。
 
@@ -165,7 +165,44 @@ uv run scripts/idea/patch_idea_icon.py --restore
 
 ---
 
-## 五、执行须知与安全准则
+## 五、PowerShell / Windows Terminal 模块
+
+模块路径：`go_projects\taskbarguard\scripts\powershell\`
+
+### 1. 支持款式说明
+
+所有图标均保存在 `custom_icons/` 目录下（底板尺寸 `988x988`，圆角半径 `rx=160`，与 Zed / DSH / IDEA 1:1 绝对对齐）：
+
+| 款式参数 (`--style`) | 图标文件路径 | 特色说明 |
+| :--- | :--- | :--- |
+| **`underlit_chrome` (环形底光通透款 · 首选推荐 ⭐)** | `custom_icons/underlit_chrome.ico` | **与 DeepSeek 8号底光款及 IDEA 同源**。高饱和度冰蓝底部环境漫射光晕 + 亮白金属镀铬浮雕 Chevron 与光标，现代极客感与任务栏浑然一体 |
+| **`dark_blue` (经典科技蓝微光款 ⭐)** | `custom_icons/dark_blue.ico` | 经典微软 Azure 科技蓝微光渐变（#60A5FA ➔ #2563EB ➔ #1D4ED8），搭配深邃科技蓝空间光晕 |
+| **`titanium` (极客银白 / 钛金属微雕款)** | `custom_icons/titanium.ico` | 纯净冷灰钛金属拉丝立体质感，内敛沉稳，克制高级 |
+| **`cyan_matrix` (极光青蓝款)** | `custom_icons/cyan_matrix.ico` | 翠青极光渐变（#22D3EE ➔ #06B6D4），匹配任务栏相邻的 Sublime Merge 视觉色系 |
+| **`pure_dark` (极简深黑哑光款)** | `custom_icons/pure_dark.ico` | 炭黑哑光质感，高反差黑曜石终端美学 |
+
+---
+
+### 2. 各款式手动切换命令
+
+```powershell
+# 【强烈推荐 ⭐】应用环形底光通透款
+uv run scripts/powershell/patch_powershell_icon.py --style underlit_chrome
+
+# 应用经典科技蓝微光款
+uv run scripts/powershell/patch_powershell_icon.py --style dark_blue
+
+# 应用极客银白钛金款
+uv run scripts/powershell/patch_powershell_icon.py --style titanium
+
+# 亦可通过 Go CLI 或应用别名调度
+go run . run --style underlit_chrome powershell
+go run . run --style dark_blue wt
+```
+
+---
+
+## 六、执行须知与安全准则
 
 1. **零黑屏安全刷新**：
    坚决不调用 `taskkill explorer.exe`。补丁写入后，脚本仅会触碰任务栏 `.lnk` 快捷方式时间戳 + 调用系统原生 `ie4uinit.exe -show` + 广播系统外壳 API `SHChangeNotify(SHCNE_ASSOCCHANGED)`。

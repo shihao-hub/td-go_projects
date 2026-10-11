@@ -167,7 +167,7 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 	if len(positionals) != 1 {
 		return reportError(stdout, stderr, *jsonOutput, "invalid_arguments", "run 需要一个应用名")
 	}
-	appName := positionals[0]
+	appName := normalizeAppName(positionals[0])
 	if *style == "" && *customIcon == "" {
 		config, err := LoadConfig(*configPath)
 		if err != nil {
@@ -271,7 +271,7 @@ func setConfig(args []string, stdout, stderr io.Writer) int {
 	if len(positionals) != 1 || (*style == "" && *customIcon == "") {
 		return reportError(stdout, stderr, false, "invalid_arguments", "用法: set APP (--style NAME | --custom-icon PATH) [--enabled=false]")
 	}
-	appName := positionals[0]
+	appName := normalizeAppName(positionals[0])
 	config, err := LoadConfig(*configPath)
 	if err != nil {
 		return reportError(stdout, stderr, false, "config_failed", err.Error())
@@ -315,7 +315,7 @@ func applyConfig(args []string, stdout, stderr io.Writer) int {
 	}
 	apps := make([]string, 0, len(config.Apps))
 	if len(positionals) == 1 {
-		apps = append(apps, positionals[0])
+		apps = append(apps, normalizeAppName(positionals[0]))
 	} else {
 		for name, preference := range config.Apps {
 			if preference.Enabled {
@@ -418,8 +418,19 @@ func discoverApps(scriptsDir string) ([]appInfo, error) {
 	return apps, nil
 }
 
+func normalizeAppName(name string) string {
+	normalized := strings.ToLower(strings.TrimSuffix(name, ".exe"))
+	switch normalized {
+	case "wt", "terminal", "windowsterminal", "windows_terminal":
+		return "powershell"
+	default:
+		return name
+	}
+}
+
 func findApp(scriptsDir, name string) (appInfo, error) {
-	app, err := inspectApp(filepath.Join(scriptsDir, name), name)
+	resolved := normalizeAppName(name)
+	app, err := inspectApp(filepath.Join(scriptsDir, resolved), resolved)
 	if err != nil {
 		return appInfo{}, err
 	}

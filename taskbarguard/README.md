@@ -1,4 +1,4 @@
-﻿# TaskbarGuard
+# TaskbarGuard
 
 Windows 任务栏应用质感图标守卫与自动恢复引擎。
 
@@ -18,6 +18,7 @@ go_projects/taskbarguard/
     ├── README.md               # 脚本库全量款式、生成工序揭秘与手动运行速查手册
     ├── deepseek_harness/       # DeepSeek Harness 模块（款式 8 环形底光通透款已设为首选 ⭐）
     ├── idea/                   # IntelliJ IDEA 模块（经典微光彩极款 ⭐ / 极客银白 / 冰蓝科技）
+    ├── powershell/             # PowerShell / Windows Terminal 模块（环形底光通透款 ⭐ / 科技蓝 / 钛白）
     └── vscode/                 # VS Code 模块（科技蓝微光 / 极客银白）
 ```
 
@@ -25,13 +26,14 @@ go_projects/taskbarguard/
 
 ## 配置持久化
 
-CLI 默认在当前工作目录读写 `config.json`。首次执行 `config`、`run` 或 `apply` 时，如果文件不存在，会生成包含 VS Code 与 DeepSeek Harness 默认偏好的配置：
+CLI 默认在当前工作目录读写 `config.json`。首次执行 `config`、`run` 或 `apply` 时，如果文件不存在，会生成包含 VS Code、DeepSeek Harness、IntelliJ IDEA 与 PowerShell 的默认偏好配置：
 
 ```json
 {
   "apps": {
     "deepseek_harness": { "enabled": true, "style": "8_underlit_chrome" },
     "idea": { "enabled": true, "style": "brand" },
+    "powershell": { "enabled": true, "style": "underlit_chrome" },
     "vscode": { "enabled": true, "style": "blue" }
   }
 }
@@ -78,6 +80,10 @@ go run . run --style blue vscode
 
 # 调度 DeepSeek Harness 的自定义图标款式
 go run . run --style 8_underlit_chrome deepseek_harness
+
+# 调度 PowerShell / Windows Terminal (支持别名 powershell, wt, terminal)
+go run . run --style underlit_chrome powershell
+go run . run --style dark_blue wt
 ```
 
 `run` 只负责发现脚本、校验参数并调度 `uv run`；不会在 Go 进程内执行 Python 逻辑。`install-task` 仅在 Windows 下注册登录触发的计划任务，实际脚本仍由守卫命令调用。
