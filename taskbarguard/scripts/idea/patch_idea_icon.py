@@ -1,4 +1,4 @@
-﻿# /// script
+# /// script
 # requires-python = ">=3.11"
 # dependencies = [
 #     "pillow>=10.0.0",
@@ -240,7 +240,7 @@ def main() -> int:
     )
     parser.add_argument("--style", default="underlit_chrome", help="图标风格 (如 underlit_chrome: 环形底光通透立雕款, pure_sculpted: 纯粹微光立体徽标款, titanium_prism: 钛金折面光刃款, silver: 极客银白金属款, brand: 经典彩极微光款)")
     parser.add_argument("--custom-icon", type=str, help="自定义图标路径 (.ico)")
-    parser.add_argument("--restore", action="store_true", help="从 .bak 备份恢复官方原始 EXE 与内部图标")
+    parser.add_argument("--restore", "--revert", action="store_true", help="从 .bak 备份恢复官方原始 EXE 与内部图标")
     parser.add_argument("--kill", action="store_true", help="如果 IntelliJ IDEA 正在运行或后台占用，强制关闭它")
     parser.add_argument("--target-exe", type=str, help="手动指定 idea64.exe 路径")
     parser.add_argument("--rcedit-path", type=str, help="手动指定 rcedit.exe 路径")

@@ -1063,6 +1063,19 @@ def update_windows_terminal(
     return code
 
 
+def revert_autostart() -> None:
+    """清理 Win32 开机自启动注册表项。"""
+    run_key = r"Software\Microsoft\Windows\CurrentVersion\Run"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key, 0, winreg.KEY_SET_VALUE) as k:
+            winreg.DeleteValue(k, "WindowsTerminalCustom")
+            print("[+] 已清理开机自启动项: WindowsTerminalCustom")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[-] 清理开机自启动项失败: {e}")
+
+
 def revert_patch(restart_exp: bool = False, remove_path: bool = False) -> int:
     print("[*] 正在执行 Windows Terminal 定制回退与 100% 官方原生复原...")
 
@@ -1072,7 +1085,10 @@ def revert_patch(restart_exp: bool = False, remove_path: bool = False) -> int:
     # 2. 还原系统默认终端 DefTerm
     revert_defterm()
 
-    # 3. 还原 Nilesoft Shell
+    # 3. 清理开机自启动
+    revert_autostart()
+
+    # 4. 还原 Nilesoft Shell
     revert_nilesoft()
 
     # 4. 还原 Images 对比度图标
@@ -1128,7 +1144,7 @@ def main():
     parser.add_argument("--restart-explorer", action="store_true", help="修改完成后自动离线重建图标缓存并重启 Explorer")
     parser.add_argument("--auto-setup", action="store_true", help="新电脑全自动部署模式：自动从 GitHub 下载最新免安装终端，并自动配置 PATH（仅目录为空时联网部署）")
     parser.add_argument("--update", action="store_true", help="幂等升级已部署的独立版到 GitHub 最新稳定版（已是最新则直接退出 0），随后自动重放全链路定制")
-    parser.add_argument("--revert", action="store_true", help="一键彻底撤销修改并还原为系统官方原生状态")
+    parser.add_argument("--revert", "--restore", dest="revert", action="store_true", help="一键彻底撤销修改并还原为系统官方原生状态")
     parser.add_argument("--remove-path", action="store_true", help="复原时一并从用户环境变量 Path 中移除独立版目录")
     parser.add_argument("--list-styles", action="store_true", help="列出全部可用图标风格")
     parser.add_argument("--defterm", type=str, choices=["conhost", "wt", "auto"], default=None, help="配置系统默认终端 (DefTerm)：conhost (推荐开发者环境，阻断静默脚本弹窗抢焦点), wt, auto")

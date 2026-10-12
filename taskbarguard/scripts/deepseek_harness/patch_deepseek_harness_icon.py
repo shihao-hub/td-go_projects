@@ -173,7 +173,7 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--custom-icon", type=str, help="自定义图标路径 (.ico)")
-    parser.add_argument("--restore", action="store_true", help="从 .bak 备份恢复官方原始 EXE 及托盘图标")
+    parser.add_argument("--restore", "--revert", action="store_true", help="从 .bak 备份恢复官方原始 EXE 及托盘图标")
     parser.add_argument("--kill", action="store_true", help="如果应用正在运行或占用，强制关闭")
     parser.add_argument("--target-exe", type=str, help="手动指定 DeepSeek Harness.exe 路径")
     parser.add_argument("--rcedit-path", type=str, help="手动指定 rcedit.exe 路径")

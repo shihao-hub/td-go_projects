@@ -186,7 +186,7 @@ def main() -> int:
     )
     parser.add_argument("--style", choices=["blue", "silver"], default="blue", help="图标风格 (默认 blue: 科技蓝微光, silver: 极客银白)")
     parser.add_argument("--custom-icon", type=str, help="自定义图标路径 (.ico)")
-    parser.add_argument("--restore", action="store_true", help="从 .bak 备份恢复官方原始 EXE")
+    parser.add_argument("--restore", "--revert", action="store_true", help="从 .bak 备份恢复官方原始 EXE")
     parser.add_argument("--kill", action="store_true", help="如果 VS Code 正在运行或后台占用，强制关闭它")
     parser.add_argument("--target-exe", type=str, help="手动指定 Code.exe 路径")
     parser.add_argument("--rcedit-path", type=str, help="手动指定 rcedit.exe 路径")

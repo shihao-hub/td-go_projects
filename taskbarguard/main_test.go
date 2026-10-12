@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -138,32 +139,36 @@ func TestFindAppAlias(t *testing.T) {
 }
 
 func TestRevertPatchUsesMockRunner(t *testing.T) {
-	root := t.TempDir()
-	appDir := filepath.Join(root, "wt")
-	if err := os.Mkdir(appDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	script := filepath.Join(appDir, "patch_wt_icon.py")
-	if err := os.WriteFile(script, []byte{}, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	for _, appName := range []string{"wt", "vscode"} {
+		t.Run(appName, func(t *testing.T) {
+			root := t.TempDir()
+			appDir := filepath.Join(root, appName)
+			if err := os.Mkdir(appDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			script := filepath.Join(appDir, fmt.Sprintf("patch_%s_icon.py", appName))
+			if err := os.WriteFile(script, []byte{}, 0o600); err != nil {
+				t.Fatal(err)
+			}
 
-	called := false
-	original := commandRunner
-	commandRunner = func(name string, args ...string) error {
-		called = true
-		if name != "uv" || len(args) != 3 || args[0] != "run" || args[2] != "--revert" {
-			t.Fatalf("unexpected mocked command: %s %#v", name, args)
-		}
-		return nil
-	}
-	t.Cleanup(func() { commandRunner = original })
+			called := false
+			original := commandRunner
+			commandRunner = func(name string, args ...string) error {
+				called = true
+				if name != "uv" || len(args) != 3 || args[0] != "run" || args[2] != "--revert" {
+					t.Fatalf("unexpected mocked command: %s %#v", name, args)
+				}
+				return nil
+			}
+			t.Cleanup(func() { commandRunner = original })
 
-	if code := run([]string{"revert", "--scripts-dir", root, "wt"}, discardWriter{}, discardWriter{}); code != 0 {
-		t.Fatalf("revert returned %d", code)
-	}
-	if !called {
-		t.Fatal("expected mocked command runner to be called")
+			if code := run([]string{"revert", "--scripts-dir", root, appName}, discardWriter{}, discardWriter{}); code != 0 {
+				t.Fatalf("revert returned %d", code)
+			}
+			if !called {
+				t.Fatal("expected mocked command runner to be called")
+			}
+		})
 	}
 }
 
