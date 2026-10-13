@@ -9,12 +9,12 @@
       "style": "underlit_chrome"
     },
     "vscode": {
-      "enabled": true,
+      "enabled": false,
       "style": "silver"
     },
     "wt": {
       "enabled": true,
-      "style": "pure_dark"
+      "style": "titanium"
     }
   }
 }
