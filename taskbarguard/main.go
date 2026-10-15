@@ -155,6 +155,7 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 	style := fs.String("style", "", "图标款式")
 	customIcon := fs.String("custom-icon", "", "自定义 ICO 路径")
 	kill := fs.Bool("kill", false, "强制关闭正在运行的目标应用")
+	restartExplorer := fs.Bool("restart-explorer", false, "彻底重构图标缓存并重启 Explorer")
 	configPath := fs.String("config", defaultConfigFile, "配置文件路径")
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
 	if err := fs.Parse(normalizeArgs(args)); err != nil {
@@ -206,6 +207,9 @@ func runPatch(args []string, stdout, stderr io.Writer) int {
 	if *kill {
 		argsForScript = append(argsForScript, "--kill")
 	}
+	if *restartExplorer {
+		argsForScript = append(argsForScript, "--restart-explorer")
+	}
 	if err := commandRunner("uv", append([]string{"run"}, argsForScript...)...); err != nil {
 		return reportError(stdout, stderr, *jsonOutput, "script_failed", err.Error())
 	}
@@ -221,6 +225,7 @@ func revertPatch(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOutput := fs.Bool("json", false, "输出 JSON")
 	schemaOutput := fs.Bool("schema", false, "输出当前命令的 JSON 契约")
+	restartExplorer := fs.Bool("restart-explorer", false, "彻底重构图标缓存并重启 Explorer")
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
 	if err := fs.Parse(normalizeArgs(args)); err != nil {
 		return 2
@@ -244,6 +249,9 @@ func revertPatch(args []string, stdout, stderr io.Writer) int {
 		return reportError(stdout, stderr, *jsonOutput, "script_not_found", "应用没有可执行补丁脚本")
 	}
 	argsForScript := []string{app.Script, "--revert"}
+	if *restartExplorer {
+		argsForScript = append(argsForScript, "--restart-explorer")
+	}
 	if err := commandRunner("uv", append([]string{"run"}, argsForScript...)...); err != nil {
 		return reportError(stdout, stderr, *jsonOutput, "script_failed", err.Error())
 	}
@@ -347,6 +355,7 @@ func applyConfig(args []string, stdout, stderr io.Writer) int {
 	scriptsDir := fs.String("scripts-dir", defaultScripts, "脚本目录")
 	jsonOutput := fs.Bool("json", false, "输出 JSON")
 	kill := fs.Bool("kill", false, "强制关闭正在运行的目标应用")
+	restartExplorer := fs.Bool("restart-explorer", false, "彻底重构图标缓存并重启 Explorer")
 	if err := fs.Parse(normalizeArgs(args)); err != nil {
 		return 2
 	}
@@ -391,6 +400,9 @@ func applyConfig(args []string, stdout, stderr io.Writer) int {
 		if *kill {
 			command = append(command, "--kill")
 		}
+		if *restartExplorer {
+			command = append(command, "--restart-explorer")
+		}
 		command = append(command, name)
 		childStdout := stdout
 		if *jsonOutput {
@@ -432,12 +444,16 @@ func parsePositionals(fs *flag.FlagSet, args []string) ([]string, error) {
 	if len(positionals) > 0 {
 		return positionals, nil
 	}
-	knownFlags := map[string]bool{"--config": true, "--scripts-dir": true, "--style": true, "--custom-icon": true, "--file": true, "--json": true, "--schema": true, "--enabled": true}
+	knownFlags := map[string]bool{
+		"--config": true, "--scripts-dir": true, "--style": true, "--custom-icon": true,
+		"--file": true, "--json": true, "--schema": true, "--enabled": true,
+		"--kill": true, "--restart-explorer": true,
+	}
 	for index := 0; index < len(args); index++ {
 		arg := args[index]
 		if strings.HasPrefix(arg, "--") {
 			name := strings.SplitN(arg, "=", 2)[0]
-			if knownFlags[name] && !strings.Contains(arg, "=") && name != "--json" && name != "--schema" {
+			if knownFlags[name] && !strings.Contains(arg, "=") && name != "--json" && name != "--schema" && name != "--kill" && name != "--restart-explorer" {
 				index++
 			}
 			continue
@@ -561,13 +577,13 @@ func writeCommandSchema(stdout io.Writer, command string) int {
 		"run": map[string]interface{}{
 			"name": "run", "interface": "cli",
 			"arguments": map[string]interface{}{"positionals": 1, "positionalName": "app"},
-			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--style": "string", "--custom-icon": "path", "--scripts-dir": "string", "--kill": "boolean"},
+			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--style": "string", "--custom-icon": "path", "--scripts-dir": "string", "--kill": "boolean", "--restart-explorer": "boolean"},
 			"output":    "{ok:true,data:{app:string}}",
 		},
 		"revert": map[string]interface{}{
 			"name": "revert", "interface": "cli",
 			"arguments": map[string]interface{}{"positionals": 1, "positionalName": "app"},
-			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--scripts-dir": "string"},
+			"options":   map[string]string{"--json": "boolean", "--schema": "boolean", "--scripts-dir": "string", "--restart-explorer": "boolean"},
 			"output":    "{ok:true,data:{reverted:string}}",
 		},
 		"config": map[string]interface{}{
@@ -580,7 +596,7 @@ func writeCommandSchema(stdout io.Writer, command string) int {
 		},
 		"apply": map[string]interface{}{
 			"name": "apply", "interface": "cli", "arguments": map[string]interface{}{"positionals": "0..1", "positionalName": "app"},
-			"options": map[string]string{"--config": "path", "--scripts-dir": "path", "--json": "boolean", "--kill": "boolean"}, "output": "{ok:true,data:{applied:string[]}}",
+			"options": map[string]string{"--config": "path", "--scripts-dir": "path", "--json": "boolean", "--kill": "boolean", "--restart-explorer": "boolean"}, "output": "{ok:true,data:{applied:string[]}}",
 		},
 		"install-task": map[string]interface{}{
 			"name": "install-task", "interface": "cli",
@@ -616,11 +632,11 @@ func printHelp(w io.Writer) {
 	fmt.Fprintln(w, "TaskbarGuard - Windows 任务栏应用质感图标守卫")
 	fmt.Fprintln(w, "用法: taskbarguard <list|run|revert|config|set|apply|install-task|schema>")
 	fmt.Fprintln(w, "  list          列出脚本目录中的支持应用")
-	fmt.Fprintln(w, "  run APP       调度补丁脚本（--kill 强制关闭占用进程后写入）")
-	fmt.Fprintln(w, "  revert APP    撤销指定应用的图标定制并恢复原生基线状态")
+	fmt.Fprintln(w, "  run APP       调度补丁脚本（--kill 强制关闭占用进程后写入，--restart-explorer 彻底重构图标缓存）")
+	fmt.Fprintln(w, "  revert APP    撤销指定应用的图标定制并恢复原生基线状态（--restart-explorer 彻底刷新）")
 	fmt.Fprintln(w, "  config        打印当前生效的配置 (config.json)")
 	fmt.Fprintln(w, "  set APP       更新偏好并自动落盘: --style NAME | --custom-icon PATH | --enabled=false")
-	fmt.Fprintln(w, "  apply [APP]   按配置一键打补丁（--kill 强制关进程），缺省全部已启用应用")
+	fmt.Fprintln(w, "  apply [APP]   按配置一键打补丁（--kill 强制关进程，--restart-explorer 彻底刷新），缺省全部已启用应用")
 	fmt.Fprintln(w, "  install-task  注册用户登录时的守护计划任务")
 	fmt.Fprintln(w, "  schema        输出 CLI 契约 JSON")
 	fmt.Fprintln(w, "")

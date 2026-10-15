@@ -143,16 +143,59 @@ def apply_icon_with_retry(rcedit_exe: Path, exe_path: Path, icon_path: Path, max
     return False
 
 
-def refresh_windows_icon_cache() -> None:
+def refresh_windows_icon_cache(restart_explorer: bool = False) -> None:
     print("[*] 正在安全刷新 Windows 任务栏与外壳图标缓存...")
-    taskbar_dir = Path(os.path.expandvars(r"%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"))
-    if taskbar_dir.is_dir():
-        for lnk in taskbar_dir.glob("*DeepSeek*.lnk"):
+    dirs_to_check = [
+        Path(os.path.expandvars(r"%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar")),
+        Path(os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs")),
+        Path(os.path.expandvars(r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs")),
+        Path(os.path.expandvars(r"%USERPROFILE%\Desktop")),
+        Path(os.path.expandvars(r"%PUBLIC%\Desktop")),
+    ]
+    for d in dirs_to_check:
+        if d.is_dir():
+            for pat in ["*DeepSeek*.lnk", "*Harness*.lnk"]:
+                for lnk in d.rglob(pat):
+                    try:
+                        os.utime(lnk, None)
+                        print(f"[+] 已刷新快捷方式时间戳: {lnk.name}")
+                    except Exception:
+                        pass
+
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "StartMenuExperienceHost.exe"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print("[+] 已重置 Windows 11 开始菜单宿主 (StartMenuExperienceHost)")
+    except Exception:
+        pass
+
+    if restart_explorer:
+        print("[*] 正在执行 Explorer 重启与图标缓存深度清理...")
+        subprocess.run(["powershell", "-NoProfile", "-Command", "Stop-Process -Name explorer -Force"], check=False)
+        time.sleep(1.0)
+        explorer_dir = Path(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\Explorer"))
+        deleted_count = 0
+        for pattern in ["iconcache*.db", "thumbcache*.db"]:
+            for f in explorer_dir.glob(pattern):
+                try:
+                    f.unlink()
+                    deleted_count += 1
+                except Exception:
+                    pass
+        iconcache_root = Path(os.path.expandvars(r"%LOCALAPPDATA%\IconCache.db"))
+        if iconcache_root.is_file():
             try:
-                os.utime(lnk, None)
-                print(f"[+] 已刷新任务栏快捷方式时间戳: {lnk.name}")
+                iconcache_root.unlink()
+                deleted_count += 1
             except Exception:
                 pass
+        print(f"[+] 已离线清除 {deleted_count} 个 Windows 图标缓存数据库")
+        subprocess.run(["powershell", "-NoProfile", "-Command", "Start-Process explorer.exe"], check=False)
+        time.sleep(1.2)
 
     try:
         subprocess.run(["ie4uinit.exe", "-show"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -175,6 +218,7 @@ def main() -> int:
     parser.add_argument("--custom-icon", type=str, help="自定义图标路径 (.ico)")
     parser.add_argument("--restore", "--revert", action="store_true", help="从 .bak 备份恢复官方原始 EXE 及托盘图标")
     parser.add_argument("--kill", action="store_true", help="如果应用正在运行或占用，强制关闭")
+    parser.add_argument("--restart-explorer", action="store_true", help="修改完成后自动离线重建图标缓存并重启 Explorer")
     parser.add_argument("--target-exe", type=str, help="手动指定 DeepSeek Harness.exe 路径")
     parser.add_argument("--rcedit-path", type=str, help="手动指定 rcedit.exe 路径")
     parser.add_argument("--no-tray", action="store_true", help="不修改右下角托盘图标")
@@ -200,7 +244,7 @@ def main() -> int:
             print(f"[+] 已恢复官方原始托盘图标: {tray_ico_path}")
             restored_any = True
         if restored_any:
-            refresh_windows_icon_cache()
+            refresh_windows_icon_cache(restart_explorer=args.restart_explorer)
             return 0
         else:
             print("[-] 错误: 未找到备份文件，无法还原！", file=sys.stderr)
@@ -243,7 +287,7 @@ def main() -> int:
         except Exception as e:
             print(f"[-] 托盘图标写入异常: {e}")
 
-    refresh_windows_icon_cache()
+    refresh_windows_icon_cache(restart_explorer=args.restart_explorer)
 
     print("\n" + "=" * 60)
     print("[SUCCESS] DeepSeek Harness 任务栏与托盘图标补丁完成！")

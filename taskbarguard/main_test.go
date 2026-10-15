@@ -207,6 +207,61 @@ func TestApplyPassesKillFlag(t *testing.T) {
 	}
 }
 
+func TestRevertPatchPassesRestartExplorer(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "vscode")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "patch_vscode_icon.py"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var seen []string
+	original := commandRunner
+	commandRunner = func(name string, args ...string) error {
+		seen = args
+		return nil
+	}
+	t.Cleanup(func() { commandRunner = original })
+
+	if code := run([]string{"revert", "--restart-explorer", "--scripts-dir", root, "vscode"}, discardWriter{}, discardWriter{}); code != 0 {
+		t.Fatalf("revert returned %d", code)
+	}
+	if len(seen) != 4 || seen[0] != "run" || seen[2] != "--revert" || seen[3] != "--restart-explorer" {
+		t.Fatalf("unexpected args: %#v", seen)
+	}
+}
+
+func TestRunPatchPassesRestartExplorer(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "vscode")
+	if err := os.Mkdir(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "patch_vscode_icon.py"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "vscode_dark_blue.ico"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var seen []string
+	original := commandRunner
+	commandRunner = func(name string, args ...string) error {
+		seen = args
+		return nil
+	}
+	t.Cleanup(func() { commandRunner = original })
+
+	if code := run([]string{"run", "--style", "blue", "--restart-explorer", "--scripts-dir", root, "vscode"}, discardWriter{}, discardWriter{}); code != 0 {
+		t.Fatalf("run returned %d", code)
+	}
+	if len(seen) != 5 || seen[0] != "run" || seen[2] != "--style" || seen[3] != "blue" || seen[4] != "--restart-explorer" {
+		t.Fatalf("unexpected args: %#v", seen)
+	}
+}
+
 type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }

@@ -149,28 +149,72 @@ def apply_icon_with_retry(rcedit_exe: Path, exe_path: Path, icon_path: Path, max
     return False
 
 
-def refresh_windows_icon_cache() -> None:
-    """官方原生安全外壳刷新组合拳（零风险、不杀 Explorer）"""
+def refresh_windows_icon_cache(restart_explorer: bool = False) -> None:
+    """官方原生安全外壳刷新组合拳（含 Windows 11 开始菜单与任务栏深度刷新）"""
     print("[*] 正在刷新 Windows 任务栏与外壳图标缓存...")
 
-    # 1. 触碰固定快捷方式时间戳
-    taskbar_dir = Path(os.path.expandvars(r"%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar"))
-    if taskbar_dir.is_dir():
-        for lnk in taskbar_dir.glob("*Code*.lnk"):
+    # 1. 递归触碰所有相关快捷方式时间戳 (任务栏 + 开始菜单 + 桌面)
+    dirs_to_check = [
+        Path(os.path.expandvars(r"%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar")),
+        Path(os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs")),
+        Path(os.path.expandvars(r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs")),
+        Path(os.path.expandvars(r"%USERPROFILE%\Desktop")),
+        Path(os.path.expandvars(r"%PUBLIC%\Desktop")),
+    ]
+    for d in dirs_to_check:
+        if d.is_dir():
+            for lnk in d.rglob("*Code*.lnk"):
+                try:
+                    os.utime(lnk, None)
+                    print(f"[+] 已刷新快捷方式时间戳: {lnk.name}")
+                except Exception:
+                    pass
+
+    # 2. 静默重置 Windows 11 开始菜单宿主 (StartMenuExperienceHost)
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "StartMenuExperienceHost.exe"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print("[+] 已重置 Windows 11 开始菜单宿主 (StartMenuExperienceHost)")
+    except Exception:
+        pass
+
+    # 3. 若指定了 restart_explorer，执行 Explorer 离线缓存清空与平滑重启
+    if restart_explorer:
+        print("[*] 正在执行 Explorer 重启与图标缓存深度清理...")
+        subprocess.run(["powershell", "-NoProfile", "-Command", "Stop-Process -Name explorer -Force"], check=False)
+        time.sleep(1.0)
+        explorer_dir = Path(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\Explorer"))
+        deleted_count = 0
+        for pattern in ["iconcache*.db", "thumbcache*.db"]:
+            for f in explorer_dir.glob(pattern):
+                try:
+                    f.unlink()
+                    deleted_count += 1
+                except Exception:
+                    pass
+        iconcache_root = Path(os.path.expandvars(r"%LOCALAPPDATA%\IconCache.db"))
+        if iconcache_root.is_file():
             try:
-                os.utime(lnk, None)
-                print(f"[+] 已刷新任务栏快捷方式时间戳: {lnk.name}")
+                iconcache_root.unlink()
+                deleted_count += 1
             except Exception:
                 pass
+        print(f"[+] 已离线清除 {deleted_count} 个 Windows 图标缓存数据库")
+        subprocess.run(["powershell", "-NoProfile", "-Command", "Start-Process explorer.exe"], check=False)
+        time.sleep(1.2)
 
-    # 2. 调用 Windows 系统自带外壳图标刷新器 ie4uinit
+    # 4. 调用 Windows 系统自带外壳图标刷新器 ie4uinit
     try:
         subprocess.run(["ie4uinit.exe", "-show"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("[+] 已调用系统内置 ie4uinit 刷新图标位图缓存")
     except Exception:
         pass
 
-    # 3. 广播 SHChangeNotify 外壳关联变更通知
+    # 5. 广播 SHChangeNotify 外壳关联变更通知
     try:
         # SHCNE_ASSOCCHANGED = 0x08000000, SHCNF_FLUSH = 0x1000
         ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x1000, 0, 0)
@@ -188,6 +232,7 @@ def main() -> int:
     parser.add_argument("--custom-icon", type=str, help="自定义图标路径 (.ico)")
     parser.add_argument("--restore", "--revert", action="store_true", help="从 .bak 备份恢复官方原始 EXE")
     parser.add_argument("--kill", action="store_true", help="如果 VS Code 正在运行或后台占用，强制关闭它")
+    parser.add_argument("--restart-explorer", action="store_true", help="修改完成后自动离线重建图标缓存并重启 Explorer")
     parser.add_argument("--target-exe", type=str, help="手动指定 Code.exe 路径")
     parser.add_argument("--rcedit-path", type=str, help="手动指定 rcedit.exe 路径")
 
@@ -202,19 +247,39 @@ def main() -> int:
     # 1. 还原模式
     if args.restore:
         ensure_process_closed(exe_path, kill=args.kill)
+        restored = False
         if bak_path.is_file():
             shutil.copy2(bak_path, exe_path)
             print(f"[+] 已恢复官方原始 EXE: {exe_path}")
+            restored = True
+        else:
+            print(f"[*] 未找到 {bak_path.name}，正在尝试从内部官方资源兜底恢复...")
+            official_ico = None
             for ico_p in internal_icos:
                 ico_bak = ico_p.with_name("code.ico.bak")
                 if ico_bak.is_file():
-                    shutil.copy2(ico_bak, ico_p)
-                    print(f"[+] 已恢复内部资源 code.ico: {ico_p}")
-            refresh_windows_icon_cache()
+                    official_ico = ico_bak
+                    break
+            if official_ico and official_ico.is_file():
+                rcedit_exe = ensure_rcedit(args.rcedit_path)
+                print(f"[*] 找到官方原生图标资源: {official_ico}")
+                if apply_icon_with_retry(rcedit_exe, exe_path, official_ico):
+                    print(f"[+] 已通过 rcedit 将官方原生图标重新注入回 {exe_path.name}")
+                    restored = True
+            else:
+                print(f"[-] 错误: 未找到备份文件 {bak_path}", file=sys.stderr)
+                return 1
+
+        for ico_p in internal_icos:
+            ico_bak = ico_p.with_name("code.ico.bak")
+            if ico_bak.is_file():
+                shutil.copy2(ico_bak, ico_p)
+                print(f"[+] 已恢复内部资源 code.ico: {ico_p}")
+
+        if restored:
+            refresh_windows_icon_cache(restart_explorer=args.restart_explorer)
             return 0
-        else:
-            print(f"[-] 错误: 未找到备份文件 {bak_path}", file=sys.stderr)
-            return 1
+        return 1
 
     # 2. 补丁模式
     ensure_process_closed(exe_path, kill=args.kill)
@@ -261,7 +326,7 @@ def main() -> int:
             print(f"[-] 覆写内部资源异常: {e}")
 
     # 原生安全刷新
-    refresh_windows_icon_cache()
+    refresh_windows_icon_cache(restart_explorer=args.restart_explorer)
 
     print("\n" + "=" * 60)
     print("[SUCCESS] VS Code 任务栏与可执行文件图标补丁注入完成！")

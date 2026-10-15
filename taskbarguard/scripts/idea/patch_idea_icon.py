@@ -198,8 +198,8 @@ def apply_icon_with_retry(rcedit_exe: Path, exe_path: Path, icon_path: Path, max
     return False
 
 
-def refresh_windows_icon_cache() -> None:
-    """官方原生安全外壳刷新组合拳（零风险、不杀 Explorer）"""
+def refresh_windows_icon_cache(restart_explorer: bool = False) -> None:
+    """官方原生安全外壳刷新组合拳（含 Windows 11 开始菜单与任务栏深度刷新）"""
     print("[*] 正在刷新 Windows 任务栏与外壳图标缓存...")
 
     # 1. 碰触固定快捷方式时间戳
@@ -207,6 +207,8 @@ def refresh_windows_icon_cache() -> None:
         Path(os.path.expandvars(r"%APPDATA%\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar")),
         Path(os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs")),
         Path(os.path.expandvars(r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs")),
+        Path(os.path.expandvars(r"%USERPROFILE%\Desktop")),
+        Path(os.path.expandvars(r"%PUBLIC%\Desktop")),
     ]
     for s_dir in shortcut_dirs:
         if s_dir.is_dir():
@@ -217,14 +219,51 @@ def refresh_windows_icon_cache() -> None:
                 except Exception:
                     pass
 
-    # 2. 调用 Windows 系统自带外壳图标刷新器 ie4uinit
+    # 2. 静默重置 Windows 11 开始菜单宿主 (StartMenuExperienceHost)
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "StartMenuExperienceHost.exe"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print("[+] 已重置 Windows 11 开始菜单宿主 (StartMenuExperienceHost)")
+    except Exception:
+        pass
+
+    # 3. 若指定了 restart_explorer，执行 Explorer 离线缓存清空与平滑重启
+    if restart_explorer:
+        print("[*] 正在执行 Explorer 重启与图标缓存深度清理...")
+        subprocess.run(["powershell", "-NoProfile", "-Command", "Stop-Process -Name explorer -Force"], check=False)
+        time.sleep(1.0)
+        explorer_dir = Path(os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Windows\Explorer"))
+        deleted_count = 0
+        for pattern in ["iconcache*.db", "thumbcache*.db"]:
+            for f in explorer_dir.glob(pattern):
+                try:
+                    f.unlink()
+                    deleted_count += 1
+                except Exception:
+                    pass
+        iconcache_root = Path(os.path.expandvars(r"%LOCALAPPDATA%\IconCache.db"))
+        if iconcache_root.is_file():
+            try:
+                iconcache_root.unlink()
+                deleted_count += 1
+            except Exception:
+                pass
+        print(f"[+] 已离线清除 {deleted_count} 个 Windows 图标缓存数据库")
+        subprocess.run(["powershell", "-NoProfile", "-Command", "Start-Process explorer.exe"], check=False)
+        time.sleep(1.2)
+
+    # 4. 调用 Windows 系统自带外壳图标刷新器 ie4uinit
     try:
         subprocess.run(["ie4uinit.exe", "-show"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("[+] 已调用系统内置 ie4uinit 刷新图标位图缓存")
     except Exception:
         pass
 
-    # 3. 广播 SHChangeNotify 外壳关联变更通知
+    # 5. 广播 SHChangeNotify 外壳关联变更通知
     try:
         # SHCNE_ASSOCCHANGED = 0x08000000, SHCNF_FLUSH = 0x1000
         ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x1000, 0, 0)
@@ -242,6 +281,7 @@ def main() -> int:
     parser.add_argument("--custom-icon", type=str, help="自定义图标路径 (.ico)")
     parser.add_argument("--restore", "--revert", action="store_true", help="从 .bak 备份恢复官方原始 EXE 与内部图标")
     parser.add_argument("--kill", action="store_true", help="如果 IntelliJ IDEA 正在运行或后台占用，强制关闭它")
+    parser.add_argument("--restart-explorer", action="store_true", help="修改完成后自动离线重建图标缓存并重启 Explorer")
     parser.add_argument("--target-exe", type=str, help="手动指定 idea64.exe 路径")
     parser.add_argument("--rcedit-path", type=str, help="手动指定 rcedit.exe 路径")
 
@@ -271,7 +311,7 @@ def main() -> int:
             restored = True
 
         if restored:
-            refresh_windows_icon_cache()
+            refresh_windows_icon_cache(restart_explorer=args.restart_explorer)
             return 0
         else:
             print("[-] 错误: 未找到任何备份文件进行恢复", file=sys.stderr)
@@ -318,7 +358,7 @@ def main() -> int:
             print(f"[-] 覆写伴生图标异常: {e}")
 
     # 原生安全刷新
-    refresh_windows_icon_cache()
+    refresh_windows_icon_cache(restart_explorer=args.restart_explorer)
 
     print("\n" + "=" * 60)
     print("[SUCCESS] IntelliJ IDEA 任务栏与可执行文件图标补丁注入完成！")
