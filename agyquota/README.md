@@ -55,12 +55,11 @@ Claude and GPT models
   Claude and GPT models        weekly      96%  5天15小时后刷新
 ```
 
-## 命令与参数一览
-
 | 命令 / 参数 | 说明 |
 |---|---|
 | `agyquota --agy` | 查询官方 CLI / 桌面端账号配额（daemon 内调用 `agy -p /usage`，自动杀进程） |
 | `agyquota --zed` | 查询 Zed (`antigravity-acp`) 账号配额（读取本地凭据与缓存） |
+| `agyquota --zed --once` | **单次查询模式**：若未运行 daemon 则自动启动临时实例，查询完毕后立即优雅退出并清理，0 残留 |
 | `agyquota --agy --json` | JSON 信封输出：`{"ok":true,"data":…}` / `{"ok":false,"error":{…}}` |
 | `agyquota --zed --raw` | 打印底层接口原始响应（排障/调试用） |
 | `agyquota serve` | 前台启动 daemon（`--bind` 默认 127.0.0.1、`--port` 默认 17625、`--idle-timeout` 默认 0=不退出） |
@@ -77,8 +76,9 @@ Claude and GPT models
 查询不再由 CLI/MCP 进程内直接执行业务，而是统一交给后台 daemon（`agyquota serve`）：
 
 - **地址发现优先级**：`--host` → 环境变量 `AGYQUOTA_HOST` → 地址文件 → 默认 `127.0.0.1:17625`；
-- **生产构建自动拉起**：buildID 的 describe 部分为干净 tag（如 `agyquota/v1.2.3`）且未显式指定地址时，CLI/MCP 会用自身 exe 自动拉起 daemon（Windows `DETACHED_PROCESS`，无窗口、不抢焦点、关闭终端不退出），等待就绪后继续请求；
-- **开发构建不拉起**：describe 带 `-g<hash>`/`-dirty` 时连不上直接报错，提示先运行 `agyquota serve`。开发走双终端：
+- **单次即退模式 (`--once`)**：若无常驻 daemon 在运行，CLI 自动拉起临时专属 daemon 并注入 `--idle-timeout 10s` 兜底；查询完成后立即通过 `POST /v1/stop` 回收退出并清理地址文件，不留后台进程（无论开发构建还是生产构建均适用；若已有常驻 daemon 则直接复用且不杀已有进程）；
+- **生产构建自动拉起**：buildID 的 describe 部分为干净 tag（如 `agyquota/v1.2.3`）且未显式指定地址时，CLI/MCP 会用自身 exe 自动拉起常驻 daemon（Windows `DETACHED_PROCESS`，无窗口、不抢焦点、关闭终端不退出），等待就绪后继续请求；
+- **开发构建不拉起**：describe 带 `-g<hash>`/`-dirty` 且未指定 `--once` 时连不上直接报错，提示先运行 `agyquota serve`（双终端工作流）或添加 `--once` 标志；
 
   ```powershell
   # 终端 1：前台跑 daemon，日志在眼前，Ctrl+C 即停

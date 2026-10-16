@@ -29,7 +29,8 @@ func NewRootCmd() *cobra.Command {
 			"  --agy : 调用官方 Antigravity CLI (agy)，查询终端与桌面端账号配额，调用后自动回收进程；\n" +
 			"  --zed : 读取 Zed (antigravity-acp) 本地凭据直连 Google 官方接口，支持本地安全缓存。\n\n" +
 			"查询由后台 daemon 执行（agyquota serve）：生产构建会自动拉起并空闲 30 分钟自动退出；\n" +
-			"开发构建请先运行 agyquota serve（双终端工作流）。\n\n" +
+			"开发构建请先运行 agyquota serve（双终端工作流）；\n" +
+			"支持通过 --once 标志单次查询：若未运行 daemon 则自动启动临时实例并在返回结果后立即退出清理。\n\n" +
 			"不带子命令运行时等价于 agyquota quota。",
 		Version:       buildinfo.Version,
 		SilenceErrors: true,
@@ -50,6 +51,7 @@ func NewRootCmd() *cobra.Command {
 	}
 	root.PersistentFlags().Bool("agy", false, "查询官方 Antigravity CLI / 桌面端账号配额（进程随用随杀）")
 	root.PersistentFlags().Bool("zed", false, "查询 Zed (antigravity-acp) 账号配额（带 50 分钟安全缓存）")
+	root.PersistentFlags().Bool("once", false, "单次查询模式：若未运行 daemon 则启动临时实例，查询完毕后自动退出，不留后台进程")
 	root.PersistentFlags().Bool("json", false, "以 JSON 信封输出（供脚本/程序消费）")
 	root.PersistentFlags().String("token-file", "", "Zed 凭据文件路径（仅 --zed 生效，缺省用 ~/.gemini/antigravity-acp/acp_token.json）")
 	root.PersistentFlags().Bool("raw", false, "输出配额接口原始响应（调试用，仅 quota 生效）")

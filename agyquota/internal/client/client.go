@@ -32,6 +32,8 @@ const (
 	DefaultAddr = "127.0.0.1:17625"
 	// spawnIdleTimeout 是自动拉起的 daemon 的空闲退出时长。
 	spawnIdleTimeout = "30m"
+	// spawnEphemeralIdleTimeout 是临时拉起的 daemon 的空闲退出时长（短超时防残留兜底）。
+	spawnEphemeralIdleTimeout = "10s"
 	// pingTimeout 是探测/握手超时。
 	pingTimeout = 500 * time.Millisecond
 	// startWait 是自动拉起后就绪等待上限。
@@ -43,15 +45,17 @@ const (
 // Config 是客户端配置。
 type Config struct {
 	Host string // 显式目标地址 host[:port]（--host）；空时按发现优先级解析
+	Once bool   // 单次查询模式：若未运行 daemon 则启动临时实例，查询完毕后自动退出回收
 }
 
 // Client 是 daemon 的 HTTP 客户端；用 New 构造。
 type Client struct {
-	cfg      Config
-	hc       *http.Client
-	addr     string
-	explicit bool
-	resolved bool
+	cfg              Config
+	hc               *http.Client
+	addr             string
+	explicit         bool
+	resolved         bool
+	spawnedEphemeral bool // 标记当前 daemon 是否由本次客户端临时拉起
 }
 
 // New 创建客户端。
@@ -133,23 +137,36 @@ func (c *Client) ensureResolved() error {
 }
 
 // EnsureDaemon 确保目标 daemon 可用：Ping、buildID 握手；
-// 生产构建且未显式指定地址时，连不上则自动拉起（有界等待就绪）。
+// 生产构建且未显式指定地址时，连不上则自动拉起（有界等待就绪）；
+// 若开启了 Once 模式，且未显式指定地址，则无论是否为生产构建，均可拉起临时 daemon。
 func (c *Client) EnsureDaemon(ctx context.Context) error {
 	if err := c.ensureResolved(); err != nil {
 		return err
 	}
 	ping, err := c.pingAddr(ctx, c.addr, pingTimeout)
 	if err == nil {
+		c.spawnedEphemeral = false
 		return checkBuildID(ping.BuildID)
 	}
 	if c.explicit {
 		return c.unreachableErr()
 	}
-	if !buildinfo.IsProduction() {
+	if !c.cfg.Once && !buildinfo.IsProduction() {
 		return api.Errorf(api.ErrDaemonUnreachable, "agyquota daemon 未运行（开发构建不自动拉起）").
-			WithSuggestion("请先运行 agyquota serve（开发双终端工作流）")
+			WithSuggestion("请先运行 agyquota serve（开发双终端工作流）").
+			WithSuggestion("或添加 --once 标志单次查询并自动退出（如 agyquota --zed --once）")
 	}
-	return c.spawnDaemon(ctx)
+	idle := spawnIdleTimeout
+	if c.cfg.Once {
+		idle = spawnEphemeralIdleTimeout
+	}
+	if err := c.spawnDaemonWithIdle(ctx, idle); err != nil {
+		return err
+	}
+	if c.cfg.Once {
+		c.spawnedEphemeral = true
+	}
+	return nil
 }
 
 // Ping 探测 daemon 并返回其身份信息（500ms 超时）。
@@ -239,15 +256,33 @@ func (c *Client) Stop(ctx context.Context) (bool, error) {
 	return out.Stopped, nil
 }
 
+// CleanupIfEphemeral 若本次调用由临时专属 daemon 支持，则发送 stop 请求优雅关停并清理。
+// 若连接的是已有的常驻 daemon，则为 no-op，安全保留外部 daemon。
+func (c *Client) CleanupIfEphemeral(ctx context.Context) error {
+	if !c.spawnedEphemeral {
+		return nil
+	}
+	_, err := c.Stop(ctx)
+	return err
+}
+
+// IsEphemeral 报告当前连接是否由本次客户端调用临时拉起的专属 daemon。
+func (c *Client) IsEphemeral() bool {
+	return c.spawnedEphemeral
+}
+
 // retryable 判断是否允许「空闲退出竞态」的一次重试：
-// 错误为 daemon_unreachable（传输失败或 503 包络）、生产构建、未显式指定地址且请求未被取消。
+// 错误为 daemon_unreachable（传输失败或 503 包络）、生产构建（或 Once 模式）、未显式指定地址且请求未被取消。
 // quota 两类请求只读，重试安全。
 func (c *Client) retryable(ctx context.Context, err error) bool {
 	var ae *api.Error
 	if !errors.As(err, &ae) || ae.Code != api.ErrDaemonUnreachable {
 		return false
 	}
-	return !c.explicit && buildinfo.IsProduction() && ctx.Err() == nil
+	if c.explicit || ctx.Err() != nil {
+		return false
+	}
+	return c.cfg.Once || buildinfo.IsProduction()
 }
 
 func (c *Client) unreachableErr() *api.Error {
@@ -264,9 +299,14 @@ func checkBuildID(serverID string) error {
 		buildinfo.BuildID, serverID)
 }
 
-// spawnDaemon 用自身 exe 以 detached 方式拉起 `serve --idle-timeout 30m`，
-// 就有界轮询就绪（候选每轮重读地址文件 + 默认端口兜底，自愈陈旧地址）。
+// spawnDaemon 用自身 exe 以 detached 方式拉起 `serve --idle-timeout 30m`。
 func (c *Client) spawnDaemon(ctx context.Context) error {
+	return c.spawnDaemonWithIdle(ctx, spawnIdleTimeout)
+}
+
+// spawnDaemonWithIdle 用自身 exe 以 detached 方式拉起指定 idle-timeout 的 daemon，
+// 并有界轮询就绪（候选每轮重读地址文件 + 默认端口兜底，自愈陈旧地址）。
+func (c *Client) spawnDaemonWithIdle(ctx context.Context, idleTimeout string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return api.Errorf(api.ErrDaemonStartFailed, "无法获取自身可执行文件路径: %v", err)
@@ -274,7 +314,7 @@ func (c *Client) spawnDaemon(ctx context.Context) error {
 	logPath := appdata.LogFile()
 	logFile, logErr := rotateAndOpenLog(logPath)
 
-	cmd := exec.Command(exe, "serve", "--idle-timeout", spawnIdleTimeout)
+	cmd := exec.Command(exe, "serve", "--idle-timeout", idleTimeout)
 	configureDetached(cmd)
 	if logErr == nil && logFile != nil {
 		cmd.Stdout = logFile

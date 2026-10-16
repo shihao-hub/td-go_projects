@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -32,6 +33,7 @@ func quotaRun(cmd *cobra.Command) error {
 	tokenFile, _ := cmd.Flags().GetString("token-file")
 	useAgy, _ := cmd.Flags().GetBool("agy")
 	useZed, _ := cmd.Flags().GetBool("zed")
+	once, _ := cmd.Flags().GetBool("once")
 
 	if !useAgy && !useZed {
 		return outErr(cmd, &api.Error{
@@ -57,9 +59,17 @@ func quotaRun(cmd *cobra.Command) error {
 	}
 
 	host, _ := cmd.Flags().GetString("host")
-	cl := client.New(client.Config{Host: host})
+	cl := client.New(client.Config{Host: host, Once: once})
 	ctx, cancel := contextTimeout(cmd, 2*time.Minute)
 	defer cancel()
+
+	defer func() {
+		if cl.IsEphemeral() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cleanupCancel()
+			_ = cl.CleanupIfEphemeral(cleanupCtx)
+		}
+	}()
 
 	// 进度与退避提示走 stderr（人读/JSON 模式均合法：stderr 是诊断流）
 	progress := func(msg string) {
