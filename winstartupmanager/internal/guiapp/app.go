@@ -9,10 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/wailsapp/wails/v3/pkg/application"
-	"github.com/wailsapp/wails/v3/pkg/events"
 	"winstartupmanager/internal/env"
 	"winstartupmanager/internal/store"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 type RunOptions struct {
@@ -71,9 +72,10 @@ func Run(opts RunOptions) {
 
 	a.app = app
 
-	if !opts.Hidden {
-		a.buildWindow(false)
-	}
+	// Always pre-create window before app.Run() (hidden if started with --hidden)
+	// This guarantees WebView2 environment is properly initialized and avoids
+	// runtime creation deadlocks on Windows message loops.
+	a.buildWindow(opts.Hidden)
 	a.buildTray()
 
 	if err := app.Run(); err != nil {
@@ -103,10 +105,9 @@ func (a *App) createWindowLocked(hidden bool) {
 		if a.exiting.Load() {
 			return
 		}
-		// Allow native destruction of WebView2 to release Chromium memory
-		a.winMu.Lock()
-		a.win = nil
-		a.winMu.Unlock()
+		// Cancel destruction so window can be summoned back instantly from tray
+		event.Cancel()
+		a.win.Hide()
 
 		go func() {
 			time.Sleep(300 * time.Millisecond)
@@ -116,38 +117,25 @@ func (a *App) createWindowLocked(hidden bool) {
 	})
 }
 
-func (a *App) isWindowAlive() bool {
-	if a.win == nil {
-		return false
-	}
-	_, exists := a.app.Window.GetByID(a.win.ID())
-	return exists
-}
-
 func (a *App) ensureMainWindow() {
 	a.winMu.Lock()
 	defer a.winMu.Unlock()
 
-	if a.isWindowAlive() {
-		if a.win.IsMinimised() {
-			a.win.UnMinimise()
-		}
-		a.win.Show()
-		a.win.Focus()
+	if a.win == nil {
 		return
 	}
 
-	a.createWindowLocked(false)
-	if a.win != nil {
-		a.win.Show()
-		a.win.Focus()
+	if a.win.IsMinimised() {
+		a.win.UnMinimise()
 	}
+	a.win.Show()
+	a.win.Focus()
 }
 
 func (a *App) quit() {
 	a.exiting.Store(true)
 	a.winMu.Lock()
-	if a.win != nil && a.isWindowAlive() {
+	if a.win != nil {
 		a.win.Close()
 	}
 	a.win = nil
