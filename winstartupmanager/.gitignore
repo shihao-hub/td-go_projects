@@ -1,0 +1,11 @@
+# 前端构建与依赖
+frontend/node_modules/
+frontend/dist/
+frontend/bindings/
+
+# 构建产物
+build/*.exe
+build/icon.rc
+*.syso
+*.exe
+winstartupmanager.exe
