@@ -33,7 +33,7 @@
 ```
 
 1. **关闭但在托盘时（`X`） -> WebView 不渲染**：
-   * 拦截窗口关闭动作，**不取消**事件，放行 Wails 彻底销毁原生窗口和 WebView2 句柄；
+   * 放行窗口关闭事件（不 `Cancel`），让 Wails 彻底销毁原生窗口和 WebView2 句柄；
    * 底层 6 个 Edge/Chromium 子进程彻底退出，DOM / V8 / GPU 渲染管线全部释放，触发 Go GC 归还物理内存（常驻降至 ~25MB 级纯守护态）。
 2. **最小化时（`-`） -> 保持渲染**：
    * 走 Windows 原生任务栏最小化（`SW_MINIMIZE`），不触发 `WindowClosing`；
@@ -41,11 +41,24 @@
 3. **托盘呼出 / 双击**：
    * 毫秒级按需瞬间重建 WebView2 窗口重新挂载，体验丝滑。
 4. **后台守护与自动拉起**：
-   * 壳子启动时自动检测 8765 端口；
-   * 若未检测到 `docsearch serve`，自动在后台静默拉起 `uv run docsearch serve`（零黑框闪烁）；
+   * 壳子启动时自动检测目标端口；
+   * 若未检测到 docsearch 服务，自动在后台静默拉起 `uv run docsearch serve --port <壳子端口>`（零黑框闪烁）；
+   * 服务就绪后自动刷新已打开的窗口，无需手动关窗重开；
    * 托盘彻底退出时清理自己拉起的子进程。
 5. **Chromium 参数剪枝**：
    * 注入 `--disable-gpu`、`--disable-features=NetworkServiceOutOfProcess` 等启动参数，窗口开启态峰值内存比常规浏览器降低 160MB+。
+
+---
+
+## 配置与排障
+
+| 项 | 说明 |
+| --- | --- |
+| `--port` | 壳子连接**并透传**给 `docsearch serve` 的端口；单实例标识包含端口，不同端口实例互不干扰 |
+| `--hidden` | 开机静默启动，仅常驻托盘 |
+| `DOCSEARCH_DIR` | 显式指定 docsearch 项目目录（必须含 `pyproject.toml` 与 `src/docsearch`）；不设置时自动从可执行文件/工作目录逐级上溯查找 `python_projects/docsearch` |
+| 数据目录 | `%APPDATA%\language_projects\docsearch-gui\`（含 `webview2\` 缓存） |
+| 日志 | `%APPDATA%\language_projects\docsearch-gui\docsearch-gui.log`（windowsgui 无控制台，异常一律落盘） |
 
 ---
 
@@ -64,4 +77,9 @@ wails3 generate syso -arch amd64 -icon icon.ico -manifest wails.exe.manifest -in
 
 # 2. 编译无黑框 GUI 可执行文件
 go build -ldflags="-w -s -H windowsgui" -o bin/docsearch-gui.exe
+```
+
+### 单元测试
+```powershell
+go test ./...        # 覆盖目录探测、端口透传、状态解析、重建索引请求
 ```

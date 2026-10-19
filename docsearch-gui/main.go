@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -16,55 +15,50 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
-type App struct {
-	app        *application.App
-	daemon     *DaemonManager
-	serverURL  string
-	winMu      sync.Mutex
-	win        *application.WebviewWindow
-	tray       *application.SystemTray
-	exiting    atomic.Bool
-	statusItem *application.MenuItem
-}
-
 const (
-	defaultPort      = 8765
-	singleInstanceID = "shihao.langproj.docsearch-gui"
-	windowTitle      = "docsearch - 本地语义文档检索"
+	defaultPort = 8765
+	appName     = "docsearch-gui"
+	windowTitle = "docsearch - 本地语义文档检索"
 )
+
+type App struct {
+	app       *application.App
+	daemon    *DaemonManager
+	serverURL string
+
+	winMu sync.Mutex
+	win   *application.WebviewWindow
+
+	// ensureMu 串行化窗口的创建/唤出，避免连点托盘时并发建窗。
+	ensureMu sync.Mutex
+
+	tray        *application.SystemTray
+	statusItem  *application.MenuItem
+	reindexItem *application.MenuItem
+
+	exiting        atomic.Bool
+	reindexBusy    atomic.Bool
+	statusHoldTill atomic.Int64
+}
 
 func main() {
 	port := flag.Int("port", defaultPort, "docsearch 服务监听端口")
 	hidden := flag.Bool("hidden", false, "开机静默启动（仅常驻托盘，不弹窗）")
 	flag.Parse()
 
-	serverURL := fmt.Sprintf("http://127.0.0.1:%d", *port)
-	daemon := NewDaemonManager(serverURL)
-
-	// 提前探测并异步确保 docsearch 后台服务就绪
-	go func() {
-		if err := daemon.EnsureRunning(); err != nil {
-			fmt.Fprintf(os.Stderr, "[docsearch-gui] 启动后台服务异常: %v\n", err)
-		}
-	}()
+	daemon := NewDaemonManager(*port)
 
 	var appInstance *App
 
-	// 计算 WebView2 用户数据缓存路径，避免散落根目录
-	var webviewDataPath string
-	if appData, err := os.UserConfigDir(); err == nil && appData != "" {
-		webviewDataPath = filepath.Join(appData, "language_projects", "docsearch", "webview2")
-	}
-
 	wailsApp := application.New(application.Options{
-		Name:        "docsearch-gui",
+		Name:        appName,
 		Description: "docsearch 本地语义文档检索桌面托盘壳",
 		Windows: application.WindowsOptions{
-			// 核心 1：所有窗口关闭后，托盘与后台消息泵继续存活，绝不退出进程
+			// 所有窗口关闭后，托盘与后台消息泵继续存活，绝不退出进程
 			DisableQuitOnLastWindowClosed: true,
-			WebviewUserDataPath:           webviewDataPath,
+			WebviewUserDataPath:           webviewDataPath(),
 
-			// 核心 2：Chromium 启动参数深度剪枝（消灭独立 GPU 进程与网络隔离进程，常驻立省 160MB）
+			// Chromium 启动参数深度剪枝（消灭独立 GPU 进程与网络隔离进程，常驻立省 160MB）
 			AdditionalBrowserArgs: []string{
 				"--disable-gpu",
 				"--disable-gpu-compositing",
@@ -74,7 +68,8 @@ func main() {
 			},
 		},
 		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: singleInstanceID,
+			// 单实例标识带上端口，避免不同端口的实例互相吞并
+			UniqueID: fmt.Sprintf("shihao.langproj.docsearch-gui.%d", *port),
 			ExitCode: 0,
 			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
 				if appInstance != nil {
@@ -87,29 +82,29 @@ func main() {
 	appInstance = &App{
 		app:       wailsApp,
 		daemon:    daemon,
-		serverURL: serverURL,
+		serverURL: daemon.URL(),
 	}
 
-	// 托盘常驻初始化
 	appInstance.buildTray()
 
-	// 若非静默启动，默认直接开窗
+	// 后台服务异步拉起；就绪后若主窗口已打开则自动刷新，避免停在后端未就绪的错误页
+	go appInstance.kickDaemon()
+
 	if !*hidden {
 		appInstance.ensureMainWindow()
 	}
 
-	// 启动定期刷新托盘状态的协程
 	go appInstance.loopUpdateStatus()
 
 	if err := wailsApp.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "[docsearch-gui] 运行异常: %v\n", err)
+		logf("运行异常: %v", err)
 		os.Exit(1)
 	}
 }
 
-// createWindowLocked 创建主窗口并挂载关闭释放钩子（调用方需持有 winMu）
-func (a *App) createWindowLocked(hidden bool) {
-	a.win = a.app.Window.NewWithOptions(application.WebviewWindowOptions{
+// buildWindowLocked 创建主窗口并挂载关闭释放钩子（调用方需持有 winMu）。
+func (a *App) buildWindowLocked(hidden bool) {
+	win := a.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            windowTitle,
 		Width:            1020,
 		Height:           680,
@@ -119,72 +114,107 @@ func (a *App) createWindowLocked(hidden bool) {
 		URL:              a.serverURL,
 		BackgroundColour: application.NewRGB(30, 30, 36), // #1e1e24 与 WebUI 暗黑背景无缝衔接
 	})
+	a.win = win
 
-	// 核心生命周期分流 1：点击右上角 X 窗口关闭
-	// 需求：关闭但在托盘时，webview 不渲染
-	a.win.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+	// 关闭 (X) 分流：不调用 event.Cancel()，放行 Wails 彻底销毁原生窗口并卸载 WebView2，
+	// 让 Chromium 子进程全部退出，完全停止渲染；随后托盘点击时再按需重建。
+	win.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) {
 		if a.exiting.Load() {
-			return // 用户从托盘菜单点击“退出”时，放行全局退出
+			return // 托盘“彻底退出”时放行全局退出
 		}
-
-		// 核心关键：不调用 event.Cancel()！放行让 Wails 彻底销毁原生窗口并卸载 WebView2
-		// 这将导致 Chromium 的 6 个子进程完全退出，DOM / V8 / 渲染管线彻底清空，完全停止渲染
 		a.winMu.Lock()
-		a.win = nil
+		if a.win == win {
+			a.win = nil
+		}
 		a.winMu.Unlock()
 
-		// 异步触发垃圾回收与物理内存归还操作系统
 		go func() {
 			time.Sleep(250 * time.Millisecond)
 			runtime.GC()
 			debug.FreeOSMemory()
 		}()
 	})
-
-	// 核心生命周期分流 2：点击最小化按钮 (-)
-	// 需求：最小化时渲染
-	// 说明：用户在标题栏点击 "-" 最小化按钮走的是 Windows 原生的 SC_MINIMIZE，
-	// 不会触发 WindowClosing 钩子。窗口缩在任务栏，WebView2 渲染管线与 JS 状态完全保留！
 }
 
-// isWindowAlive 判断当前主窗口实例是否存在且未被销毁
-func (a *App) isWindowAlive() bool {
-	if a.win == nil {
-		return false
-	}
-	_, exists := a.app.Window.GetByID(a.win.ID())
-	return exists
-}
-
-// ensureMainWindow 唤出或按需瞬间重建主窗口
-func (a *App) ensureMainWindow() {
+// aliveWindow 返回当前存活的主窗口；指针已销毁时顺手清空，避免使用失效句柄。
+func (a *App) aliveWindow() *application.WebviewWindow {
 	a.winMu.Lock()
 	defer a.winMu.Unlock()
 
-	// 确保后台 Python 服务已在运行
-	go func() {
-		_ = a.daemon.EnsureRunning()
-	}()
+	win := a.win
+	if win == nil {
+		return nil
+	}
+	if _, exists := a.app.Window.GetByID(win.ID()); !exists {
+		a.win = nil
+		return nil
+	}
+	return win
+}
 
-	// 1. 若窗口仍在内存中（例如用户点击任务栏最小化，仍在热态待命）
-	if a.isWindowAlive() {
-		if a.win.IsMinimised() {
-			a.win.UnMinimise()
-		}
-		a.win.Show()
-		a.win.Focus()
+// ensureMainWindow 供 UI 回调（托盘点击、第二实例唤醒）调用。
+// 关键：绝不在 Wails 主线程/事件回调内创建或销毁窗口——WebView2 初始化需要消息泵继续
+// 运转，在回调里同步建窗会让消息泵卡死，表现为“窗口只建不显、托盘从此无响应”。
+func (a *App) ensureMainWindow() {
+	go a.showMainWindow()
+}
+
+// showMainWindow 唤出或按需重建主窗口。
+func (a *App) showMainWindow() {
+	a.ensureMu.Lock()
+	defer a.ensureMu.Unlock()
+
+	if a.exiting.Load() {
 		return
 	}
 
-	// 2. 若窗口已被点“X”关闭销毁（深度休眠态），则毫秒级按需重建 WebView2
-	a.createWindowLocked(false)
-	if a.win != nil {
-		a.win.Show()
-		a.win.Focus()
+	// 1. 窗口仍在内存中（例如用户点击任务栏最小化，仍在热态待命）
+	if win := a.aliveWindow(); win != nil {
+		if win.IsMinimised() {
+			win.UnMinimise()
+		}
+		win.Show()
+		win.Focus()
+		return
+	}
+
+	// 2. 窗口已被点“X”关闭销毁（深度休眠态），则按需重建 WebView2
+	needReload := !a.daemon.IsAlive()
+
+	a.winMu.Lock()
+	a.buildWindowLocked(false)
+	win := a.win
+	a.winMu.Unlock()
+	if win == nil {
+		return
+	}
+
+	win.Show()
+	win.Focus()
+
+	// 建窗时后端还没就绪：窗口会先显示连接错误页，等服务起来后自动刷新
+	if needReload {
+		go a.ensureDaemonThenReload()
 	}
 }
 
-// buildTray 初始化系统托盘与右键菜单
+// kickDaemon 启动时拉起后台服务，并在就绪后刷新已打开的窗口。
+func (a *App) kickDaemon() {
+	a.ensureDaemonThenReload()
+}
+
+// ensureDaemonThenReload 幂等地确保后台服务就绪，随后刷新当前窗口。
+func (a *App) ensureDaemonThenReload() {
+	if err := a.daemon.EnsureRunning(); err != nil {
+		logf("后台服务启动异常: %v", err)
+		return
+	}
+	if win := a.aliveWindow(); win != nil {
+		win.Reload()
+	}
+}
+
+// buildTray 初始化系统托盘与右键菜单。
 func (a *App) buildTray() {
 	a.tray = a.app.SystemTray.New()
 	if len(iconICO) > 0 {
@@ -193,35 +223,23 @@ func (a *App) buildTray() {
 	a.tray.SetTooltip("docsearch - 本地语义文档检索")
 
 	// 托盘单击与双击均支持一键呼出/隐藏主窗口
-	a.tray.OnClick(func() {
-		a.ensureMainWindow()
-	})
-	a.tray.OnDoubleClick(func() {
-		a.ensureMainWindow()
-	})
+	a.tray.OnClick(a.ensureMainWindow)
+	a.tray.OnDoubleClick(a.ensureMainWindow)
 
 	menu := a.app.NewMenu()
 	menu.Add("打开搜索窗口").OnClick(func(*application.Context) {
 		a.ensureMainWindow()
 	})
 
-	menu.Add("增量重建索引").OnClick(func(*application.Context) {
-		go func() {
-			a.tray.SetTooltip("docsearch: 正在扫描并构建索引...")
-			err := a.daemon.ReindexAll(false)
-			if err != nil {
-				a.tray.SetTooltip("docsearch: 重建索引失败")
-				time.Sleep(3 * time.Second)
-			} else {
-				a.tray.SetTooltip("docsearch: 索引构建完成！")
-				time.Sleep(2 * time.Second)
-			}
-			a.updateStatusText()
-		}()
+	a.reindexItem = menu.Add("增量重建索引")
+	a.reindexItem.OnClick(func(*application.Context) {
+		a.toggleReindex()
 	})
 
 	menu.Add("在默认浏览器中打开").OnClick(func(*application.Context) {
-		_ = openURL(a.serverURL)
+		if err := openURL(a.serverURL); err != nil {
+			logf("打开浏览器失败: %v", err)
+		}
 	})
 
 	menu.AddSeparator()
@@ -230,21 +248,46 @@ func (a *App) buildTray() {
 
 	menu.AddSeparator()
 	menu.Add("彻底退出").OnClick(func(*application.Context) {
-		a.quit()
+		go a.quit()
 	})
 
 	a.tray.SetMenu(menu)
 }
 
-// loopUpdateStatus 定期探活并更新托盘 Tooltip 与状态菜单
-func (a *App) loopUpdateStatus() {
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
+// toggleReindex 触发一次增量重建索引；运行期间禁用菜单项，杜绝并发重复触发。
+func (a *App) toggleReindex() {
+	if !a.reindexBusy.CompareAndSwap(false, true) {
+		return
+	}
+	if a.reindexItem != nil {
+		a.reindexItem.SetEnabled(false)
+	}
 
-	// 启动后立即更新一次
-	time.Sleep(1 * time.Second)
+	go func() {
+		defer func() {
+			a.reindexBusy.Store(false)
+			if a.reindexItem != nil {
+				a.reindexItem.SetEnabled(true)
+			}
+		}()
+
+		a.setTemporaryStatus("docsearch: 正在扫描并构建索引...", 30*time.Minute)
+		if err := a.daemon.ReindexAll(false); err != nil {
+			logf("重建索引失败: %v", err)
+			a.setTemporaryStatus("docsearch: 重建索引失败（详见日志）", 6*time.Second)
+			return
+		}
+		a.setTemporaryStatus("docsearch: 索引构建完成！", 4*time.Second)
+	}()
+}
+
+// loopUpdateStatus 定期探活并更新托盘 Tooltip 与状态菜单。
+func (a *App) loopUpdateStatus() {
+	time.Sleep(time.Second)
 	a.updateStatusText()
 
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
 	for range ticker.C {
 		if a.exiting.Load() {
 			return
@@ -253,7 +296,19 @@ func (a *App) loopUpdateStatus() {
 	}
 }
 
+// setTemporaryStatus 展示一段临时状态文案，在 hold 期间不被周期探活覆盖。
+func (a *App) setTemporaryStatus(text string, hold time.Duration) {
+	a.statusHoldTill.Store(time.Now().Add(hold).UnixNano())
+	if a.tray != nil {
+		a.tray.SetTooltip(text)
+	}
+}
+
 func (a *App) updateStatusText() {
+	if time.Now().UnixNano() < a.statusHoldTill.Load() {
+		return // 临时提示（建索引等）优先，期间不覆盖
+	}
+
 	st, err := a.daemon.GetStatus()
 	if err != nil {
 		if a.statusItem != nil {
@@ -265,26 +320,26 @@ func (a *App) updateStatusText() {
 		return
 	}
 
-	label := fmt.Sprintf("状态: 已索引 %d 个文件 (%d 片段)", st.TotalFiles, st.TotalChunks)
 	if a.statusItem != nil {
-		a.statusItem.SetLabel(label)
+		a.statusItem.SetLabel(fmt.Sprintf("状态: 已索引 %d 个文件 (%d 片段)", st.TotalFiles, st.TotalChunks))
 	}
 	if a.tray != nil {
 		a.tray.SetTooltip(fmt.Sprintf("docsearch: %d 文件 / %d 片段\n左键打开搜索", st.TotalFiles, st.TotalChunks))
 	}
 }
 
-// quit 彻底退出应用
+// quit 彻底退出应用。
 func (a *App) quit() {
 	a.exiting.Store(true)
 
-	// 关闭主窗口
 	a.winMu.Lock()
-	if a.win != nil && a.isWindowAlive() {
-		a.win.Close()
-	}
+	win := a.win
 	a.win = nil
 	a.winMu.Unlock()
+
+	if win != nil {
+		win.Close()
+	}
 
 	// 停止由我们拉起的 Python 守护进程
 	a.daemon.Stop()
