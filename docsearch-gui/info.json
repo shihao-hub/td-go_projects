@@ -1,0 +1,14 @@
+{
+	"fixed": {
+		"file_version": "0.1.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "0.1.0",
+			"CompanyName": "docsearch",
+			"FileDescription": "docsearch - 本地语义文档检索桌面外壳",
+			"LegalCopyright": "© 2026 docsearch",
+			"ProductName": "docsearch-gui"
+		}
+	}
+}
