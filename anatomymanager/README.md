@@ -32,6 +32,7 @@ uv run scripts/build.py --release  # 发布构建 → anatomymanager.exe
 - 版本号由 `-ldflags` 注入：dev 为 `vX.Y.Z-dev`（脏工作区追加 `-dirty`），release 为 `vX.Y.Z`；
 - dev / release 的数据目录与单实例互斥 ID 相互隔离：`%APPDATA%\language_projects\anatomymanager\{dev,prod}`；
 - 开机自启仅 release 版可注册，dev 版菜单项置灰禁用。
+- 图标按通道区分：dev 版用 Go 地鼠图标，release 版用专属精密机械图标（exe 文件图标与窗口/托盘图标一致）。
 
 ### 2. 摄取归档产物 (Ingest)
 以会话 `6970a9e0-1c38-4f75-bd66-ec8a26d10e6a` 生成的精密限流定标仪为例：

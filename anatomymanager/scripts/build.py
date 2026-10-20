@@ -5,11 +5,14 @@
 """Anatomy Manager 单文件二进制构建流水线。
 
 产物规则（严格隔离）：
-  - dev（默认）：anatomymanager-dev.exe（并同步覆盖当前根目录 anatomymanager.exe 便于直接测试运行），版本 vX.Y.Z-dev（脏工作区再加 -dirty）
+  - dev（默认）：anatomymanager-dev.exe，版本 vX.Y.Z-dev（脏工作区再加 -dirty）
   - release：anatomymanager.exe，版本 vX.Y.Z
   只有 HEAD 精确命中 anatomymanager/v* tag 且工作区干净时才允许 release；
+  dev 与 release 产物名不同，互不覆盖。
 
 构建内容：
+  - 图标按通道区分：release 用专属精密机械图标，dev 用 Go 地鼠图标
+    （exe 文件图标与窗口/托盘图标保持一致）
   - 自动渲染/更新 Windows 多尺寸专属图标
   - 调用 rsrc 将 PE Manifest 与 Icon 资源编译注入 cmd/anatomymanager/*.syso
   - 编译单二进制：静态链接、去符号、-H windowsgui 零黑框
@@ -24,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,7 +37,8 @@ RSRC_EXE = Path(r"C:\Users\29580\go\bin\rsrc.exe")
 
 VERSION_FILE = PROJECT_ROOT / "info.json"
 MANIFEST = PROJECT_ROOT / "wails.exe.manifest"
-ICON = PROJECT_ROOT / "icon.ico"
+ICON_RELEASE = PROJECT_ROOT / "icon.ico"
+ICON_DEV = PROJECT_ROOT / "internal" / "app" / "icon_dev.ico"
 SYSO_OUT = PROJECT_ROOT / "cmd" / "anatomymanager" / "rsrc_windows_amd64.syso"
 EXE_RELEASE = PROJECT_ROOT / "anatomymanager.exe"
 EXE_DEV = PROJECT_ROOT / "anatomymanager-dev.exe"
@@ -112,18 +115,23 @@ def worktree_dirty() -> bool:
     return False
 
 
-def build_resources() -> int:
-    """重绘图标并编译 PE 资源段。"""
+def build_resources(release: bool) -> int:
+    """重绘 release 图标并编译 PE 资源段；dev 使用静态地鼠图标。"""
     if RENDER_ICON.exists():
         r = subprocess.run(["uv", "run", str(RENDER_ICON)], cwd=str(PROJECT_ROOT))
         if r.returncode != 0:
             print("⚠️ 图标渲染脚本执行异常，跳过重绘", file=sys.stderr)
 
+    icon = ICON_RELEASE if release else ICON_DEV
+    if not icon.exists():
+        print(f"❌ 缺少图标文件: {icon}", file=sys.stderr)
+        return 4
+
     r = subprocess.run(
         [
             str(RSRC_EXE),
             "-manifest", str(MANIFEST),
-            "-ico", str(ICON),
+            "-ico", str(icon),
             "-arch", "amd64",
             "-o", str(SYSO_OUT),
         ],
@@ -132,7 +140,7 @@ def build_resources() -> int:
     if r.returncode != 0:
         print(f"❌ rsrc 编译 syso 失败（exit {r.returncode}）", file=sys.stderr)
         return r.returncode
-    print(f"✅ 已注入 Windows PE 资源段: {SYSO_OUT}")
+    print(f"✅ 已注入 Windows PE 资源段: {SYSO_OUT} (icon: {icon.name})")
     return 0
 
 
@@ -144,12 +152,7 @@ def main() -> int:
     parser.add_argument("--version", default="", help="覆盖版本基线（不改变 dev/release 判定）")
     args = parser.parse_args()
 
-    # 1. 图标与 PE 资源
-    rc = build_resources()
-    if rc != 0:
-        return rc
-
-    # 2. 判定构建类型：默认 dev，仅 精确 tag + 干净工作区 才 release
+    # 1. 判定构建类型：默认 dev，仅 精确 tag + 干净工作区 才 release
     exact_tag = exact_project_tag()
     dirty = worktree_dirty()
     release = exact_tag is not None and not dirty
@@ -158,6 +161,11 @@ def main() -> int:
         reason = "当前 HEAD 未命中项目 tag" if exact_tag is None else "工作区存在未提交改动"
         print(f"❌ 拒绝发布构建：{reason}（release 需同时满足 精确 tag + 工作区干净）", file=sys.stderr)
         return 2
+
+    # 2. 图标与 PE 资源（按通道选择图标）
+    rc = build_resources(release)
+    if rc != 0:
+        return rc
 
     base = args.version.lstrip("v") if args.version else base_version()
     if release:
@@ -178,34 +186,22 @@ def main() -> int:
         f"-X anatomymanager/internal/app.BuildMode={build_mode}"
     )
     out_exe = EXE_RELEASE if release else EXE_DEV
-    r = subprocess.run(
-        [
-            "go", "build", "-trimpath",
-            f"-ldflags={ldflags}",
-            "-o", str(out_exe),
-            "./cmd/anatomymanager",
-        ],
-        cwd=str(PROJECT_ROOT),
-    )
+    go_cmd = ["go", "build", "-trimpath"]
+    if not release:
+        go_cmd += ["-tags", "dev"]
+    go_cmd += [f"-ldflags={ldflags}", "-o", str(out_exe), "./cmd/anatomymanager"]
+    r = subprocess.run(go_cmd, cwd=str(PROJECT_ROOT))
     if r.returncode != 0:
         print(f"❌ go build 失败（exit {r.returncode}）", file=sys.stderr)
         return r.returncode
 
-    # 4. 产物名守卫与同步
+    # 4. 产物名守卫：dev 必须带 -dev 后缀，release 不得带
     if release and "dev" in out_exe.stem:
         print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
         return 3
     if not release and not out_exe.stem.endswith("-dev"):
         print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
         return 3
-
-    # 开发模式同步至 anatomymanager.exe，确保用户运行 ./anatomymanager.exe 立即生效
-    if not release:
-        try:
-            shutil.copy2(out_exe, EXE_RELEASE)
-            print(f"🔄 已同步更新当前根目录运行产物: {EXE_RELEASE}")
-        except Exception as e:
-            print(f"⚠️ 无法同步至 {EXE_RELEASE}（可能被运行中进程锁定）: {e}", file=sys.stderr)
 
     size_mb = out_exe.stat().st_size / (1024 * 1024)
     print(f"🎉 构建完成: {out_exe} ({size_mb:.2f} MB)")
