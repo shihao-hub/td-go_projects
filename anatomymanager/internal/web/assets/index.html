@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anatomy Manager - 机械精绘与交互图谱管理器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path>
+          <path d="M2 12h20"></path>
+        </svg>
+        <div class="brand-text">
+          <h1>Anatomy Manager</h1>
+          <span class="sub">Isometric Mechanical Visualizer & Artifact Hub</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="search-box">
+          <input type="text" id="searchInput" placeholder="搜索图谱 / 算法 / 标签..." autocomplete="off">
+        </div>
+        <button id="themeToggleBtn" class="btn btn-secondary" title="切换管理器主题">🌓 主题</button>
+        <button id="refreshBtn" class="btn btn-secondary" title="刷新列表">🔄 刷新</button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="app-body">
+      <!-- Sidebar List -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <span class="count-badge" id="artCount">0 个图谱</span>
+          <span class="storage-info" title="SQLite 单文件存储">SQLite DB</span>
+        </div>
+        <div class="artwork-list" id="artworkList">
+          <div class="empty-hint">暂无图谱，可通过 CLI 摄取归档...</div>
+        </div>
+      </aside>
+
+      <!-- Detail & Viewer Area -->
+      <main class="viewer-main">
+        <!-- Toolbar -->
+        <div class="viewer-toolbar" id="viewerToolbar" style="display: none;">
+          <div class="toolbar-left">
+            <h2 id="artTitle">--</h2>
+            <span class="tag-badge" id="artCategory">figure</span>
+            <span class="session-badge" id="artSession"></span>
+          </div>
+          <div class="toolbar-right">
+            <div class="variant-selector" id="variantSelector">
+              <button class="btn btn-toggle active" data-variant="dark" id="btnVariantDark">深色渲染</button>
+              <button class="btn btn-toggle" data-variant="light" id="btnVariantLight">浅色渲染</button>
+            </div>
+            <button class="btn btn-secondary" id="btnNewTab">↗ 独立标签页打开</button>
+          </div>
+        </div>
+
+        <!-- View Tabs -->
+        <div class="view-tabs" id="viewTabs" style="display: none;">
+          <button class="tab-btn active" data-tab="render">🎮 交互视窗</button>
+          <button class="tab-btn" data-tab="doc">📖 原理与机械映射文档</button>
+          <button class="tab-btn" data-tab="source">📜 源码查看 (build.mjs)</button>
+          <button class="tab-btn" data-tab="files">📦 归档资产清单</button>
+        </div>
+
+        <!-- Tab Contents -->
+        <div class="tab-viewport">
+          <!-- Render Tab -->
+          <div class="tab-pane active" id="pane-render">
+            <div class="iframe-wrapper" id="iframeWrapper">
+              <div class="placeholder-msg">请从左侧选择一个图谱进行可视化渲染</div>
+            </div>
+          </div>
+
+          <!-- Doc Tab -->
+          <div class="tab-pane" id="pane-doc">
+            <div class="doc-container" id="docContent">暂无说明文档</div>
+          </div>
+
+          <!-- Source Tab -->
+          <div class="tab-pane" id="pane-source">
+            <pre class="code-container"><code id="sourceCode">// 正在加载源码...</code></pre>
+          </div>
+
+          <!-- Files Tab -->
+          <div class="tab-pane" id="pane-files">
+            <div class="files-table-wrapper">
+              <table class="files-table">
+                <thead>
+                  <tr>
+                    <th>文件名</th>
+                    <th>类型</th>
+                    <th>大小</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="filesTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
