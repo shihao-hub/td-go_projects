@@ -18,20 +18,15 @@ type Store struct {
 	db *sql.DB
 }
 
-// NewStore opens and initializes the SQLite database at dbPath.
+// NewStore 打开并初始化 dbPath 指定的 SQLite 数据库。
+// 路径必须由调用方显式给出（默认路径由 internal/app.DefaultDBPath 按 dev/prod 通道解析），
+// 避免数据文件散落到家目录等非规范位置。
 func NewStore(dbPath string) (*Store, error) {
 	if dbPath == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "."
-		}
-		dir := filepath.Join(home, ".anatomy")
-		_ = os.MkdirAll(dir, 0755)
-		dbPath = filepath.Join(dir, "anatomy.db")
-	} else {
-		dir := filepath.Dir(dbPath)
-		_ = os.MkdirAll(dir, 0755)
+		return nil, fmt.Errorf("dbPath 不能为空")
 	}
+	dir := filepath.Dir(dbPath)
+	_ = os.MkdirAll(dir, 0755)
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {

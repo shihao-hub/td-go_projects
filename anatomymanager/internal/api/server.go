@@ -24,21 +24,19 @@ func NewServer(store *storage.Store, port int) *Server {
 	return &Server{store: store, port: port}
 }
 
-func (s *Server) Start(openBrowser bool) error {
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-
-	// 1. API endpoints
 	mux.HandleFunc("/api/artworks", s.handleArtworks)
 	mux.HandleFunc("/api/artworks/", s.handleArtworkResource)
-
-	// 2. Embedded WebUI static files
 	subFS, err := fs.Sub(web.Assets, "assets")
-	if err != nil {
-		return fmt.Errorf("mount embedded web assets failed: %w", err)
+	if err == nil {
+		mux.Handle("/", http.FileServer(http.FS(subFS)))
 	}
-	fileServer := http.FileServer(http.FS(subFS))
-	mux.Handle("/", fileServer)
+	return mux
+}
 
+func (s *Server) Start(openBrowser bool) error {
+	mux := s.Handler()
 	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
 	fmt.Printf("Anatomy Manager WebUI is running at http://%s\n", addr)
 

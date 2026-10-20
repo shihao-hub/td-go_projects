@@ -10,16 +10,25 @@ import (
 	"time"
 
 	"anatomymanager/internal/api"
+	"anatomymanager/internal/app"
 	"anatomymanager/internal/model"
 	"anatomymanager/internal/storage"
 )
 
-const version = "1.0.0"
-
 func main() {
-	// 如果双击直接启动（无子命令传参），默认启动 WebUI 并自动弹出浏览器
+	// 如果双击直接启动（无子命令传参），默认启动 WebUI 与桌面托盘外壳
 	if len(os.Args) < 2 {
-		handleServe([]string{"--open"})
+		if err := app.LaunchGUI("", 8765, false); err != nil {
+			handleServe([]string{"--open"})
+		}
+		return
+	}
+
+	// 如果开机自启或后台静默启动（--hidden 参数），不弹窗仅常驻托盘
+	if os.Args[1] == "--hidden" {
+		if err := app.LaunchGUI("", 8765, true); err != nil {
+			handleServe(nil)
+		}
 		return
 	}
 
@@ -38,7 +47,11 @@ func main() {
 	case "serve":
 		handleServe(os.Args[2:])
 	case "version", "-v", "--version":
-		fmt.Printf("Anatomy Manager v%s (Go)\n", version)
+		modeStr := "development"
+		if app.IsRelease() {
+			modeStr = "release"
+		}
+		fmt.Printf("Anatomy Manager %s (mode: %s, build: %s)\n", app.Version, modeStr, app.BuildMode)
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -53,7 +66,7 @@ func printUsage() {
 
 用法:
   anatomymanager [command] [flags]
-  (直接双击或不带参数运行：默认启动 WebUI 并打开浏览器)
+  (直接双击或不带参数运行：启动桌面工作台与托盘；带 --hidden 参数：静默常驻托盘)
 
 命令:
   serve      启动内置 WebUI 与 HTTP 渲染服务 (默认端口 8765, 支持 --open)
@@ -67,6 +80,14 @@ func printUsage() {
 使用 'anatomymanager <command> --help' 获取更多选项。`)
 }
 
+// resolveDBPath 未显式指定 --db 时落到按构建通道隔离的规范数据目录。
+func resolveDBPath(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	return app.DefaultDBPath()
+}
+
 func handleIngest(args []string) {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
 	name := fs.String("name", "", "作品唯一标识符 (如 rate-limiter)")
@@ -76,7 +97,7 @@ func handleIngest(args []string) {
 	sessionID := fs.String("session-id", "", "来源 Agent 会话 ID")
 	category := fs.String("category", "figure", "图谱分类 (figure / part / exploded / rig)")
 	tagsStr := fs.String("tags", "", "标签列表 (逗号分隔)")
-	dbPath := fs.String("db", "", "SQLite 数据库路径 (默认 ~/.anatomy/anatomy.db)")
+	dbPath := fs.String("db", "", "SQLite 数据库路径 (默认 %APPDATA%\\language_projects\\anatomymanager\\<dev|prod>\\anatomy.db)")
 	asJSON := fs.Bool("json", false, "以结构化 JSON 格式输出结果")
 
 	_ = fs.Parse(args)
@@ -88,7 +109,7 @@ func handleIngest(args []string) {
 		fatal("错误: 必须指定 --dir 目录路径", *asJSON)
 	}
 
-	store, err := storage.NewStore(*dbPath)
+	store, err := storage.NewStore(resolveDBPath(*dbPath))
 	if err != nil {
 		fatal(fmt.Sprintf("打开数据库失败: %v", err), *asJSON)
 	}
@@ -197,7 +218,7 @@ func handleList(args []string) {
 	asJSON := fs.Bool("json", false, "JSON 输出")
 	_ = fs.Parse(args)
 
-	store, err := storage.NewStore(*dbPath)
+	store, err := storage.NewStore(resolveDBPath(*dbPath))
 	if err != nil {
 		fatal(fmt.Sprintf("打开数据库失败: %v", err), *asJSON)
 	}
@@ -237,7 +258,7 @@ func handleGet(args []string) {
 	}
 	id := fs.Args()[0]
 
-	store, err := storage.NewStore(*dbPath)
+	store, err := storage.NewStore(resolveDBPath(*dbPath))
 	if err != nil {
 		fatal(fmt.Sprintf("打开数据库失败: %v", err), *asJSON)
 	}
@@ -329,7 +350,7 @@ func handleExport(args []string) {
 		*outDir = filepath.Join(".", id)
 	}
 
-	store, err := storage.NewStore(*dbPath)
+	store, err := storage.NewStore(resolveDBPath(*dbPath))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "打开数据库失败: %v\n", err)
 		os.Exit(1)
@@ -361,7 +382,7 @@ func handleServe(args []string) {
 	dbPath := fs.String("db", "", "SQLite 数据库路径")
 	_ = fs.Parse(args)
 
-	store, err := storage.NewStore(*dbPath)
+	store, err := storage.NewStore(resolveDBPath(*dbPath))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "打开数据库失败: %v\n", err)
 		os.Exit(1)
