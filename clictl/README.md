@@ -113,6 +113,7 @@ uv run scripts/build.py --release   # release → clictl-gui.exe + clictl-cli.ex
 - PE 资源由 `go-winres` 生成（VERSIONINFO + manifest + 图标）；GUI 与 CLI 的 FileDescription 不同
 - dev 使用 Go 地鼠图标，release 由 `scripts/render_icon.py` 重绘专属图标
 - 依赖 `modernc.org/sqlite`（纯 Go 无 CGO）、`golang.org/x/sys`（Win32 探活）、`github.com/wailsapp/wails/v3`（仅 GUI 产物）
+- 安装到用户工具目录（CLI 安装为 `clictl.exe`，GUI 同通道安装为 `clictl-gui.exe`）：`uv run scripts/copy_clictl_to_local_bin.py [--channel prod]`；卸载用 `remove_clictl_from_local_bin.py`
 
 ## 数据目录
 
