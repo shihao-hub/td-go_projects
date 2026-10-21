@@ -43,12 +43,20 @@ func Run(args []string, opt Options) int {
 	if len(args) == 0 {
 		return renderHelp(&opt)
 	}
+	// --hidden / --tray 在 console 通道退化为无窗口常驻服务（没有桌面壳可拉）。
+	if args[0] == "--hidden" || args[0] == "--tray" {
+		return runServe(nil, &opt)
+	}
 	switch args[0] {
 	case "-h", "--help", "help":
 		return renderHelp(&opt)
 	case "--version", "version":
 		fmt.Fprintln(opt.Stdout, version.Version)
 		return 0
+	case "serve":
+		return runServe(args[1:], &opt)
+	case "url":
+		return runURL(&opt)
 	case "http":
 		return runHTTP(args[1:], &opt)
 	case "mcp":

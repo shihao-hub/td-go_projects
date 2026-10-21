@@ -5,3 +5,13 @@ build/
 *.exe
 *.test
 *.out
+
+# 构建生成物（脚本自动重建，不入库）
+/icon.ico
+/icon.png
+/cmd/liteconf/rsrc_windows_amd64.syso
+/winres/.tmp-winres.json
+
+# Python 运行缓存
+__pycache__/
+*.pyc

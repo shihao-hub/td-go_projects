@@ -36,6 +36,11 @@ func NewMux(st *Store, bc *Broadcaster) *http.ServeMux {
 	})
 	// Web 控制台静态资源（/ui 由 ServeMux 自动 301 补斜杠到 /ui/）
 	mux.Handle("GET /ui/", webui.Handler())
+	// 根路径重定向到控制台：GUI 窗口与 CLI serve 打印的地址都是完整工作台，
+	// 不再出现「根路径 404」的裸 API 观感；未知路径仍由 ServeMux 返回 404。
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusFound)
+	})
 	return mux
 }
 

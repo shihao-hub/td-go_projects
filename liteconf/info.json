@@ -1,0 +1,14 @@
+{
+  "fixed": {
+    "file_version": "0.2.0"
+  },
+  "info": {
+    "0000": {
+      "ProductVersion": "0.2.0",
+      "CompanyName": "shihao-hub",
+      "FileDescription": "liteconf - 配置中心桌面控制台",
+      "LegalCopyright": "© 2026 shihao-hub",
+      "ProductName": "liteconf"
+    }
+  }
+}
