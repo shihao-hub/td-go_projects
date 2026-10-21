@@ -1,0 +1,12 @@
+# 构建生成物（由 scripts/build.py 与 scripts/render_icon.py 自动重建，不入库）
+# 仅限项目根目录，internal/app/icon.ico 是 go:embed 资源，必须入库
+/icon.ico
+/icon.png
+/cmd/plansql/rsrc_windows_amd64.syso
+
+# Python 运行缓存
+__pycache__/
+*.pyc
+
+# winres 构建临时清单（build.py 用完即删，中断时遗留也不入库）
+/winres/.tmp-*

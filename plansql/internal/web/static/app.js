@@ -1,4 +1,5 @@
 let currentItems = [];
+let currentMeta = null;
 
 async function fetchJSON(url, options = {}) {
     const res = await fetch(url, options);
@@ -7,6 +8,16 @@ async function fetchJSON(url, options = {}) {
         throw new Error(data.error || '请求失败');
     }
     return data.data;
+}
+
+async function loadMeta() {
+    const meta = await fetchJSON('/api/v1/meta');
+    currentMeta = meta;
+    document.getElementById('meta-root').innerText = meta.root_dir || '-';
+    document.getElementById('meta-sql').innerText = meta.sql_file || '-';
+    document.getElementById('meta-channel').innerText =
+        `${meta.channel || '-'} / ${meta.version || '-'}`;
+    return meta;
 }
 
 async function loadData() {
@@ -152,7 +163,44 @@ document.getElementById('form-update').onsubmit = async (e) => {
 };
 
 // 头部操作按钮
-document.getElementById('btn-refresh').onclick = loadData;
+document.getElementById('btn-refresh').onclick = async () => {
+    await loadMeta().catch(() => {});
+    loadData();
+};
+
+// 切换项目根
+const rootModal = document.getElementById('modal-root');
+const rootPathInput = document.getElementById('root-path');
+
+document.getElementById('btn-root').onclick = () => {
+    rootPathInput.value = (currentMeta && currentMeta.root_dir) || '';
+    rootModal.classList.remove('hidden');
+    rootPathInput.focus();
+};
+
+document.getElementById('modal-root-close').onclick = () => rootModal.classList.add('hidden');
+document.getElementById('btn-root-cancel').onclick = () => rootModal.classList.add('hidden');
+
+document.getElementById('form-root').onsubmit = async (e) => {
+    e.preventDefault();
+    const root = rootPathInput.value.trim();
+    if (!root) {
+        alert('请填写项目根目录');
+        return;
+    }
+    try {
+        await fetchJSON('/api/v1/root', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ root })
+        });
+        rootModal.classList.add('hidden');
+        await loadMeta();
+        await loadData();
+    } catch (err) {
+        alert('切换项目失败: ' + err.message);
+    }
+};
 
 document.getElementById('btn-check').onclick = async () => {
     try {
@@ -184,4 +232,7 @@ document.getElementById('btn-scan').onclick = async () => {
 };
 
 // 初始化
+loadMeta().catch(err => {
+    document.getElementById('meta-root').innerText = '读取失败: ' + err.message;
+});
 loadData();

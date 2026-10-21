@@ -11,6 +11,8 @@ var (
 	Version = ""
 	// BuildID 是握手与升级检测凭据
 	BuildID = ""
+	// BuildMode 是编译期注入的通道标识（release / dev），是 dev-release 判定的唯一真源
+	BuildMode = ""
 )
 
 func init() {
@@ -57,8 +59,12 @@ func vcsVersion() string {
 // 生产构建正则：形如 v1.0.0 或 plansql/v1.0.0
 var productionRe = regexp.MustCompile(`^(?:plansql/)?v\d+\.\d+\.\d+$`)
 
-// IsProduction 判断当前二进制是否为生产构建（干净的 release tag）
+// IsProduction 判断当前二进制是否为生产构建（干净的 release tag）。
+// 优先采信构建脚本注入的 BuildMode；手工 go build 未注入时回退到 BuildID 正则推导。
 func IsProduction() bool {
+	if BuildMode != "" {
+		return BuildMode == "release"
+	}
 	id := BuildID
 	if id == "" {
 		return false
@@ -70,6 +76,15 @@ func IsProduction() bool {
 		}
 	}
 	return productionRe.MatchString(id)
+}
+
+// Channel 返回当前构建通道：release → prod，dev → dev。
+// 数据目录、单实例 ID、自省命令的判定全部由它派生。
+func Channel() string {
+	if IsProduction() {
+		return "prod"
+	}
+	return "dev"
 }
 
 func isDigits(s string) bool {

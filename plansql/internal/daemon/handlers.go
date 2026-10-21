@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"plansql/internal/buildinfo"
 )
 
 type APIResponse struct {
@@ -18,12 +20,92 @@ func writeJSON(w http.ResponseWriter, status int, resp APIResponse) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// Meta 描述当前服务实例所属的项目根与构建通道，
+// 经 /api/v1/meta 暴露给 WebUI，让用户能确认「这个窗口看的是哪个项目」。
+type Meta struct {
+	RootDir   string `json:"root_dir"`
+	SQLFile   string `json:"sql_file"`
+	Channel   string `json:"channel"`
+	BuildMode string `json:"build_mode"`
+	Version   string `json:"version"`
+	BuildID   string `json:"build_id"`
+	Items     int    `json:"items"`
+}
+
+// handleMeta 处理 GET /api/v1/meta
+func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, APIResponse{OK: false, Error: "method not allowed"})
+		return
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	meta := Meta{
+		RootDir:   s.rootDir,
+		SQLFile:   s.sqlFile,
+		Channel:   buildinfo.Channel(),
+		BuildMode: buildinfo.BuildMode,
+		Version:   buildinfo.Version,
+		BuildID:   buildinfo.BuildID,
+	}
+	if s.store != nil {
+		if items, err := s.store.GetAllItems(); err == nil {
+			meta.Items = len(items)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: meta})
+}
+
+// RootRequest 切换项目根的请求体
+type RootRequest struct {
+	Root string `json:"root"`
+}
+
+// handleRoot 处理 POST /api/v1/root：切换当前服务观察的项目根。
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, APIResponse{OK: false, Error: "method not allowed"})
+		return
+	}
+
+	var req RootRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, APIResponse{OK: false, Error: fmt.Sprintf("invalid request body: %v", err)})
+		return
+	}
+	if req.Root == "" {
+		writeJSON(w, http.StatusBadRequest, APIResponse{OK: false, Error: "root 不能为空"})
+		return
+	}
+
+	sqlFile := filepath.Join(req.Root, "plans_status.sql")
+	if err := s.Reconfigure(req.Root, sqlFile); err != nil {
+		writeJSON(w, http.StatusBadRequest, APIResponse{OK: false, Error: err.Error()})
+		return
+	}
+
+	rootDir, resolvedSQL := s.Project()
+	writeJSON(w, http.StatusOK, APIResponse{
+		OK: true,
+		Data: map[string]any{
+			"root_dir": rootDir,
+			"sql_file": resolvedSQL,
+		},
+	})
+}
+
 // handleGetItems 处理 GET /api/v1/items
 func (s *Server) handleGetItems(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, APIResponse{OK: false, Error: "method not allowed"})
 		return
 	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	items, err := s.store.GetAllItems()
 	if err != nil {
@@ -46,6 +128,9 @@ func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	res, err := s.wal.Check()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: err.Error()})
@@ -61,6 +146,9 @@ func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, APIResponse{OK: false, Error: "method not allowed"})
 		return
 	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	report, err := s.scanner.Scan(s.store)
 	if err != nil {
@@ -90,6 +178,9 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, APIResponse{OK: false, Error: fmt.Sprintf("invalid request body: %v", err)})
 		return
 	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	sqlStmt, err := s.wal.AppendMutation(s.store, req.Type, req.Path, req.Status)
 	if err != nil {

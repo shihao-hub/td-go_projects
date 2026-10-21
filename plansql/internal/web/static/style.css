@@ -40,6 +40,37 @@ body {
     gap: 0.5rem;
 }
 
+.meta-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    padding: 0.6rem 2rem;
+    background: #eef2f7;
+    border-bottom: 1px solid #dde3ea;
+    font-size: 0.8rem;
+    color: #4b5563;
+}
+
+.meta-item {
+    display: inline-flex;
+    gap: 0.4rem;
+    align-items: baseline;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
+.meta-item strong {
+    color: #111827;
+    white-space: nowrap;
+}
+
+.form-hint {
+    margin-top: 0.5rem;
+    font-size: 0.78rem;
+    color: #6b7280;
+    line-height: 1.5;
+}
+
 .container {
     max-width: 1400px;
     margin: 1.5rem auto;

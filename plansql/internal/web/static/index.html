@@ -13,11 +13,18 @@
             <h1>plansql Dashboard</h1>
         </div>
         <div class="header-actions">
+            <button id="btn-root" class="btn btn-secondary">📁 切换项目</button>
             <button id="btn-scan" class="btn btn-secondary">🔍 磁盘对齐扫描</button>
             <button id="btn-check" class="btn btn-secondary">🛡️ 校验 SQL</button>
             <button id="btn-refresh" class="btn btn-primary">🔄 刷新</button>
         </div>
     </header>
+
+    <div class="meta-bar">
+        <span class="meta-item"><strong>项目根</strong> <span id="meta-root">加载中…</span></span>
+        <span class="meta-item"><strong>SQL</strong> <span id="meta-sql">-</span></span>
+        <span class="meta-item"><strong>通道</strong> <span id="meta-channel">-</span></span>
+    </div>
 
     <main class="container">
         <!-- 统计面板 -->
@@ -100,6 +107,27 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" id="btn-cancel">取消</button>
                     <button type="submit" class="btn btn-primary" id="btn-save">生成并追加 SQL</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 弹窗：切换项目根 -->
+    <div id="modal-root" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>切换项目</h3>
+                <span class="close" id="modal-root-close">&times;</span>
+            </div>
+            <form id="form-root">
+                <div class="form-group">
+                    <label>项目根目录:</label>
+                    <input type="text" id="root-path" class="input" placeholder="例如 D:\\Users\\language_projects">
+                    <p class="form-hint">目录需包含 plans_status.sql 或 .git；切换后会重新加载该项目的登记与扫描结果。</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btn-root-cancel">取消</button>
+                    <button type="submit" class="btn btn-primary" id="btn-root-save">切换并重载</button>
                 </div>
             </form>
         </div>

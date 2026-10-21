@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"plansql/internal/buildinfo"
 	"plansql/internal/daemon"
+	"plansql/internal/instance"
 	"runtime"
 	"strings"
 	"text/tabwriter"
@@ -45,6 +46,8 @@ func RunCLI(args []string) int {
 		return runScan(subArgs)
 	case "ui":
 		return runUI(subArgs)
+	case "where":
+		return runWhere(subArgs)
 	case "schema":
 		printFullSchema()
 		return 0
@@ -52,7 +55,12 @@ func RunCLI(args []string) int {
 		printUsage()
 		return 0
 	case "version", "--version", "-v":
-		fmt.Printf("plansql %s (build: %s, Go 1.25.3, standard v2 daemon architecture)\n", buildinfo.Version, buildinfo.BuildID)
+		mode := "development"
+		if buildinfo.IsProduction() {
+			mode = "release"
+		}
+		fmt.Printf("plansql %s (channel: %s, mode: %s, build: %s)\n",
+			buildinfo.Version, buildinfo.Channel(), mode, buildinfo.BuildID)
 		return 0
 	default:
 		// 支持 plansql --schema 全局导出
@@ -69,8 +77,13 @@ func RunCLI(args []string) int {
 func printUsage() {
 	fmt.Println(`plansql - 基于 SQL 追加流与 SQLite 投影的 Plan/Spec 状态管理与约束 CLI
 
+通道说明:
+  plansql-gui.exe  GUI 通道：只负责桌面工作台，不接受任何子命令，
+                   双击或带任意参数启动都是显示窗口（--hidden 为静默托盘）
+  plansql-cli.exe  Console 通道（就是本程序）：终端 / 脚本 / Agent / MCP 专用
+
 用法:
-  plansql <command> [flags]
+  plansql-cli <command> [flags]
 
 命令:
   list    列出所有已登记的 plan / spec 状态
@@ -81,6 +94,7 @@ func printUsage() {
   serve   启动后台守护进程 (Daemon 模式)
   mcp     以 stdio 模式启动 MCP 桥接服务
   schema  导出完整契约的 JSON Schema 目录
+  where   自省：通道、数据目录、daemon 与 GUI 运行状态
 
 命令选项 (flags):
   --json        以结构化 JSON 输出
@@ -566,4 +580,90 @@ func openBrowser(url string) {
 		args = []string{url}
 	}
 	_ = exec.Command(cmd, args...).Start()
+}
+
+// whereOutput 是 `where` 子命令的机器可读契约，供 Agent 在执行命令前自证通道与环境。
+type whereOutput struct {
+	Binary        string `json:"binary"`
+	Channel       string `json:"channel"`
+	BuildMode     string `json:"buildMode"`
+	Version       string `json:"version"`
+	BuildID       string `json:"buildId"`
+	DataDir       string `json:"dataDir"`
+	AddressFile   string `json:"addressFile"`
+	DaemonAddr    string `json:"daemonAddr"`
+	DaemonRunning bool   `json:"daemonRunning"`
+	ProjectRoot   string `json:"projectRoot"`
+	SQLFile       string `json:"sqlFile"`
+	SQLFileExists bool   `json:"sqlFileExists"`
+	GUI           struct {
+		Dev  bool `json:"dev"`
+		Prod bool `json:"prod"`
+	} `json:"gui"`
+}
+
+// runWhere 输出运行时自省信息：构建通道、数据目录、daemon 与 GUI 状态、当前项目根。
+func runWhere(args []string) int {
+	fs := flag.NewFlagSet("where", flag.ExitOnError)
+	jsonOut := fs.Bool("json", false, "以结构化 JSON 输出")
+	_ = fs.Parse(args)
+
+	info := whereOutput{
+		Binary:    filepath.Base(os.Args[0]),
+		Channel:   buildinfo.Channel(),
+		BuildMode: buildinfo.BuildMode,
+		Version:   buildinfo.Version,
+		BuildID:   buildinfo.BuildID,
+	}
+	info.DataDir, _ = daemon.GetDataDir()
+	info.AddressFile, _ = daemon.GetAddressFilePath()
+	if addr, err := daemon.ReadAddressFile(); err == nil {
+		info.DaemonAddr = addr
+	}
+
+	client, err := NewClient("")
+	if err == nil {
+		info.DaemonRunning = client.Ping() == nil
+	}
+
+	cwd, _ := os.Getwd()
+	info.ProjectRoot = daemon.FindProjectRoot(cwd)
+	info.SQLFile = filepath.Join(info.ProjectRoot, "plans_status.sql")
+	if _, err := os.Stat(info.SQLFile); err == nil {
+		info.SQLFileExists = true
+	}
+
+	info.GUI.Dev = instance.GUIRunning(false)
+	info.GUI.Prod = instance.GUIRunning(true)
+
+	if *jsonOut {
+		PrintJSON(map[string]any{"ok": true, "data": info})
+		return 0
+	}
+
+	guiState := func(running bool) string {
+		if running {
+			return "运行中"
+		}
+		return "未运行"
+	}
+	daemonState := "未运行"
+	if info.DaemonRunning {
+		daemonState = "运行中 (" + info.DaemonAddr + ")"
+	}
+
+	fmt.Printf("二进制     : %s\n", info.Binary)
+	fmt.Printf("通道       : %s (%s)\n", info.Channel, info.BuildMode)
+	fmt.Printf("版本       : %s (build: %s)\n", info.Version, info.BuildID)
+	fmt.Printf("数据目录   : %s\n", info.DataDir)
+	fmt.Printf("地址文件   : %s\n", info.AddressFile)
+	fmt.Printf("daemon     : %s\n", daemonState)
+	fmt.Printf("GUI 状态   : dev=%s  prod=%s\n", guiState(info.GUI.Dev), guiState(info.GUI.Prod))
+	fmt.Printf("项目根     : %s\n", info.ProjectRoot)
+	if info.SQLFileExists {
+		fmt.Printf("SQL 文件   : %s\n", info.SQLFile)
+	} else {
+		fmt.Printf("SQL 文件   : %s（尚未创建）\n", info.SQLFile)
+	}
+	return 0
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"plansql/internal/buildinfo"
 	"strconv"
 	"strings"
 	"time"
@@ -47,7 +48,8 @@ func FindProjectRoot(startDir string) string {
 }
 
 // GetDataDir 获取标准数据存放目录，严格遵守仓库规范：
-// 优先 %APPDATA%\language_projects\plansql\，其次 ~/.language_projects/plansql/
+// 优先 %APPDATA%\language_projects\plansql\<dev|prod>，其次 ~/.language_projects/plansql/<dev|prod>。
+// 通道子目录保证 dev 与 release 的地址文件、日志、窗口状态互不串台。
 func GetDataDir() (string, error) {
 	appData := os.Getenv("APPDATA")
 	var baseDir string
@@ -60,6 +62,7 @@ func GetDataDir() (string, error) {
 		}
 		baseDir = filepath.Join(home, ".language_projects", "plansql")
 	}
+	baseDir = filepath.Join(baseDir, buildinfo.Channel())
 
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return "", fmt.Errorf("create data dir %s: %w", baseDir, err)
