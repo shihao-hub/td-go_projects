@@ -140,7 +140,7 @@ async function showList() {
   clearError();
   editorView.classList.add("hidden");
   listView.classList.remove("hidden");
-  listView.innerHTML = '<p class="empty-state">加载中…</p>';
+  listView.innerHTML = '<p class="empty-state">正在读取配置目录…</p>';
 
   let data;
   try {
@@ -154,42 +154,72 @@ async function showList() {
 
   const apps = data.apps || [];
   if (apps.length === 0) {
-    listView.innerHTML = '<p class="empty-state">仓库中还没有配置。点击右上角「新建配置」创建第一条。</p>';
+    listView.innerHTML = '<p class="empty-state">还没有任何配置。点右上角「新建配置」，先给第一个 app 建个 dev 环境。</p>';
     return;
   }
 
   const frag = document.createDocumentFragment();
-  for (const appEntry of apps) {
-    const card = document.createElement("div");
-    card.className = "app-card";
-    const title = document.createElement("h3");
-    title.textContent = appEntry.app;
-    card.appendChild(title);
 
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    thead.innerHTML = "<tr><th>env</th><th>version</th></tr>";
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    for (const envEntry of appEntry.envs || []) {
-      const tr = document.createElement("tr");
-      tr.className = "env-row";
-      tr.title = "点击查看/编辑";
-      const tdEnv = document.createElement("td");
-      tdEnv.textContent = envEntry.env;
-      const tdVer = document.createElement("td");
-      tdVer.textContent = envEntry.version;
-      tr.appendChild(tdEnv);
-      tr.appendChild(tdVer);
-      tr.addEventListener("click", () => {
+  const listHead = document.createElement("div");
+  listHead.className = "list-head";
+  const listLabel = document.createElement("span");
+  listLabel.textContent = "配置目录";
+  const listTotal = document.createElement("span");
+  const envTotal = apps.reduce((n, a) => n + (a.envs || []).length, 0);
+  listTotal.textContent = apps.length + " 个应用 · " + envTotal + " 个环境";
+  listHead.append(listLabel, listTotal);
+  frag.appendChild(listHead);
+
+  apps.forEach((appEntry, i) => {
+    const entry = document.createElement("article");
+    entry.className = "app-entry";
+
+    const head = document.createElement("div");
+    head.className = "app-head";
+
+    const index = document.createElement("span");
+    index.className = "app-index";
+    index.textContent = String(i + 1).padStart(2, "0");
+
+    const name = document.createElement("h3");
+    name.className = "app-name";
+    name.textContent = appEntry.app;
+
+    const envs = appEntry.envs || [];
+    const count = document.createElement("span");
+    count.className = "app-count";
+    count.textContent = envs.length + " 个环境";
+
+    head.append(index, name, count);
+
+    const list = document.createElement("ul");
+    list.className = "env-list";
+    for (const envEntry of envs) {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "env-row";
+      btn.title = "打开 " + appEntry.app + " / " + envEntry.env;
+
+      const envName = document.createElement("span");
+      envName.className = "env-name";
+      envName.textContent = envEntry.env;
+
+      const envVer = document.createElement("span");
+      envVer.className = "env-version";
+      envVer.textContent = "v" + envEntry.version;
+
+      btn.append(envName, envVer);
+      btn.addEventListener("click", () => {
         location.hash = "#/" + appEntry.app + "/" + envEntry.env;
       });
-      tbody.appendChild(tr);
+      li.appendChild(btn);
+      list.appendChild(li);
     }
-    table.appendChild(tbody);
-    card.appendChild(table);
-    frag.appendChild(card);
-  }
+
+    entry.append(head, list);
+    frag.appendChild(entry);
+  });
   listView.innerHTML = "";
   listView.appendChild(frag);
 }
@@ -199,8 +229,8 @@ async function showList() {
 // ------------------------------------------------------------
 
 function refreshVersionLabel(extra) {
-  const v = state.version === null ? "未知" : state.version;
-  editorVersion.textContent = "版本：" + v + (extra ? " · " + extra : "");
+  const v = state.version === null ? "—" : "v" + state.version;
+  editorVersion.textContent = v + (extra ? " · " + extra : "");
 }
 
 async function showEditor(app, env) {
@@ -456,6 +486,8 @@ function applyModeDom() {
   tablePane.classList.toggle("hidden", isText);
   btnModeText.classList.toggle("active", isText);
   btnModeTable.classList.toggle("active", !isText);
+  btnModeText.setAttribute("aria-selected", String(isText));
+  btnModeTable.setAttribute("aria-selected", String(!isText));
   if (isText) {
     jsonText.value = state.text;
   }
