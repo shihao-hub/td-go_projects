@@ -27,6 +27,10 @@
   - Chromium 启动参数剪枝（砍掉独立 GPU 与网络进程）。
   - 关窗彻底销毁 WebView2，异步调用 GC 与 FreeOSMemory 归还系统堆内存。
   - 托盘双击毫秒级按需重建窗口；开机自启 `--hidden` 零 Chromium 纯 Go 实例运行（常驻物理内存 ~20MB）。
+- **窗口几何记忆**：
+  - 尺寸、位置、最大化状态落 `window.json`，移窗/缩放 700ms 防抖保存，关窗同步落盘。
+  - 外接屏拔出后旧坐标不可见时自动拉回主屏居中。
+- **通道隔离**：dev / release 使用不同数据目录、单实例 ID、图标（dev 为灰蓝 DEV 图标）与版本号。
 
 ## 构建与运行
 
@@ -35,19 +39,19 @@
 - Node.js 20+ / npm
 - uv (Python 包与脚本运行工具)
 - Wails v3 CLI (`wails3`)
-- MinGW64 windres (用于 Windows PE 图标与资源编译)
+- go-winres (`go install github.com/tc-hib/go-winres@latest`)
 
 ### 开发构建 (dev)
 ```bash
 uv run build.py --dev
 ```
-产物输出至 `build/winstartupmanager-dev.exe`。
+产物输出至 `build/winstartupmanager-dev.exe`（`-tags dev`，灰蓝 DEV 图标）。
 
 ### 正式打包 (release)
 ```bash
 uv run build.py --release
 ```
-产物输出至 `build/winstartupmanager.exe`。
+产物输出至 `build/winstartupmanager.exe`；仅当 HEAD 精确命中 `winstartupmanager/v*` tag 且工作区干净时允许，否则退出码 2。
 
 ### 运行
 ```bash
@@ -57,3 +61,10 @@ uv run build.py --release
 # 静默启动进系统托盘（开机自启形态）
 ./build/winstartupmanager-dev.exe --hidden
 ```
+
+## 数据目录
+
+- 运行时数据：`%APPDATA%\language_projects\winstartupmanager\{dev,prod}\`
+  - `backups/`：删除前的 `.reg` 快照（旧版 `%LOCALAPPDATA%\WinStartupManager\backups` 会在首次访问时复制过来，源目录保留）
+  - `webview2/`：WebView2 用户数据
+  - `window.json`：窗口尺寸/位置/最大化状态

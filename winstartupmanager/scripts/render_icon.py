@@ -15,26 +15,29 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 SIZE = 1024
 
 BG_TOP = (14, 165, 233)     # Sky 500
 BG_BOTTOM = (37, 99, 235)   # Blue 600
+DEV_BG_TOP = (100, 116, 139)   # Slate 500
+DEV_BG_BOTTOM = (51, 65, 85)   # Slate 700
 ROCKET_BODY = (255, 255, 255)
 ROCKET_ACCENT = (239, 68, 68)  # Red 500
 FIRE_ORANGE = (249, 115, 22)   # Orange 500
 FIRE_YELLOW = (250, 204, 21)   # Yellow 400
 
 
-def build_icon() -> Image.Image:
+def build_icon(dev: bool = False) -> Image.Image:
+    bg_top, bg_bottom = (DEV_BG_TOP, DEV_BG_BOTTOM) if dev else (BG_TOP, BG_BOTTOM)
     img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     grad = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
     gd = ImageDraw.Draw(grad)
 
     for y in range(SIZE):
         t = y / SIZE
-        color = tuple(int(BG_TOP[i] + (BG_BOTTOM[i] - BG_TOP[i]) * t) for i in range(3))
+        color = tuple(int(bg_top[i] + (bg_bottom[i] - bg_top[i]) * t) for i in range(3))
         gd.line([(0, y), (SIZE, y)], fill=(*color, 255))
 
     mask = Image.new("L", (SIZE, SIZE), 0)
@@ -108,23 +111,43 @@ def build_icon() -> Image.Image:
     ]
     d.polygon(flame_inner, fill=(*FIRE_YELLOW, 255))
 
+    if dev:
+        font = ImageFont.load_default(size=int(SIZE * 0.11))
+        text = "DEV"
+        box = d.textbbox((0, 0), text, font=font)
+        tw, th = box[2] - box[0], box[3] - box[1]
+        d.rounded_rectangle(
+            [int(SIZE * 0.06), int(SIZE * 0.965) - th - int(SIZE * 0.03),
+             int(SIZE * 0.06) + tw + int(SIZE * 0.06), int(SIZE * 0.965)],
+            radius=int(SIZE * 0.02),
+            fill=(15, 23, 42, 235),
+        )
+        d.text(
+            (int(SIZE * 0.09), int(SIZE * 0.965) - th - int(SIZE * 0.035)),
+            text,
+            font=font,
+            fill=(250, 250, 250, 255),
+        )
+
     return img
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="生成 winstartupmanager 应用图标")
     parser.add_argument("--out", default="build", help="输出目录（默认 build/）")
+    parser.add_argument("--dev", action="store_true", help="生成 dev 通道图标（灰蓝配色 + DEV 标记）")
     args = parser.parse_args()
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    icon = build_icon()
-    png_path = out / "appicon.png"
+    icon = build_icon(dev=args.dev)
+    suffix = "_dev" if args.dev else ""
+    png_path = out / f"appicon{suffix}.png"
     icon.save(png_path, "PNG")
 
     ico_sizes = [256, 128, 64, 48, 32, 24, 16]
-    ico_path = out / "icon.ico"
+    ico_path = out / f"icon{suffix}.ico"
     icon.save(ico_path, format="ICO", sizes=[(s, s) for s in ico_sizes])
 
     print(f"已生成 {png_path}")

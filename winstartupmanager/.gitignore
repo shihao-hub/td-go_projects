@@ -5,7 +5,7 @@ frontend/bindings/
 
 # 构建产物
 build/*.exe
-build/icon.rc
+winres.generated.json
 *.syso
 *.exe
 winstartupmanager.exe

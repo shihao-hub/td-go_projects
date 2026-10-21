@@ -10,13 +10,10 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed build/icon.ico
-var iconICO []byte
-
 func main() {
 	hidden := false
 	for _, arg := range os.Args[1:] {
-		if arg == "--hidden" {
+		if arg == "--hidden" || arg == "--tray" {
 			hidden = true
 		}
 	}

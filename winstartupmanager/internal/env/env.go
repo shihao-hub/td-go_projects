@@ -5,14 +5,24 @@ import (
 )
 
 var (
+	// Version 由构建脚本通过 -ldflags -X 注入，dev 通道带 -dev 后缀。
 	Version = "v0.1.0-dev"
-	Commit  = "unknown"
+	// Commit 由构建脚本注入短哈希。
+	Commit = "unknown"
+	// BuildMode 是 dev/release 的唯一真源，只允许构建脚本注入 "dev" 或 "release"。
+	BuildMode = ""
 )
 
-const baseSingleInstanceID = "shihao.langproj.winstartupmanager"
+const (
+	ModeDev     = "dev"
+	ModeRelease = "release"
 
+	baseSingleInstanceID = "shihao.langproj.winstartupmanager"
+)
+
+// IsDev 以 BuildMode 为唯一判据；未注入时按 dev 处理（保证本地 go run 不影响正式通道）。
 func IsDev() bool {
-	return strings.Contains(Version, "-dev")
+	return BuildMode != ModeRelease
 }
 
 func SingleInstanceID() string {
@@ -32,4 +42,9 @@ func WindowTitle() string {
 
 func AutostartAllowed() bool {
 	return !IsDev()
+}
+
+// IsDirty 表示 dev 通道构建时工作区存在未提交改动。
+func IsDirty() bool {
+	return strings.HasSuffix(Version, "-dirty")
 }

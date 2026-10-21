@@ -5,7 +5,7 @@
 """winstartupmanager 统一构建脚本（uv 单文件）。
 
 使用说明：
-    uv run build.py              # 自动判定模式：HEAD 严格命中 git tag 且工作区
+    uv run build.py              # 自动判定模式：HEAD 严格命中项目 tag 且工作区
                                  # 干净 -> release；否则 -> dev
     uv run build.py --dev        # 强制 dev 构建（产物 build/winstartupmanager-dev.exe）
     uv run build.py --release    # 强制 release（条件不满足时直接报错退出）
@@ -13,17 +13,19 @@
 
 模式约定（与 go_projects 构建规范一致）：
     dev     产物名 winstartupmanager-dev.exe，版本号附 -dev 后缀，工作区不干净再附
-            -dirty；保留控制台窗口便于看日志。
+            -dirty；保留控制台窗口便于看日志；-tags dev 切换 dev 图标与通道标识。
     release 产物名 winstartupmanager.exe（严禁任何 dev 标识）；仅当 HEAD 严格命中
-            git tag 且工作区干净时允许；-trimpath + -H windowsgui 隐藏控制台。
+            项目 tag `winstartupmanager/v*` 且工作区干净时允许；
+            -trimpath + -H windowsgui 隐藏控制台。
 
 构建流程：
-    1) 前置检查（node/npm、wails3 CLI、windres）
+    1) 前置检查（node/npm、wails3 CLI、go-winres）
     2) npm install（frontend/node_modules 缺失时）与 wails3 generate bindings
     3) 前端构建（npm run build，dev 模式用 build:dev 不压缩便于调试）
-    4) 图标检查（build/icon.ico 缺失时调 scripts/render_icon.py 生成）
-    5) windres 生成 .syso（PE 图标与版本资源），go build 后即删除
-    6) go build 注入 internal/env.Version / internal/env.Commit
+    4) 图标检查（release 用 build/icon.ico，dev 用 build/icon_dev.ico，缺失时调
+       scripts/render_icon.py 生成）
+    5) go-winres 生成 PE 资源（图标 + VERSIONINFO），go build 后即删除
+    6) go build 注入 internal/env.{Version,Commit,BuildMode}
 
 每次变更本脚本时必须同步更新本使用说明。
 """
@@ -31,6 +33,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -41,21 +44,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 BUILD_DIR = PROJECT_ROOT / "build"
 
-WINDRES_CANDIDATES = (
-    r"D:\msys64\mingw64\bin\windres.exe",
-    r"C:\msys64\mingw64\bin\windres.exe",
-    r"D:\msys64\ucrt64\bin\windres.exe",
-    r"C:\msys64\ucrt64\bin\windres.exe",
-)
+APP_NAME = "winstartupmanager"
+TAG_PREFIX = f"{APP_NAME}/"
+FALLBACK_VERSION = "v0.1.0"
+
+COMPANY_NAME = "shihao"
+LEGAL_COPYRIGHT = "© 2026 shihao"
 
 
 def info(msg: str) -> None:
     print(f"[build] {msg}")
 
 
-def fail(msg: str) -> None:
+def fail(msg: str, code: int = 1) -> None:
     print(f"[build][错误] {msg}", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(code)
 
 
 def run(cmd: list[str], **kw) -> None:
@@ -73,22 +76,25 @@ def git(*args: str) -> str:
 
 
 def detect_mode(force: str | None) -> tuple[str, str]:
-    exact = git("describe", "--exact-match", "--tags", "HEAD")
-    describe = git("describe", "--tags", "--long", "HEAD")
+    match = f"{TAG_PREFIX}v*"
+    exact = git("describe", "--exact-match", "--tags", "--match", match, "HEAD")
+    describe = git("describe", "--tags", "--long", "--match", match, "HEAD")
     dirty = bool(git("status", "--porcelain"))
 
-    base = describe.rsplit("-", 2)[0] if describe and describe.count("-") >= 2 else "v0.0.0"
-    base = base.rsplit("/", 1)[-1]
+    base = FALLBACK_VERSION
+    if describe and describe.count("-") >= 2:
+        tag = describe.rsplit("-", 2)[0]
+        base = tag.rsplit("/", 1)[-1] if "/" in tag else tag
 
     if force == "release":
         if not exact:
-            fail("release 要求 HEAD 精确命中 git tag（当前不满足）")
+            fail("release 要求 HEAD 精确命中项目 tag（winstartupmanager/v*，当前不满足）", code=2)
         if dirty:
-            fail("release 要求工作区干净（存在未提交改动）")
-        return "release", exact
+            fail("release 要求工作区干净（存在未提交改动）", code=2)
+        return "release", exact.rsplit("/", 1)[-1]
 
     if force is None and exact and not dirty:
-        return "release", exact
+        return "release", exact.rsplit("/", 1)[-1]
 
     version = f"{base}-dev"
     if dirty:
@@ -96,21 +102,17 @@ def detect_mode(force: str | None) -> tuple[str, str]:
     return "dev", version
 
 
-def find_windres() -> str:
-    found = shutil.which("windres")
-    if found:
-        return found
-    for cand in WINDRES_CANDIDATES:
-        if Path(cand).is_file():
-            return cand
-    fail("找不到 windres（MSYS2 MinGW64）；请安装 MSYS2 或将其 bin 加入 PATH")
+def numeric_version(version: str) -> str:
+    nums = []
+    for part in version.lstrip("v").split("-")[0].split("."):
+        nums.append(int(part) if part.isdigit() else 0)
+    nums = (nums + [0, 0, 0, 0])[:4]
+    return ".".join(str(n) for n in nums)
 
 
 def ensure_frontend() -> None:
-    npm = "npm"
     if not (FRONTEND_DIR / "node_modules").is_dir():
-        run([npm, "install"], cwd=FRONTEND_DIR)
-    # wails3 generate bindings
+        run(["npm", "install"], cwd=FRONTEND_DIR)
     run(["wails3", "generate", "bindings"], cwd=PROJECT_ROOT)
 
 
@@ -119,59 +121,73 @@ def build_frontend(mode: str) -> None:
     run(["npm", "run", script], cwd=FRONTEND_DIR)
 
 
-def make_syso(version: str) -> Path:
-    windres = find_windres()
+def ensure_icon(mode: str) -> Path:
+    """release 用项目专属图标，dev 用灰蓝 DEV 图标（静态入库，缺失时按需生成）。"""
+    if mode == "dev":
+        ico = BUILD_DIR / "icon_dev.ico"
+        if not ico.is_file():
+            run(["uv", "run", "scripts/render_icon.py", "--dev"], cwd=PROJECT_ROOT)
+        return ico
     ico = BUILD_DIR / "icon.ico"
     if not ico.is_file():
         run(["uv", "run", "scripts/render_icon.py"], cwd=PROJECT_ROOT)
+    return ico
 
-    nums = []
-    for part in version.lstrip("v").split("-")[0].split("."):
-        nums.append(int(part) if part.isdigit() else 0)
-    nums = (nums + [0, 0, 0, 0])[:4]
 
-    rc = f"""1 ICON "icon.ico"
+def make_syso(mode: str, version: str) -> tuple[Path, Path]:
+    """用 go-winres 生成 PE 资源（图标 + VERSIONINFO），返回 (syso, 临时 json)。"""
+    if not shutil.which("go-winres"):
+        fail("找不到 go-winres，请执行 go install github.com/tc-hib/go-winres@latest")
 
-1 VERSIONINFO
-FILEVERSION {nums[0]},{nums[1]},{nums[2]},{nums[3]}
-PRODUCTVERSION {nums[0]},{nums[1]},{nums[2]},{nums[3]}
-BEGIN
-  BLOCK "StringFileInfo"
-  BEGIN
-    BLOCK "040904b0"
-    BEGIN
-      VALUE "FileDescription", "Windows Startup Manager (WinStartupManager)"
-      VALUE "FileVersion", "{version}"
-      VALUE "ProductName", "WinStartupManager"
-      VALUE "ProductVersion", "{version}"
-    END
-  END
-  BLOCK "VarFileInfo"
-  BEGIN
-    VALUE "Translation", 0x0409, 1200
-  END
-END
-"""
-    rc_path = BUILD_DIR / "icon.rc"
-    rc_path.write_text(rc, encoding="ascii")
-    syso = PROJECT_ROOT / "icon_windows_amd64.syso"
-    env = {**os.environ, "PATH": f"{Path(windres).parent}{os.pathsep}{os.environ.get('PATH', '')}"}
-    run([windres, "-O", "coff", "-o", str(syso), rc_path.name], cwd=BUILD_DIR, env=env)
-    return syso
+    ico = ensure_icon(mode)
+    ico_rel = ico.relative_to(PROJECT_ROOT).as_posix()
+    fixed = numeric_version(version)
+    display_version = version.lstrip("v")
+    out_name = f"{APP_NAME}-dev.exe" if mode == "dev" else f"{APP_NAME}.exe"
+
+    winres = {
+        "RT_GROUP_ICON": {"APP": {"0000": ico_rel}},
+        "RT_VERSION": {
+            "#1": {
+                "0000": {
+                    "fixed": {"file_version": fixed, "product_version": fixed},
+                    "info": {
+                        "0409": {
+                            "CompanyName": COMPANY_NAME,
+                            "FileDescription": "WinStartupManager - 开机自启可视化管理工具",
+                            "FileVersion": display_version,
+                            "InternalName": APP_NAME,
+                            "LegalCopyright": LEGAL_COPYRIGHT,
+                            "OriginalFilename": out_name,
+                            "ProductName": "WinStartupManager",
+                            "ProductVersion": display_version,
+                        }
+                    },
+                }
+            }
+        },
+    }
+
+    json_path = PROJECT_ROOT / "winres.generated.json"
+    json_path.write_text(json.dumps(winres, ensure_ascii=False, indent=2), encoding="utf-8")
+    run(["go-winres", "make", "--in", json_path.name, "--out", "rsrc", "--arch", "amd64"], cwd=PROJECT_ROOT)
+    return PROJECT_ROOT / "rsrc_windows_amd64.syso", json_path
 
 
 def go_build(mode: str, version: str) -> Path:
     commit = git("rev-parse", "--short", "HEAD") or "unknown"
+    build_mode = "dev" if mode == "dev" else "release"
     ld = (
         f"-X winstartupmanager/internal/env.Version={version} "
-        f"-X winstartupmanager/internal/env.Commit={commit}"
+        f"-X winstartupmanager/internal/env.Commit={commit} "
+        f"-X winstartupmanager/internal/env.BuildMode={build_mode}"
     )
-    out = BUILD_DIR / (f"winstartupmanager-{mode}.exe" if mode == "dev" else "winstartupmanager.exe")
+    out = BUILD_DIR / (f"{APP_NAME}-dev.exe" if mode == "dev" else f"{APP_NAME}.exe")
     cmd = ["go", "build", "-trimpath"]
     if mode == "release":
         cmd += ["-ldflags", f"-s -w -H windowsgui {ld}"]
     else:
-        cmd += ["-ldflags", ld]
+        cmd += ["-tags", "dev", "-ldflags", ld]
     cmd += ["-o", str(out), "."]
     run(cmd, cwd=PROJECT_ROOT)
     return out
@@ -189,17 +205,20 @@ def main() -> None:
 
     if not (FRONTEND_DIR / "package.json").is_file():
         fail(f"前端目录缺失: {FRONTEND_DIR}")
+    if not os.environ.get("APPDATA"):
+        info("警告：未检测到 APPDATA，运行时数据将回落 ~/.language_projects")
 
     mode, version = detect_mode(force)
     info(f"模式={mode} 版本={version}")
 
     ensure_frontend()
     build_frontend(mode)
-    syso = make_syso(version)
+    syso, winres_json = make_syso(mode, version)
     try:
         out = go_build(mode, version)
     finally:
         syso.unlink(missing_ok=True)
+        winres_json.unlink(missing_ok=True)
 
     info(f"完成: {out}")
 
