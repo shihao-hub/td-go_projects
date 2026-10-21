@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"clictl/internal/appinfo"
+
 	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动，免 CGO
 )
 
@@ -89,25 +91,13 @@ type Store struct{ db *sql.DB }
 
 type scanner interface{ Scan(dest ...any) error }
 
-// dbPath 数据库路径：%AppData%\language_projects\clictl\clictl.db，
-// 取不到 AppData 回退 ~/.language_projects/clictl/
-func dbPath() (string, error) {
-	if appData := os.Getenv("AppData"); appData != "" {
-		return filepath.Join(appData, "language_projects", "clictl", "clictl.db"), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("无法定位数据目录: %w", err)
-	}
-	return filepath.Join(home, ".language_projects", "clictl", "clictl.db"), nil
+// Open 打开当前构建通道的数据库（dev / prod 目录隔离）
+func Open() (*Store, error) {
+	return OpenAt(appinfo.DefaultDBPath())
 }
 
-// Open 打开数据库（WAL + busy_timeout=2s + 外键约束）并完成建表迁移
-func Open() (*Store, error) {
-	path, err := dbPath()
-	if err != nil {
-		return nil, err
-	}
+// OpenAt 打开指定路径的数据库（WAL + busy_timeout=2s + 外键约束）并完成建表迁移
+func OpenAt(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("创建数据目录失败: %w", err)
 	}

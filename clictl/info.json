@@ -1,0 +1,14 @@
+{
+	"fixed": {
+		"file_version": "2.0.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "2.0.0",
+			"CompanyName": "shihao",
+			"FileDescription": "clictl - 工具注册与启动台",
+			"LegalCopyright": "© 2026 shihao",
+			"ProductName": "clictl"
+		}
+	}
+}

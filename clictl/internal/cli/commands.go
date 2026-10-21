@@ -11,14 +11,12 @@ import (
 	"os/signal"
 	"strings"
 
+	"clictl/internal/appinfo"
 	"clictl/internal/mcp"
 	"clictl/internal/runner"
 	"clictl/internal/service"
 	"clictl/internal/store"
 )
-
-// Version 版本号，唯一来源是构建命令 -ldflags -X 注入
-var Version = "dev"
 
 var svc *service.Service
 
@@ -47,6 +45,11 @@ func Run(args []string) int {
 		return 0
 	}
 
+	// console 通道没有桌面壳可拉：--hidden / --tray 退化为无窗口常驻服务。
+	if args[0] == "--hidden" || args[0] == "--tray" {
+		return cmdServe(nil)
+	}
+
 	cmd, rest := args[0], args[1:]
 	// run/start 的剩余参数全部透传给子进程，不能剥离全局 flag，其他的都给剥离掉
 	if cmd != "run" && cmd != "start" {
@@ -72,6 +75,10 @@ func Run(args []string) int {
 		return cmdStop(rest)
 	case "cp":
 		return cmdCp(rest)
+	case "serve":
+		return cmdServe(rest)
+	case "where":
+		return cmdWhere(rest)
 	case "completion":
 		return cmdCompletion(rest)
 	case "mcp":
@@ -79,7 +86,11 @@ func Run(args []string) int {
 	case "schema":
 		return cmdSchema(rest)
 	case "version", "--version", "-v":
-		Emit(map[string]string{"version": Version})
+		Emit(map[string]string{
+			"version":    appinfo.Version,
+			"channel":    appinfo.Channel(),
+			"build_mode": appinfo.BuildMode,
+		})
 		return 0
 	case "help", "-h", "--help":
 		EmitHelp()
@@ -97,7 +108,7 @@ func cmdMcp(args []string) int {
 		fmt.Fprintln(os.Stderr, "clictl mcp 不接受参数（MCP 客户端经 stdin/stdout 对话）")
 		return 1
 	}
-	mcp.Version = Version
+	mcp.Version = appinfo.Version
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := mcp.Run(ctx); err != nil {
@@ -121,7 +132,7 @@ func cmdSchema(args []string) int {
 	}
 	Emit(map[string]any{
 		"name":    "clictl",
-		"version": Version,
+		"version": appinfo.Version,
 		"tools":   tools,
 	})
 	return 0
@@ -166,6 +177,8 @@ func EmitHelp() {
 			{"cmd": "start <name> [args...]", "desc": "后台分离启动（GUI/托盘/服务类），立即返回并输出 pid；未注册/失效=127"},
 			{"cmd": "stop <name>", "desc": "终止该工具全部后台活实例（taskkill 树杀）并闭环记录"},
 			{"cmd": "cp <name> <dest_dir> [--force]", "desc": "复制已注册 exe 到目标目录；目录须已存在，目标同名文件需 --force 覆盖"},
+			{"cmd": "serve [--port 0] [--open]", "desc": "启动内置 WebUI 与 REST 服务（与 GUI 同一 Handler；默认动态端口）"},
+			{"cmd": "where", "desc": "自省：通道 / 版本 / 库路径 / 工具数 / 两通道 GUI 运行状态"},
 			{"cmd": "completion powershell [--install|--uninstall]", "desc": "PowerShell Tab 补全脚本；--install 写入 $PROFILE，--uninstall 移除"},
 			{"cmd": "completion names", "desc": "全部工具名，每行一个（供补全脚本消费，raw 输出）"},
 			{"cmd": "mcp", "desc": "启动 stdio MCP server（GUI/AI 客户端对话通道；不解析参数，日志走 stderr）"},

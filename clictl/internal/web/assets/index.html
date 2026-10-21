@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>clictl — 工具注册与启动台</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+            <circle cx="12" cy="12" r="8.2"></circle>
+            <path d="M12 3.8v3.1M12 17.1v3.1M3.8 12h3.1M17.1 12h3.1"></path>
+            <path d="M10.2 9.4l5 2.6-5 2.6z" fill="currentColor" stroke="none"></path>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <h1>clictl</h1>
+          <span>工具注册与启动台</span>
+        </div>
+      </div>
+
+      <div class="topbar-search">
+        <input id="searchInput" type="search" placeholder="搜索工具名 / 路径 / 描述" autocomplete="off" spellcheck="false">
+      </div>
+
+      <div class="topbar-actions">
+        <span class="channel-badge" id="channelBadge">--</span>
+        <button class="btn" id="refreshBtn" title="刷新列表">刷新</button>
+        <button class="btn btn-accent" id="addBtn">注册工具</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="list-pane">
+        <div class="list-toolbar">
+          <div class="filters" id="filters">
+            <button class="chip active" data-filter="all">全部</button>
+            <button class="chip" data-filter="running">运行中</button>
+            <button class="chip" data-filter="active">有效</button>
+            <button class="chip" data-filter="invalid">失效</button>
+          </div>
+          <span class="count" id="toolCount">0 个</span>
+        </div>
+        <div class="tool-list" id="toolList"></div>
+      </aside>
+
+      <main class="detail-pane" id="detailPane">
+        <div class="empty-state" id="emptyState">
+          <span class="empty-glyph">⌘</span>
+          <p>从左侧选择一个工具查看详情</p>
+          <p class="muted">或点击右上角「注册工具」把任意 exe 收编进启动台</p>
+        </div>
+
+        <div class="detail" id="detail" hidden>
+          <div class="detail-head">
+            <div>
+              <div class="detail-title-row">
+                <h2 id="detailName">--</h2>
+                <span class="status-dot" id="detailStatusDot"></span>
+                <span class="status-text" id="detailStatus">--</span>
+              </div>
+              <p class="detail-desc" id="detailDesc"></p>
+            </div>
+            <div class="detail-actions">
+              <button class="btn btn-primary" id="startBtn">启动</button>
+              <button class="btn" id="stopBtn">停止</button>
+              <button class="btn" id="revealBtn">定位</button>
+              <button class="btn" id="metaBtn">meta</button>
+              <button class="btn btn-danger" id="deleteBtn">删除</button>
+            </div>
+          </div>
+
+          <div class="run-row" id="runRow" hidden>
+            <label for="startArgs">启动参数</label>
+            <input id="startArgs" type="text" placeholder="可选，空格分隔；含空格请用引号包裹，按 shell 规则解析" spellcheck="false">
+            <button class="btn btn-primary" id="startArgsBtn">带参数启动</button>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <span class="stat-label">启动次数</span>
+              <strong id="statLaunches">0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">累计耗时</span>
+              <strong id="statDuration">0s</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">文件大小</span>
+              <strong id="statSize">--</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">后台实例</span>
+              <strong id="statPids">无</strong>
+            </div>
+          </div>
+
+          <section class="field-block">
+            <h3>可执行文件</h3>
+            <code class="path" id="detailPath">--</code>
+          </section>
+
+          <section class="field-block">
+            <h3>meta</h3>
+            <pre class="meta-box" id="detailMeta">--</pre>
+          </section>
+
+          <section class="field-block">
+            <h3>最近启动</h3>
+            <table class="launch-table">
+              <thead>
+                <tr><th>开始时间</th><th>耗时</th><th>退出码</th><th>PID</th></tr>
+              </thead>
+              <tbody id="launchBody"></tbody>
+            </table>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- 注册工具 -->
+  <dialog id="addDialog" class="dialog">
+    <form method="dialog" class="dialog-form" id="addForm">
+      <h2>注册工具</h2>
+      <p class="muted">路径必须是本地 .exe；名称留空时取文件名小写。</p>
+
+      <label class="field">
+        <span>exe 路径</span>
+        <div class="path-input">
+          <input id="addPath" type="text" placeholder="C:\Tools\app.exe" spellcheck="false" required>
+          <button type="button" class="btn" id="browseBtn">浏览</button>
+        </div>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>名称（可选）</span>
+          <input id="addName" type="text" placeholder="app" spellcheck="false">
+        </label>
+        <label class="field">
+          <span>描述（可选）</span>
+          <input id="addDesc" type="text" placeholder="一句话说明">
+        </label>
+      </div>
+
+      <label class="field">
+        <span>meta（可选 JSON，仅 source / tags）</span>
+        <input id="addMeta" type="text" placeholder='{"source":"manual","tags":["dev"]}' spellcheck="false">
+      </label>
+
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="addCancel">取消</button>
+        <button type="submit" class="btn btn-accent">注册</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 目录浏览 -->
+  <dialog id="browseDialog" class="dialog dialog-wide">
+    <div class="dialog-form">
+      <h2>选择 exe</h2>
+      <div class="browse-bar">
+        <button type="button" class="btn" id="browseUp">上级</button>
+        <code id="browsePath">--</code>
+      </div>
+      <div class="browse-list" id="browseList"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="browseCancel">取消</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 编辑 meta -->
+  <dialog id="metaDialog" class="dialog">
+    <form method="dialog" class="dialog-form" id="metaForm">
+      <h2>编辑 meta</h2>
+      <p class="muted">仅允许 source（字符串）与 tags（字符串数组），传 <code>{}</code> 表示清空。</p>
+      <label class="field">
+        <span>JSON</span>
+        <textarea id="metaInput" rows="8" spellcheck="false"></textarea>
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="metaCancel">取消</button>
+        <button type="submit" class="btn btn-accent">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

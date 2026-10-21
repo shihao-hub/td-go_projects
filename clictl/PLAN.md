@@ -17,23 +17,30 @@
 | 决策 | 内容 |
 |---|---|
 | 语言 | **Go**（理由见"关键技术点"） |
-| 命名 | 项目 `clictl`，命令 `clictl`（构建产物 `clictl.exe`，PATH 已验证无冲突） |
+| 命名 | 项目 `clictl`；产物 `clictl-gui[-dev].exe`（桌面）与 `clictl-cli[-dev].exe`（终端），命令名 `clictl` 指 CLI |
 | 管理对象 | v1 仅 `.exe`（.cmd/.bat shim 推二期） |
-| 数据位置 | `%AppData%\clictl\clictl.db`（取不到回退 `~/.clictl/`） |
+| 数据位置 | `%APPDATA%\language_projects\clictl\{dev,prod}\clictl.db`（取不到回退 `~/.language_projects/clictl/<通道>/`） |
 
 ## 项目结构
 
 ```
 go_projects/clictl/
-├── cmd/clictl/main.go            # 入口：子命令分发
-├── internal/cli/commands.go      # add/rm/list/info/run 各命令实现
-├── internal/cli/output.go        # JSON 包络输出（ok/error、--pretty）
-├── internal/store/store.go       # SQLite 打开/迁移/CRUD/统计
-├── internal/store/meta.go        # meta 白名单校验器（key 约束 + 4KB 硬限）
-├── internal/runner/runner.go     # 透传启动 + 启动记录回写
-├── scripts/build.ps1             # 构建 + 版本注入
+├── cmd/clictl/main.go            # GUI 入口（!cli）：只出窗口
+├── cmd/clictl/cli.go             # Console 入口（cli）：子命令 → internal/cli.Run
+├── internal/appinfo/             # 版本/通道/数据目录/日志（无 Wails 依赖）
+├── internal/app/                 # Wails 桌面壳：托盘/窗口几何/自启/图标/单实例
+├── internal/api/                 # REST + 内嵌 WebUI 的共用 Handler
+├── internal/web/assets/          # 前端单页（index.html / style.css / app.js）
+├── internal/cli/                 # 子命令与 JSON 包络（含 serve / where）
+├── internal/store/               # SQLite 打开/迁移/CRUD/统计
+├── internal/runner/              # 透传启动 / 后台启动 / 探活 / 停止 / 记账
+├── internal/mcp/                 # MCP stdio server 与工具定义
+├── scripts/build.py              # 双通道构建 + PE 资源 + release 门禁
+├── scripts/render_icon.py        # 专属图标渲染
+├── winres/{gui,cli}.json         # VERSIONINFO 模板
+├── info.json / wails.exe.manifest
 ├── README.md / .gitignore
-父仓镜像文档：docs/projects/go_projects/clictl/clictl.md
+父仓文档：docs/projects/go_projects/clictl/
 ```
 
 ## 核心数据结构
@@ -210,10 +217,31 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - `run` 行为零回归（透传/退出码/前置错误走 stderr）
 - 探活单测：真实路径比对、已退出进程判死、PID 复用路径不匹配判死
 
+### Phase 6：双通道桌面化（v2.0.0）
+
+- [x] 16. `internal/appinfo`：Version/BuildMode/Channel/DataDir/Logf + 旧库迁移；CLI 与 API 共用且不引入 Wails
+- [x] 17. `internal/store`：`Open()` 走通道目录，新增 `OpenAt(path)`；WAL + busy_timeout 不变
+- [x] 18. `internal/api`：REST + 内嵌 WebUI 单 Handler；GUI 与 `serve` 共用；错误码映射 HTTP 状态
+- [x] 19. `internal/web`：单页启动台（搜索/过滤/详情/启动/停止/定位/meta/删除/目录浏览注册）
+- [x] 20. `internal/app`：Wails v3 托盘、单实例（通道隔离）、窗口几何记忆、自启门禁、图标双通道
+- [x] 21. `cmd/clictl`：`main.go`（!cli，GUI）与 `cli.go`（cli，console）双入口；CLI 新增 `serve`/`where`
+- [x] 22. 构建：双产物 + go-winres VERSIONINFO/manifest/图标 + release 门禁；`render_icon.py` 专属图标
+- [x] 23. 文档：README / CHANGELOG / 父仓使用指南 / 双通道计划
+
+验收标准（已实测）：
+
+- CLI 与 GUI 产物 Subsystem 分别为 3 / 2，PE 描述与版本不同
+- `-tags cli` 产物 `go list -deps` 命中 wails = 0
+- `clictl-cli serve` 根路径 200 返回完整工作台，`/api/*` 正常
+- GUI `--hidden` 启动后 `where` 报 `running_guis.dev=true`，动态端口可从日志读取
+- PowerShell `list | ConvertFrom-Json` 正常；`go test ./...` / `go vet ./...` 干净
+- release 门禁：无 tag / 脏工作区退出码 2，不产正式名
+
 ## 技术依赖
 
 | 依赖 | 用途 | 理由 |
 |---|---|---|
+| github.com/wailsapp/wails/v3 | GUI 桌面壳（托盘/窗口/自启） | 仅 `!cli` 产物链接；`internal/app` 独立成包，CLI 产物零污染 |
 | modernc.org/sqlite | SQLite 驱动 | **纯 Go 无 CGO**：Windows 下无需 gcc，交叉编译不受限；本工具写入频率极低，性能足够 |
 | golang.org/x/sys/windows | Win32 探活 API（OpenProcess/QueryFullProcessImageName） | 原为 sqlite 传递依赖，v1.2.0 提升为直接依赖，零新增体积 |
 | 标准库 flag / os/exec / os/signal / encoding/json / database/sql | 其余全部 | 零 CLI 框架，单二进制最小化 |
@@ -248,6 +276,6 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - stop 的 taskkill /T 树杀依赖父子快照，极端竞态（PID 复用窗口）可能波及无关子进程——与 taskkill 本身行为一致，接受
 
 ---
-**最后更新：** 2026-09-13
+**最后更新：** 2026-10-21
 **作者：** Claude & User
-**版本：** v1.6（v1.5 = 复制命令 cp，发布为 1.3.0；本次 v1.4.0 = --ascii 转义开关 + 补全安装块编码固化）
+**版本：** v2.0（本次 = Wails v3 双通道桌面化：GUI + CLI + WebUI + dev/prod 隔离；上一版 v1.6 = --ascii + 补全编码固化）

@@ -26,9 +26,18 @@ type Service struct {
 	st *store.Store
 }
 
-// Open 打开数据库并完成迁移
+// Open 打开当前构建通道的数据库并完成迁移
 func Open() (*Service, error) {
 	st, err := store.Open()
+	if err != nil {
+		return nil, err
+	}
+	return &Service{st: st}, nil
+}
+
+// OpenAt 打开指定路径的数据库（GUI 与自省命令需要显式确认库位时使用）
+func OpenAt(path string) (*Service, error) {
+	st, err := store.OpenAt(path)
 	if err != nil {
 		return nil, err
 	}

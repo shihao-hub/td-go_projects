@@ -1,0 +1,34 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": "__ICON__"
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": "__MANIFEST__"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "__FIXED_VERSION__",
+          "product_version": "__FIXED_VERSION__"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "shihao",
+            "FileDescription": "clictl GUI - 工具注册与启动台",
+            "FileVersion": "__VERSION__",
+            "InternalName": "clictl-gui",
+            "LegalCopyright": "© 2026 shihao",
+            "OriginalFilename": "__ORIGINAL_NAME__",
+            "ProductName": "clictl",
+            "ProductVersion": "__VERSION__"
+          }
+        }
+      }
+    }
+  }
+}

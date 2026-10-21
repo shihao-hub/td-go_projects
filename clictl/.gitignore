@@ -1,7 +1,25 @@
-# 构建产物（锚定项目根，避免误伤 cmd/clictl/ 目录）
+# 构建生成物（scripts/build.py 与 scripts/render_icon.py 自动重建，不入库）
+# internal/app/icon.ico 是 go:embed 资源，必须入库
+/clictl-gui.exe
+/clictl-gui-dev.exe
+/clictl-cli.exe
+/clictl-cli-dev.exe
+/icon.ico
+/icon.png
+/cmd/clictl/rsrc_windows_amd64.syso
+
+# 双通道改造前的单产物
 /clictl.exe
 /clictl
+/clictl-dev.exe
 dist/
+
+# winres 临时清单（use 后即删，中断遗留也不入库）
+/winres/.tmp-*
+
+# Python 运行缓存
+__pycache__/
+*.pyc
 
 # 测试
 *.test

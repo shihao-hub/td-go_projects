@@ -2,6 +2,34 @@
 
 本文件记录 clictl 的版本变更。格式参考 Keep a Changelog，版本号遵循语义化版本。
 
+## [2.0.0] - 2026-10-21
+
+### Added
+
+- GUI 通道 `clictl-gui[-dev].exe`：Wails v3 桌面壳 + 系统托盘 + 内嵌 WebUI。托盘支持打开启动台、浏览器打开、开机自启（仅 release）、彻底退出；关窗只销毁窗口，进程常驻托盘
+- WebUI 启动台：工具卡片搜索/状态过滤、详情与最近 10 条启动记录、启动（可带参数）/停止/资源管理器定位/编辑 meta/删除、注册弹窗内置只读目录浏览
+- `clictl serve [--port 0] [--open]`：CLI 通道托管与 GUI 完全相同的 WebUI + REST Handler（根路径不再是裸 API）
+- REST API：`/api/meta`、`/api/tools`、`/api/tools/{name}` 及其 `/meta`、`/start`、`/stop`、`/reveal`、`/api/fs`，包络与 CLI 一致
+- `clictl where`：自省通道、版本、库路径、工具数、两通道 GUI 运行状态与建议
+- 窗口几何记忆：`window.json` 保存尺寸/位置/最大化（700ms 防抖 + 关闭前同步落盘 + 外接屏兜底）
+- dev / release 五维隔离：产物名、版本号、数据目录、单实例 ID（`wails-app-shihao.langproj.clictl.gui[.dev]-sim`）、图标
+- 数据目录改为 `%APPDATA%\language_projects\clictl\{dev,prod}\clictl.db`；旧库在每通道首次启动时复制一份（旧文件保留）
+- PE 版本资源由 go-winres 生成：GUI 与 CLI 的 VERSIONINFO/FileDescription 不同，属性面板版本与 tag 一致
+- 专属 release 图标（`scripts/render_icon.py`），dev 使用 Go 地鼠图标；构建脚本自动注入 PE 图标与 manifest
+
+### Changed
+
+- **破坏性**：单产物 `clictl.exe` 拆为 `clictl-gui[-dev].exe` 与 `clictl-cli[-dev].exe`。GUI 产物不解析任何子命令，终端/脚本/PATH 一律改用 `clictl-cli`。旧 `clictl.exe` 构建产物由 `scripts/build.py` 自动清理（源码与文档不动）
+- `--version` 输出增加 `channel` / `build_mode`；版本真源迁至 `internal/appinfo`
+- 构建改为双产物 + release 门禁（`clictl/v*` tag + 工作区干净）；构建脚本清理历史单产物
+- 目录分层：新增 `internal/appinfo`（无 Wails 依赖）、`internal/app`（桌面壳）、`internal/api`（HTTP）、`internal/web`（内嵌前端）
+
+### Notes
+
+- 全部 CLI 子命令、JSON 包络、meta 白名单、MCP 工具与退出码语义保持不变
+- `internal/api` / `internal/appinfo` 不引用 `internal/app`，`-tags cli` 产物不链接 Wails（已验证 `go list -deps` 为 0 处 wails）
+- WebUI 不提供 `run` 前台透传（浏览器无法接管 TTY），需要看输出请用 `clictl-cli run`
+
 ## [1.4.0] - 2026-09-13
 
 ### Added
