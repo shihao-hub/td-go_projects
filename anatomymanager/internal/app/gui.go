@@ -2,8 +2,6 @@ package app
 
 import (
 	"fmt"
-	"net"
-	"net/http"
 	"os/exec"
 	"runtime"
 	"runtime/debug"
@@ -36,7 +34,9 @@ type App struct {
 	exiting  atomic.Bool
 }
 
-func LaunchGUI(dbPath string, defaultPort int, hidden bool) error {
+// LaunchGUI 启动 WebUI + Wails 桌面壳。port 传 0 时由系统动态探测可用端口
+// （默认行为，dev 与 release 实例可并行运行而互不冲突）。
+func LaunchGUI(dbPath string, port int, hidden bool) error {
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
 	}
@@ -45,21 +45,16 @@ func LaunchGUI(dbPath string, defaultPort int, hidden bool) error {
 		return fmt.Errorf("打开数据库失败: %w", err)
 	}
 
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", defaultPort))
+	listener, err := api.Listen(port)
 	if err != nil {
-		listener, err = net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			return fmt.Errorf("启动 HTTP 监听失败: %w", err)
-		}
+		return fmt.Errorf("启动 HTTP 监听失败: %w", err)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	serverURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+	serverURL := api.URL(listener)
+	logf("WebUI 已启动: %s", serverURL)
 
-	server := api.NewServer(store, port)
-	mux := server.Handler()
-	httpServer := &http.Server{Handler: mux}
+	server := api.NewServer(store)
 	go func() {
-		_ = httpServer.Serve(listener)
+		_ = server.Serve(listener)
 	}()
 
 	var appInstance *App

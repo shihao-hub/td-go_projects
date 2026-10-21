@@ -18,7 +18,7 @@ import (
 func main() {
 	// 如果双击直接启动（无子命令传参），默认启动 WebUI 与桌面托盘外壳
 	if len(os.Args) < 2 {
-		if err := app.LaunchGUI("", 8765, false); err != nil {
+		if err := app.LaunchGUI("", 0, false); err != nil {
 			handleServe([]string{"--open"})
 		}
 		return
@@ -26,7 +26,7 @@ func main() {
 
 	// 如果开机自启或后台静默启动（--hidden 参数），不弹窗仅常驻托盘
 	if os.Args[1] == "--hidden" {
-		if err := app.LaunchGUI("", 8765, true); err != nil {
+		if err := app.LaunchGUI("", 0, true); err != nil {
 			handleServe(nil)
 		}
 		return
@@ -69,7 +69,7 @@ func printUsage() {
   (直接双击或不带参数运行：启动桌面工作台与托盘；带 --hidden 参数：静默常驻托盘)
 
 命令:
-  serve      启动内置 WebUI 与 HTTP 渲染服务 (默认端口 8765, 支持 --open)
+  serve      启动内置 WebUI 与 HTTP 渲染服务 (默认自动探测可用端口, 支持 --port / --open)
   ingest     摄取并归档 anatomy 产物进入 SQLite 单文件数据库
   list       列出已收录的所有图谱 (支持 --json)
   get        查看指定图谱的元数据详情与文件清单 (支持 --json)
@@ -377,7 +377,7 @@ func handleExport(args []string) {
 
 func handleServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	port := fs.Int("port", 8765, "HTTP 端口")
+	port := fs.Int("port", 0, "HTTP 端口（0 = 由系统动态探测可用端口）")
 	openBrowser := fs.Bool("open", false, "启动后自动打开系统默认浏览器")
 	dbPath := fs.String("db", "", "SQLite 数据库路径")
 	_ = fs.Parse(args)
@@ -389,8 +389,8 @@ func handleServe(args []string) {
 	}
 	defer store.Close()
 
-	server := api.NewServer(store, *port)
-	if err := server.Start(*openBrowser); err != nil {
+	server := api.NewServer(store)
+	if _, err := server.Start(*port, *openBrowser); err != nil {
 		fmt.Fprintf(os.Stderr, "服务异常终止: %v\n", err)
 		os.Exit(1)
 	}

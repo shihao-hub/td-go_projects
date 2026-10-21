@@ -89,9 +89,10 @@ anatomymanager export rate-limiter --out ./dist/rate-limiter
 
 ### 7. 启动可视化 WebUI 与服务 (Serve)
 ```bash
-anatomymanager serve --port 8765 --open
+anatomymanager serve --open        # 默认由系统动态探测可用端口
+anatomymanager serve --port 8765   # 需要固定端口时显式指定
 ```
-访问 `http://127.0.0.1:8765` 即可体验包含缩略图卡片流、深浅色渲染切换、沙箱交互、Markdown 原理解析与代码查看的全功能工作台。
+启动后终端会打印实际访问地址（形如 `http://127.0.0.1:<动态端口>`），浏览器打开该地址即可体验包含缩略图卡片流、深浅色渲染切换、沙箱交互、Markdown 原理解析与代码查看的全功能工作台。
 
 ---
 

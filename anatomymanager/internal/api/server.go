@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os/exec"
 	"runtime"
@@ -17,11 +18,10 @@ import (
 
 type Server struct {
 	store *storage.Store
-	port  int
 }
 
-func NewServer(store *storage.Store, port int) *Server {
-	return &Server{store: store, port: port}
+func NewServer(store *storage.Store) *Server {
+	return &Server{store: store}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -35,16 +35,37 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-func (s *Server) Start(openBrowser bool) error {
-	mux := s.Handler()
-	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
-	fmt.Printf("Anatomy Manager WebUI is running at http://%s\n", addr)
+// Listen 在回环地址上绑定监听器；port 传 0 表示由内核动态探测可用端口
+// （dev / release 等多个实例并行时天然互不抢占，无需端口约定）。
+func Listen(port int) (net.Listener, error) {
+	return net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+}
+
+// URL 由监听器推导出实际可访问地址，供宿主（Wails 窗口、托盘、CLI 输出）使用。
+func URL(listener net.Listener) string {
+	return "http://" + listener.Addr().String()
+}
+
+// Serve 在调用方已绑定的监听器上提供服务。宿主需要先拿到真实端口再构造
+// 窗口地址（如 Wails 桌面壳）时必须走该入口，而不是 Start。
+func (s *Server) Serve(listener net.Listener) error {
+	return http.Serve(listener, s.Handler())
+}
+
+// Start 绑定端口并阻塞提供服务，返回实际访问地址（port=0 时为动态端口）。
+func (s *Server) Start(port int, openBrowser bool) (string, error) {
+	listener, err := Listen(port)
+	if err != nil {
+		return "", fmt.Errorf("绑定监听失败: %w", err)
+	}
+	url := URL(listener)
+	fmt.Printf("Anatomy Manager WebUI is running at %s\n", url)
 
 	if openBrowser {
-		go openURL(fmt.Sprintf("http://%s", addr))
+		go openURL(url)
 	}
 
-	return http.ListenAndServe(addr, mux)
+	return url, s.Serve(listener)
 }
 
 func (s *Server) handleArtworks(w http.ResponseWriter, r *http.Request) {
