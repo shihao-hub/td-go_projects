@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +17,12 @@ import (
 	"anatomymanager/internal/storage"
 	"anatomymanager/internal/web"
 )
+
+// fileCacheControl 语义是「可缓存，但每次使用前必须回源校验」：
+// ingest 对同名文件走 upsert 原地覆盖 content_blob，若用 max-age 浏览器会在一小时内
+// 继续吐旧 HTML / 旧预览图。改成 ETag + no-cache 后，内容未变命中 304（零字节传输），
+// 内容变了立刻生效，无需让用户手动强刷。
+const fileCacheControl = "no-cache"
 
 type Server struct {
 	store *storage.Store
@@ -146,15 +154,45 @@ func (s *Server) handleArtworkResource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		w.Header().Set("Content-Type", f.MimeType)
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", f.SizeBytes))
-		// Cache control for performance
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-		_, _ = w.Write(f.ContentBlob)
+		serveFile(w, r, f)
 		return
 	}
 
 	http.NotFound(w, r)
+}
+
+// serveFile 把库内 BLOB 原样回写，并用内容摘要作 ETag。
+// 摘要以实际字节算，不依赖 ingest 写入的 size_bytes，两者若因历史数据不一致也以真身长度为准。
+func serveFile(w http.ResponseWriter, r *http.Request, f *model.ArtifactFile) {
+	sum := sha256.Sum256(f.ContentBlob)
+	etag := `"` + hex.EncodeToString(sum[:16]) + `"`
+
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", fileCacheControl)
+
+	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	w.Header().Set("Content-Type", f.MimeType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(f.ContentBlob)))
+	_, _ = w.Write(f.ContentBlob)
+}
+
+// etagMatches 按 RFC 9110 的列表语义比对 If-None-Match：
+// 支持逗号分隔多值、弱校验前缀 W/ 与通配 *。
+func etagMatches(header, etag string) bool {
+	if header == "" {
+		return false
+	}
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || strings.TrimPrefix(candidate, "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
