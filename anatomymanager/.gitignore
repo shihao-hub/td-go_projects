@@ -7,3 +7,6 @@
 # Python 运行缓存
 __pycache__/
 *.pyc
+
+# winres 构建临时清单（build.py 用完即删，中断时遗留也不入库）
+/winres/.tmp-*

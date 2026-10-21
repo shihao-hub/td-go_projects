@@ -23,6 +23,15 @@
 ## 🚀 快速使用指南
 
 ### 1. 编译（dev / release 严格隔离，每条通道两个二进制）
+
+构建依赖：Go ≥ 1.23、`uv`（跑 PEP 723 构建脚本）、`go-winres`（PE 资源：VERSIONINFO + manifest + 图标）。
+
+```bash
+go install github.com/tc-hib/go-winres@latest   # 一次性，装到 %GOPATH%\bin\go-winres.exe
+```
+
+> 为什么不用 `rsrc`：`rsrc v0.10.2` 只支持 `-manifest` / `-ico`，**不读 `info.json`**，也不支持 VERSIONINFO，导致 exe 属性面板的版本/描述全空。`go-winres` 能同时生成 VERSIONINFO，并让 GUI 与 CLI 两个产物拥有各自的 FileDescription。
+
 ```bash
 cd D:\Users\language_projects\go_projects\anatomymanager
 uv run scripts/build.py            # 开发构建 → anatomymanager-gui-dev.exe + anatomymanager-cli-dev.exe
@@ -34,6 +43,7 @@ uv run scripts/build.py --release  # 发布构建 → anatomymanager-gui.exe + a
 - dev / release 的数据目录与单实例互斥 ID 相互隔离：`%APPDATA%\language_projects\anatomymanager\{dev,prod}`；
 - 开机自启仅 release 版可注册，dev 版菜单项置灰禁用。
 - 图标按通道区分：dev 版用 Go 地鼠图标，release 版用专属精密机械图标（exe 文件图标与窗口/托盘图标一致）。
+- **PE 版本资源**（右键属性 → 详细信息）：`winres/{gui,cli}.json` 模板 + `go-winres` 生成 `rsrc_windows_amd64.syso`，写入文件版本 / 产品版本 / 文件说明 / 公司 / 版权 / 原始文件名。GUI 与 CLI 落在同一个 Go 包（一个包只能链接一份 syso），所以构建脚本在**每个产物 go build 之前重新生成一次**，才能让两者拥有不同的 FileDescription。
 - 窗口几何（尺寸 / 位置 / 是否最大化）自动记忆：变更后防抖写入 `%APPDATA%\language_projects\anatomymanager\<dev|prod>\window.json`，下次拉起或从托盘重建窗口时原样恢复；外接屏被拔掉导致旧坐标不可见时自动回落到主屏居中。
 
 #### 双通道产物（为何一条通道不能只出一个 exe）

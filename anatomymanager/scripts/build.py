@@ -41,13 +41,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TAG_PREFIX = "anatomymanager/"
-RSRC_EXE = Path(r"C:\Users\29580\go\bin\rsrc.exe")
+
+# PE 资源工具：go-winres（rsrc 不支持 VERSIONINFO，导致 exe 属性面板版本全空）。
+# 可通过环境变量 GO_WINRES 覆盖路径。
+WINRES_EXE = Path(os.environ.get("GO_WINRES") or r"C:\Users\29580\go\bin\go-winres.exe")
+WINRES_DIR = PROJECT_ROOT / "winres"
 
 VERSION_FILE = PROJECT_ROOT / "info.json"
 MANIFEST = PROJECT_ROOT / "wails.exe.manifest"
@@ -75,6 +80,7 @@ GENERATED_SUFFIXES = (
     "/anatomymanager.exe",
     "/anatomymanager-dev.exe",
     "/cmd/anatomymanager/rsrc_windows_amd64.syso",
+    "/winres/.tmp-winres.json",
     "/icon.ico",
     "/icon.png",
 )
@@ -141,32 +147,78 @@ def worktree_dirty() -> bool:
     return False
 
 
-def build_resources(release: bool) -> int:
-    """重绘 release 图标并编译 PE 资源段；dev 使用静态地鼠图标。"""
+def render_release_icon() -> None:
+    """重绘 release 图标（dev 用静态地鼠资产，无需重绘）。"""
     if RENDER_ICON.exists():
         r = subprocess.run(["uv", "run", str(RENDER_ICON)], cwd=str(PROJECT_ROOT))
         if r.returncode != 0:
             print("⚠️ 图标渲染脚本执行异常，跳过重绘", file=sys.stderr)
+
+
+def four_part_version(version: str) -> str:
+    """把 v1.2.1 / 1.2.1-dev 转成 VERSIONINFO 要求的 4 段数字。"""
+    core = version.lstrip("v").split("-")[0]
+    parts = (core.split(".") + ["0", "0", "0"])[:4]
+    return ".".join(parts)
+
+
+def build_resources(release: bool, gui: bool, out_exe: Path, version: str) -> int:
+    """按产物通道生成 PE 资源段（VERSIONINFO + manifest + icon）。
+
+    GUI 与 CLI 落在同一个 Go 包（cmd/anatomymanager），而一个包只能链接一份
+    rsrc_windows_amd64.syso，所以必须在每个产物 go build 之前重新生成一次，
+    这样才能让两个 exe 拥有各自的 FileDescription。
+    """
+    if not WINRES_EXE.exists():
+        print(f"❌ 缺少 go-winres: {WINRES_EXE}", file=sys.stderr)
+        print("   安装：go install github.com/tc-hib/go-winres@latest", file=sys.stderr)
+        return 4
 
     icon = ICON_RELEASE if release else ICON_DEV
     if not icon.exists():
         print(f"❌ 缺少图标文件: {icon}", file=sys.stderr)
         return 4
 
-    r = subprocess.run(
-        [
-            str(RSRC_EXE),
-            "-manifest", str(MANIFEST),
-            "-ico", str(icon),
-            "-arch", "amd64",
-            "-o", str(SYSO_OUT),
-        ],
-        cwd=str(PROJECT_ROOT),
+    template = WINRES_DIR / ("gui.json" if gui else "cli.json")
+    if not template.exists():
+        print(f"❌ 缺少资源模板: {template}", file=sys.stderr)
+        return 4
+
+    fixed_version = four_part_version(version)
+    # go-winres 把 JSON 里的资源路径当作「相对 JSON 文件目录」解析，
+    # 因此临时 JSON 必须放在 winres/ 下，路径用正斜杠相对路径（避免转义与拼错）。
+    rel_icon = Path(os.path.relpath(icon, WINRES_DIR)).as_posix()
+    rel_manifest = Path(os.path.relpath(MANIFEST, WINRES_DIR)).as_posix()
+    rendered = (
+        template.read_text(encoding="utf-8")
+        .replace("__ICON__", rel_icon)
+        .replace("__MANIFEST__", rel_manifest)
+        .replace("__FIXED_VERSION__", fixed_version)
+        .replace("__VERSION__", version.lstrip("v"))
+        .replace("__ORIGINAL_NAME__", out_exe.name)
     )
+
+    winres_json = WINRES_DIR / ".tmp-winres.json"
+    try:
+        winres_json.write_text(rendered, encoding="utf-8", newline="\n")
+        r = subprocess.run(
+            [
+                str(WINRES_EXE), "make",
+                "--in", str(winres_json),
+                "--arch", "amd64",
+                "--out", str(SYSO_OUT.parent / "rsrc"),
+            ],
+            cwd=str(PROJECT_ROOT),
+        )
+    finally:
+        winres_json.unlink(missing_ok=True)
+
     if r.returncode != 0:
-        print(f"❌ rsrc 编译 syso 失败（exit {r.returncode}）", file=sys.stderr)
+        print(f"❌ go-winres 生成 syso 失败（exit {r.returncode}）", file=sys.stderr)
         return r.returncode
-    print(f"✅ 已注入 Windows PE 资源段: {SYSO_OUT} (icon: {icon.name})")
+
+    kind = "GUI" if gui else "CLI"
+    print(f"✅ [{kind}] PE 资源已注入: VERSIONINFO={fixed_version} icon={icon.name} → {SYSO_OUT.name}")
     return 0
 
 
@@ -188,11 +240,7 @@ def main() -> int:
         print(f"❌ 拒绝发布构建：{reason}（release 需同时满足 精确 tag + 工作区干净）", file=sys.stderr)
         return 2
 
-    # 2. 图标与 PE 资源（按通道选择图标）
-    rc = build_resources(release)
-    if rc != 0:
-        return rc
-
+    # 2. 版本基线（必须在 PE 资源生成之前算好，VERSIONINFO 要用）
     base = args.version.lstrip("v") if args.version else base_version()
     if release:
         version = f"v{base}"
@@ -205,12 +253,22 @@ def main() -> int:
         f"(tag={exact_tag or '-'}, dirty={dirty})"
     )
 
+    # release 通道重绘专属图标（dev 用已入库的静态地鼠资产）
+    if release:
+        render_release_icon()
+
     # 3. 逐通道 go build（每通道两个产物：GUI 零黑框 + Console 终端友好）
     targets = (
         (EXE_GUI_RELEASE if release else EXE_GUI_DEV, True),
         (EXE_CLI_RELEASE if release else EXE_CLI_DEV, False),
     )
     for out_exe, gui in targets:
+        # 一个包只能链接一份 syso，所以每个产物构建前都重新生成带对应
+        # FileDescription 的资源段（GUI / CLI 的属性描述必须不同）。
+        rc = build_resources(release, gui, out_exe, version)
+        if rc != 0:
+            return rc
+
         flags = ["-w", "-s"]
         if gui:
             flags.append("-H windowsgui")

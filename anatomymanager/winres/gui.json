@@ -1,0 +1,34 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": "__ICON__"
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": "__MANIFEST__"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "__FIXED_VERSION__",
+          "product_version": "__FIXED_VERSION__"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "Anatomy",
+            "FileDescription": "Anatomy Manager - 精密机械图谱工作台",
+            "FileVersion": "__VERSION__",
+            "InternalName": "anatomymanager-gui",
+            "LegalCopyright": "© 2026 Anatomy",
+            "OriginalFilename": "__ORIGINAL_NAME__",
+            "ProductName": "anatomymanager",
+            "ProductVersion": "__VERSION__"
+          }
+        }
+      }
+    }
+  }
+}
