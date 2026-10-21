@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaskbarGuard - 任务栏图标守卫</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 2.6 20 5.4v6.1c0 4.6-3.2 8.5-8 9.9-4.8-1.4-8-5.3-8-9.9V5.4L12 2.6Z" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M6.6 12.6h10.8M6.6 16h7.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <div class="brand-text">
+          <h1>TaskbarGuard</h1>
+          <p>任务栏图标守卫 · 静默恢复引擎</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="channel-badge" id="channelBadge">--</span>
+        <button class="btn btn-quiet" id="refreshBtn" type="button">刷新</button>
+      </div>
+    </header>
+
+    <section class="status-strip">
+      <div class="status-item">
+        <span class="status-label">配置</span>
+        <code id="configPath">--</code>
+      </div>
+      <div class="status-item">
+        <span class="status-label">脚本</span>
+        <code id="scriptsDir">--</code>
+      </div>
+      <div class="status-item status-task">
+        <span class="status-label">登录守护</span>
+        <span class="task-state" id="taskState">--</span>
+        <button class="btn btn-quiet btn-small" id="installTaskBtn" type="button">注册计划任务</button>
+      </div>
+    </section>
+
+    <main class="workspace">
+      <div class="workspace-head">
+        <h2>已接入应用</h2>
+        <div class="bulk-actions">
+          <label class="check"><input type="checkbox" id="killCheck"> 强制关闭占用进程</label>
+          <label class="check"><input type="checkbox" id="explorerCheck"> 重启 Explorer 刷新缓存</label>
+          <button class="btn btn-primary" id="applyAllBtn" type="button">应用全部已启用</button>
+        </div>
+      </div>
+      <div class="app-grid" id="appGrid">
+        <div class="empty">正在读取脚本目录…</div>
+      </div>
+    </main>
+
+    <section class="log-panel">
+      <div class="log-head">
+        <h2>执行日志</h2>
+        <button class="btn btn-quiet btn-small" id="clearLogBtn" type="button">清空</button>
+      </div>
+      <pre class="log-body" id="logBody">等待操作…</pre>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

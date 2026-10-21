@@ -6,27 +6,54 @@ Windows 任务栏应用质感图标守卫与自动恢复引擎。
 
 ---
 
+## 双通道产物
+
+| 通道 | 产物 | 用途 |
+| :--- | :--- | :--- |
+| GUI | `taskbarguard-gui.exe` / `taskbarguard-gui-dev.exe` | 双击零黑框，托盘常驻 + 桌面工作台；**不接受任何子命令** |
+| Console | `taskbarguard-cli.exe` / `taskbarguard-cli-dev.exe` | 终端 / 脚本 / Agent / 计划任务专用，shell 正常等待，管道可用 |
+
+> 终端里请始终使用 `-cli` 产物。GUI 产物是 `windowsgui` 子系统，PowerShell 不会等待它，`--json` 与重定向都不会有输出。
+
+---
+
 ## 项目结构
 
 ```text
 go_projects/taskbarguard/
-├── go.mod                      # Go 模块文件 (go 1.25)
-├── main.go                     # Go CLI 调度引擎
-├── README.md                   # 项目总览
-├── TASK_SCHEDULER.md           # Windows 计划任务完整管理手册 + 当前活跃任务清单
-└── scripts/                    # 应用图标脚本资产库
-    ├── README.md               # 脚本库全量款式、生成工序揭秘与手动运行速查手册
-    ├── deepseek_harness/       # DeepSeek Harness 模块（款式 8 环形底光通透款已设为首选 ⭐）
-    ├── idea/                   # IntelliJ IDEA 模块（经典微光彩极款 ⭐ / 极客银白 / 冰蓝科技）
-    ├── vscode/                 # VS Code 模块（科技蓝微光 / 极客银白）
-    └── wt/                     # Windows Terminal 模块（环形底光通透款 ⭐ / 钛金极客白 / 科技蓝）
+├── go.mod
+├── cmd/taskbarguard/
+│   ├── main.go                 # GUI 入口（!cli）
+│   └── cli.go                  # Console 入口（cli）
+├── internal/
+│   ├── core/                   # service：发现 / 补丁 / 回退 / 配置 / 计划任务
+│   ├── api/                    # GUI 与 cli serve 共用的 HTTP Handler
+│   ├── web/                    # go:embed 原生 WebUI
+│   ├── app/                    # Wails 壳、托盘、窗口几何、日志、自启
+│   └── buildinfo/              # 版本与 dev/prod 通道
+├── scripts/                    # 图标补丁资产库 + build.py / render_icon.py
+├── winres/                     # PE VERSIONINFO 模板
+├── info.json / wails.exe.manifest
+└── TASK_SCHEDULER.md
 ```
 
 ---
 
-## 配置持久化
+## 配置与数据目录
 
-CLI 默认在当前工作目录读写 `config.json`（该路径相对工作目录解析，请在项目根目录执行命令）。仓库内的 `config.json` 已纳入版本管理，作为偏好快照随仓库分发；当前生效偏好：
+配置与运行时数据统一放在：
+
+```text
+%APPDATA%\language_projects\taskbarguard\<dev|prod>\config.json
+```
+
+- dev 产物写 `dev`，release 产物写 `prod`，互不覆盖；
+- GUI 与 CLI 共用同一通道配置；
+- 首次运行会把 exe 同级（或当前工作目录）的历史 `config.json` 复制到新目录，旧文件保留；
+- `scripts/` 默认按 exe 同级目录解析（仓库内开发时即项目根），可用 `--scripts-dir` 覆盖；
+- `--config` / `--file` 仍可显式指定配置路径。
+
+仓库根目录的 `config.json` 作为默认偏好快照随仓库分发，当前内容：
 
 ```json
 {
@@ -39,94 +66,114 @@ CLI 默认在当前工作目录读写 `config.json`（该路径相对工作目�
 }
 ```
 
-字段说明：`enabled` 控制 `apply` 是否批量执行；`style` 为脚本支持的款式名；`custom_icon` 为自定义 ICO 路径，设置它会替代 `style`。仅当该文件缺失时（如在仓库外首次运行）才会按上表自动生成。
-
-```powershell
-# 查看当前配置
-go run . config
-# 修改预设款式（选项可以写在 APP 前后）
-go run . set vscode --style silver
-# 指定自定义 ICO
-go run . set deepseek_harness --custom-icon scripts/deepseek_harness/custom_icons/custom.ico
-# 一键应用指定应用，或应用所有 enabled 应用（--kill 强制关闭占用进程）
-go run . apply vscode
-go run . apply --kill
-# run 未指定 --style / --custom-icon 时自动回退配置
-go run . run vscode
-```
-
-配置文件可通过 `--config PATH`（`config` 命令使用 `--file PATH`）切换。
+字段说明：`enabled` 控制 `apply` 是否批量执行；`style` 为脚本支持的款式名；`custom_icon` 为自定义 ICO 路径，设置它会替代 `style`。
 
 ---
 
-## Go CLI 调度器
+## 桌面工作台
 
-在项目根目录执行：
+```powershell
+# 打开窗口（默认动态端口）
+.\taskbarguard-gui-dev.exe
+
+# 静默托盘（开机自启用）
+.\taskbarguard-gui-dev.exe --hidden
+
+# 不装 GUI 也能用浏览器打开同一套界面
+.\taskbarguard-cli-dev.exe serve --open
+```
+
+工作台能力：
+
+- 应用卡片列表，展示脚本路径、预设款式与启用状态；
+- 切换款式 / 启用开关，即时写入配置；
+- 单应用「应用」「恢复官方」；
+- 批量应用全部已启用应用，可勾选强制关进程与重启 Explorer；
+- 注册登录守护计划任务；
+- 底部执行日志（uv 脚本输出已按 UTF-8 捕获）。
+
+窗口尺寸、位置与最大化状态记录在数据目录的 `window.json`，关闭窗口后进程留在托盘，再次打开会恢复上次几何。
+
+---
+
+## 命令行
 
 ```powershell
 # 列出可调度的应用与款式
-go run . list
+.\taskbarguard-cli-dev.exe list
 
 # 输出机器可读结果
-go run . list --json
+.\taskbarguard-cli-dev.exe list --json
 
-# 输出完整 CLI 契约，或指定子命令的契约
-go run . schema
-go run . list --schema
-go run . run --schema
+# 输出 CLI 契约
+.\taskbarguard-cli-dev.exe schema
+.\taskbarguard-cli-dev.exe run --schema
 
-# 调度 VS Code 补丁脚本
-go run . run --style blue vscode
+# 调度补丁
+.\taskbarguard-cli-dev.exe run --style blue vscode
+.\taskbarguard-cli-dev.exe run --style 8_underlit_chrome deepseek_harness
+.\taskbarguard-cli-dev.exe run --kill --style pure_dark wt
 
-# 调度 DeepSeek Harness 的自定义图标款式
-go run . run --style 8_underlit_chrome deepseek_harness
+# 恢复官方图标
+.\taskbarguard-cli-dev.exe revert vscode
 
-# 调度 Windows Terminal (别名 wt / terminal；--kill 强制关闭占用进程)
-go run . run --kill --style pure_dark wt
-go run . run --style dark_blue wt
+# 配置
+.\taskbarguard-cli-dev.exe config
+.\taskbarguard-cli-dev.exe set vscode --style silver
+.\taskbarguard-cli-dev.exe set deepseek_harness --custom-icon scripts/deepseek_harness/custom_icons/8_underlit_chrome.ico
+
+# 按配置批量应用（--kill 强制关闭占用进程）
+.\taskbarguard-cli-dev.exe apply vscode
+.\taskbarguard-cli-dev.exe apply --kill
+
+# 内嵌 WebUI
+.\taskbarguard-cli-dev.exe serve --port 0 --open
+
+# 注册登录守护计划任务（指向同目录的 taskbarguard-cli）
+.\taskbarguard-cli-dev.exe install-task
 ```
 
-`run` 只负责发现脚本、校验参数并调度 `uv run`；不会在 Go 进程内执行 Python 逻辑。`install-task` 仅在 Windows 下注册登录触发的计划任务（执行 `apply`），实际脚本仍由守卫命令调用；开发版 exe 注册时会给出警告，正式启用请使用 release 版。
+`run` 只负责发现脚本、校验参数并调度 `uv run`；不会在 Go 进程内执行 Python 逻辑。
+
+---
 
 ## 应用自动更新后的恢复
 
-VS Code、DeepSeek Harness 等应用后台静默更新后会覆盖 PE 图标资源，导致任务栏视觉回退。确认更新完成后，在项目根目录执行：
+VS Code、DeepSeek Harness 等应用后台静默更新后会覆盖 PE 图标资源。确认更新完成后执行：
 
 ```powershell
 # 推荐：强制关闭占用进程并批量恢复所有已启用应用
-.\taskbarguard-dev.exe apply --kill
+.\taskbarguard-cli-dev.exe apply --kill
 
-# 或先手动完全退出目标应用，再执行
-.\taskbarguard-dev.exe apply
+# 或先手动完全退出目标应用
+.\taskbarguard-cli-dev.exe apply
 ```
 
-**Windows Terminal 独立版（wt）是另一类情况**：免安装版不带自动更新器，不会自己变新（Store 版才会，但那是被拒绝的影子入口）。升级请用幂等命令 —— 已是最新则直接退出 0，失败自动回滚且旧版始终可用：
+**Windows Terminal 独立版（wt）**：免安装版不带自动更新器。升级请用幂等命令 —— 已是最新则退出 0，失败自动回滚：
 
 ```powershell
 uv run scripts\wt\patch_wt_icon.py --update
 ```
 
-注意：`--auto-setup` 只在安装目录为空时联网部署，**在已装机上不会升级**，仅重放定制（易误用成“更新命令”）。
+注意：`--auto-setup` 只在安装目录为空时联网部署，**在已装机上不会升级**。
 
-注意：
+---
 
-- 必须在 `go_projects\taskbarguard` 目录下执行（`config.json` 与 `scripts\` 均按当前工作目录解析）；
-- `idea` 当前在配置中禁用，`apply` 会自动跳过；需要时用 `go run . set idea --style underlit_chrome` 重新启用；
-- 也可以直接用 Go 运行：`go run . apply --kill`。
-
-## 双轨构建
-
-`build.py` 使用 Go 标准构建流程，并注入 `main.version` 与 `main.commitHash`：
+## 构建
 
 ```powershell
-# dirty / 开发分支也允许，输出 taskbarguard-dev.exe
-python build.py --dev
+# dev：taskbarguard-gui-dev.exe + taskbarguard-cli-dev.exe
+uv run scripts/build.py
 
-# 仅允许干净工作区且 HEAD 精确对齐 tag，输出 taskbarguard.exe
-python build.py --release
+# release：taskbarguard-gui.exe + taskbarguard-cli.exe
+# 需 HEAD 精确命中 taskbarguard/v* tag 且工作区干净，否则退出码 2
+git tag taskbarguard/v1.0.0
+uv run scripts/build.py --release
 ```
 
-不带参数时依次尝试构建开发版与 Release 版；Release 条件不满足会明确失败。开发版版本号带 `-dev` 或 `-dirty` 后缀，正式版使用当前 tag（例如 `v1.0.0` 注入为 `1.0.0`）。
+- 版本注入 `taskbarguard/internal/buildinfo.Version`，通道注入 `BuildMode`；
+- release 使用 `scripts/render_icon.py` 生成的盾牌图标，dev 使用 Go 地鼠；
+- PE 资源由 `go-winres` 注入（VERSIONINFO + manifest + icon），GUI 与 CLI 的 FileDescription 各自独立。
 
 ---
 
@@ -136,37 +183,21 @@ python build.py --release
 
 ### DeepSeek Harness
 ```powershell
-# 【款式 8 · 当前首选】应用环形底光立体款（上下通透）
 uv run scripts/deepseek_harness/patch_deepseek_harness_icon.py --custom-icon scripts/deepseek_harness/custom_icons/8_underlit_chrome.ico --kill
-
-# 恢复官方默认
 uv run scripts/deepseek_harness/patch_deepseek_harness_icon.py --restore
 ```
 
 ### IntelliJ IDEA
 ```powershell
-# 【强烈推荐 🏆】应用环形底光通透立雕款（与 DeepSeek 8号同源底光技术，体量饱满，对齐 Zed）
 uv run scripts/idea/patch_idea_icon.py --style underlit_chrome --kill
-
-# 【极简立雕】应用纯粹微光立体徽标款
 uv run scripts/idea/patch_idea_icon.py --style pure_sculpted --kill
-
-# 【高光光刃】应用钛金高对比光刃款
-uv run scripts/idea/patch_idea_icon.py --style titanium_prism --kill
-
-# 恢复官方默认
 uv run scripts/idea/patch_idea_icon.py --restore
 ```
 
 ### VS Code
 ```powershell
-# 切换为 科技蓝微光款（推荐）
 uv run scripts/vscode/patch_vscode_icon.py --style blue --kill
-
-# 切换为 极客银白款
 uv run scripts/vscode/patch_vscode_icon.py --style silver --kill
-
-# 恢复官方默认
 uv run scripts/vscode/patch_vscode_icon.py --restore
 ```
 
