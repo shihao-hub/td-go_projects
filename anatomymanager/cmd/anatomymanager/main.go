@@ -16,8 +16,13 @@ import (
 )
 
 func main() {
-	// 如果双击直接启动（无子命令传参），默认启动 WebUI 与桌面托盘外壳
+	// 如果双击直接启动（无子命令传参），默认启动 WebUI 与桌面托盘外壳；
+	// console 通道产物（anatomymanager-cli）无参数时只打印用法。
 	if len(os.Args) < 2 {
+		if consoleBuild {
+			printUsage()
+			return
+		}
 		if err := app.LaunchGUI("", 0, false); err != nil {
 			handleServe([]string{"--open"})
 		}
@@ -26,6 +31,10 @@ func main() {
 
 	// 如果开机自启或后台静默启动（--hidden 参数），不弹窗仅常驻托盘
 	if os.Args[1] == "--hidden" {
+		if consoleBuild {
+			handleServe(nil)
+			return
+		}
 		if err := app.LaunchGUI("", 0, true); err != nil {
 			handleServe(nil)
 		}
@@ -62,11 +71,17 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`Anatomy Manager - 机械精绘与交互图谱管理器
+	prog := strings.TrimSuffix(filepath.Base(os.Args[0]), ".exe")
+	fmt.Printf(`Anatomy Manager - 机械精绘与交互图谱管理器
 
 用法:
-  anatomymanager [command] [flags]
-  (直接双击或不带参数运行：启动桌面工作台与托盘；带 --hidden 参数：静默常驻托盘)
+  %[1]s [command] [flags]
+
+通道说明:
+  anatomymanager.exe      GUI 通道 (windowsgui 子系统): 双击或不带参数 = 启动桌面工作台与托盘;
+                          带 --hidden = 静默常驻托盘
+  anatomymanager-cli.exe  Console 通道: 终端 / 脚本 / Agent 首选, shell 正常等待,
+                          管道与重定向可用; 不带参数 = 打印本用法
 
 命令:
   serve      启动内置 WebUI 与 HTTP 渲染服务 (默认自动探测可用端口, 支持 --port / --open)
@@ -77,7 +92,7 @@ func printUsage() {
   export     将数据库中的指定作品导出为独立的本地目录
   version    打印版本信息
 
-使用 'anatomymanager <command> --help' 获取更多选项。`)
+使用 '%[1]s <command> --help' 获取更多选项。`, prog)
 }
 
 // resolveDBPath 未显式指定 --db 时落到按构建通道隔离的规范数据目录。

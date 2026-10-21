@@ -4,18 +4,26 @@
 # ///
 """Anatomy Manager 单文件二进制构建流水线。
 
-产物规则（严格隔离）：
-  - dev（默认）：anatomymanager-dev.exe，版本 vX.Y.Z-dev（脏工作区再加 -dirty）
-  - release：anatomymanager.exe，版本 vX.Y.Z
+产物规则（严格隔离，每条通道出两个二进制）：
+  - dev（默认）：anatomymanager-dev.exe（GUI 通道）+ anatomymanager-cli-dev.exe（Console 通道）
+  - release：anatomymanager.exe（GUI 通道）+ anatomymanager-cli.exe（Console 通道）
   只有 HEAD 精确命中 anatomymanager/v* tag 且工作区干净时才允许 release；
   dev 与 release 产物名不同，互不覆盖。
+
+双通道设计（为何不能只出一个）：
+  - GUI 通道用 -H windowsgui 构建，双击零黑框，但父 shell（PowerShell / cmd）
+    对 GUI 子系统进程不等待，prompt 会先于程序输出渲染，终端里跑 CLI 必然出现
+    「输出黏在 prompt 行 + 末尾光标悬空」；
+  - Console 通道为 console 子系统，shell 正常等待，prompt / 光标 / 管道 / 重定向全合规，
+    终端、脚本与 Agent 一律用它。
 
 构建内容：
   - 图标按通道区分：release 用专属精密机械图标，dev 用 Go 地鼠图标
     （exe 文件图标与窗口/托盘图标保持一致）
   - 自动渲染/更新 Windows 多尺寸专属图标
   - 调用 rsrc 将 PE Manifest 与 Icon 资源编译注入 cmd/anatomymanager/*.syso
-  - 编译单二进制：静态链接、去符号、-H windowsgui 零黑框
+  - GUI 通道：静态链接、去符号、-H windowsgui 零黑框
+  - Console 通道：静态链接、去符号、console 子系统（-tags cli）
 
 用法：
   uv run scripts/build.py              # 开发构建 (dev)
@@ -42,12 +50,16 @@ ICON_DEV = PROJECT_ROOT / "internal" / "app" / "icon_dev.ico"
 SYSO_OUT = PROJECT_ROOT / "cmd" / "anatomymanager" / "rsrc_windows_amd64.syso"
 EXE_RELEASE = PROJECT_ROOT / "anatomymanager.exe"
 EXE_DEV = PROJECT_ROOT / "anatomymanager-dev.exe"
+EXE_CLI_RELEASE = PROJECT_ROOT / "anatomymanager-cli.exe"
+EXE_CLI_DEV = PROJECT_ROOT / "anatomymanager-cli-dev.exe"
 RENDER_ICON = PROJECT_ROOT / "scripts" / "render_icon.py"
 
 # 构建自身生成的未跟踪文件：不计入「工作区不干净」
 GENERATED_SUFFIXES = (
     "/anatomymanager.exe",
     "/anatomymanager-dev.exe",
+    "/anatomymanager-cli.exe",
+    "/anatomymanager-cli-dev.exe",
     "/cmd/anatomymanager/rsrc_windows_amd64.syso",
     "/icon.ico",
     "/icon.png",
@@ -147,7 +159,7 @@ def build_resources(release: bool) -> int:
 def main() -> int:
     setup_console()
 
-    parser = argparse.ArgumentParser(description="构建 anatomymanager 单二进制（dev / release 严格隔离）")
+    parser = argparse.ArgumentParser(description="构建 anatomymanager 双通道二进制（dev / release 严格隔离）")
     parser.add_argument("--release", action="store_true", help="声明发布构建；tag 或工作区条件不满足时直接报错")
     parser.add_argument("--version", default="", help="覆盖版本基线（不改变 dev/release 判定）")
     args = parser.parse_args()
@@ -179,32 +191,46 @@ def main() -> int:
         f"(tag={exact_tag or '-'}, dirty={dirty})"
     )
 
-    # 3. 执行 go build
-    ldflags = (
-        f"-w -s -H windowsgui "
-        f"-X anatomymanager/internal/app.Version={version} "
-        f"-X anatomymanager/internal/app.BuildMode={build_mode}"
+    # 3. 逐通道 go build（每通道两个产物：GUI 零黑框 + Console 终端友好）
+    targets = (
+        (EXE_RELEASE if release else EXE_DEV, True),
+        (EXE_CLI_RELEASE if release else EXE_CLI_DEV, False),
     )
-    out_exe = EXE_RELEASE if release else EXE_DEV
-    go_cmd = ["go", "build", "-trimpath"]
-    if not release:
-        go_cmd += ["-tags", "dev"]
-    go_cmd += [f"-ldflags={ldflags}", "-o", str(out_exe), "./cmd/anatomymanager"]
-    r = subprocess.run(go_cmd, cwd=str(PROJECT_ROOT))
-    if r.returncode != 0:
-        print(f"❌ go build 失败（exit {r.returncode}）", file=sys.stderr)
-        return r.returncode
+    for out_exe, gui in targets:
+        flags = ["-w", "-s"]
+        if gui:
+            flags.append("-H windowsgui")
+        flags.append(f"-X anatomymanager/internal/app.Version={version}")
+        flags.append(f"-X anatomymanager/internal/app.BuildMode={build_mode}")
+
+        tags = [] if release else ["dev"]
+        if not gui:
+            tags.append("cli")
+
+        go_cmd = ["go", "build", "-trimpath"]
+        if tags:
+            go_cmd += ["-tags", ",".join(tags)]
+        go_cmd += [f"-ldflags={' '.join(flags)}", "-o", str(out_exe), "./cmd/anatomymanager"]
+
+        channel = "GUI" if gui else "Console"
+        print(f"🔨 [{channel}] {out_exe.name}")
+        r = subprocess.run(go_cmd, cwd=str(PROJECT_ROOT))
+        if r.returncode != 0:
+            print(f"❌ go build 失败（exit {r.returncode}）: {out_exe.name}", file=sys.stderr)
+            return r.returncode
 
     # 4. 产物名守卫：dev 必须带 -dev 后缀，release 不得带
-    if release and "dev" in out_exe.stem:
-        print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
-        return 3
-    if not release and not out_exe.stem.endswith("-dev"):
-        print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
-        return 3
+    for out_exe, _gui in targets:
+        if release and "dev" in out_exe.stem:
+            print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
+            return 3
+        if not release and not out_exe.stem.endswith("-dev"):
+            print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
+            return 3
 
-    size_mb = out_exe.stat().st_size / (1024 * 1024)
-    print(f"🎉 构建完成: {out_exe} ({size_mb:.2f} MB)")
+    for out_exe, gui in targets:
+        size_mb = out_exe.stat().st_size / (1024 * 1024)
+        print(f"🎉 构建完成 [{'GUI' if gui else 'Console'}]: {out_exe.name} ({size_mb:.2f} MB)")
     return 0
 
 
