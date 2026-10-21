@@ -1,12 +1,10 @@
-// Package buildinfo 是构建指纹（Version 与 BuildID）的单点来源。
+// Package buildinfo 是构建指纹（Version / BuildID / BuildMode）的单点来源。
 // 构建脚本经 -ldflags -X 注入；未注入时回退到 Go 编译期嵌入的 VCS 信息，
 // 保证 `go run` / 测试构建也能得到稳定的开发指纹。
 package buildinfo
 
 import (
-	"regexp"
 	"runtime/debug"
-	"strings"
 )
 
 var (
@@ -14,12 +12,12 @@ var (
 	Version = ""
 	// BuildID 是握手与升级检测凭据（describe [+ .时间戳]），由构建脚本注入。
 	BuildID = ""
+	// BuildMode 是通道唯一真源："dev" 或 "release"，由构建脚本注入。
+	// 禁止根据 Version 文本猜测通道，否则会造出「名义 dev、实际 release」的混合体。
+	BuildMode = ""
 )
 
 func init() {
-	if Version != "" && BuildID != "" {
-		return
-	}
 	v := vcsVersion()
 	if Version == "" {
 		Version = v
@@ -27,7 +25,16 @@ func init() {
 	if BuildID == "" {
 		BuildID = v
 	}
+	if BuildMode == "" {
+		BuildMode = "dev"
+	}
 }
+
+// IsRelease 报告当前二进制是否为正式发行通道。
+func IsRelease() bool { return BuildMode == "release" }
+
+// IsProduction 是 IsRelease 的兼容别名：daemon 客户端据此决定是否自动拉起。
+func IsProduction() bool { return IsRelease() }
 
 // vcsVersion 从编译期嵌入的 VCS 信息生成 "短hash[-dirty]"，取不到返回 "dev"。
 func vcsVersion() string {
@@ -56,33 +63,4 @@ func vcsVersion() string {
 		return short + "-dirty"
 	}
 	return short
-}
-
-// productionRe 是干净 tag 形态：`vX.Y.Z`，允许 monorepo 项目前缀 `agyquota/`。
-var productionRe = regexp.MustCompile(`^(?:agyquota/)?v\d+\.\d+\.\d+$`)
-
-// IsProduction 判断当前构建是否为生产构建：
-// 只解析 BuildID——仅当末尾 "." 分隔段为 ≥9 位纯十进制数（Unix 秒时间戳）
-// 时才剥离，剩余部分匹配干净 tag 形态即为生产；Version 仅供展示。
-func IsProduction() bool {
-	id := BuildID
-	if id == "" {
-		return false
-	}
-	if i := strings.LastIndex(id, "."); i >= 0 {
-		tail := id[i+1:]
-		if len(tail) >= 9 && isDigits(tail) {
-			id = id[:i]
-		}
-	}
-	return productionRe.MatchString(id)
-}
-
-func isDigits(s string) bool {
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }

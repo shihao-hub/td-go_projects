@@ -1,0 +1,15 @@
+# 构建生成物（由 scripts/build.py 与 scripts/render_icon.py 自动重建，不入库）
+# 仅限项目根目录；internal/app/icon.ico 是 go:embed 必需资产，必须入库。
+/icon.ico
+/icon.png
+/cmd/agyquota/rsrc_windows_amd64.syso
+
+# 双通道产物（父仓 .gitignore 已忽略 *.exe，这里显式声明一次）
+/agyquota-gui.exe
+/agyquota-gui-dev.exe
+/agyquota-cli.exe
+/agyquota-cli-dev.exe
+
+# Python 运行缓存
+__pycache__/
+*.pyc

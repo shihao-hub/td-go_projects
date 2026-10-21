@@ -29,7 +29,7 @@ const (
 
 	// CacheFileName Access Token 本地缓存，预留 2 分钟安全冗余（缓存约 58 分钟），杜绝频繁向 Google 刷新
 	// 注意：该文件只允许落在本项目自有数据目录（见 appdata.Dir），禁止写入 Zed 凭据等外部程序目录
-	CacheFileName = ".quota_token_cache.json"
+	CacheFileName = appdata.TokenCacheFileName
 )
 
 // TokenFile 是 Zed ACP 凭据文件的落盘结构
