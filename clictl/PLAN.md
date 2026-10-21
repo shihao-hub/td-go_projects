@@ -227,6 +227,7 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - [x] 21. `cmd/clictl`：`main.go`（!cli，GUI）与 `cli.go`（cli，console）双入口；CLI 新增 `serve`/`where`
 - [x] 22. 构建：双产物 + go-winres VERSIONINFO/manifest/图标 + release 门禁；`render_icon.py` 专属图标
 - [x] 23. 文档：README / CHANGELOG / 父仓使用指南 / 双通道计划
+- [x] 24. 命令行工具终端启动：`runner.IsConsoleExe`（PE Subsystem）、`StartConsole`（CREATE_NEW_CONSOLE + Wait 闭环）、API `mode`、CLI `start --console`、WebUI 类型徽标与主按钮切换
 
 验收标准（已实测）：
 

@@ -26,6 +26,7 @@ type InfoResult struct {
 	FinishedCount   int64          `json:"finished_count"`
 	TotalDurationMs int64          `json:"total_duration_ms"`
 	Running         RunningState   `json:"running"`
+	Console         bool           `json:"console"` // PE 子系统：true = 命令行工具
 }
 
 // RunningState 后台运行状态
@@ -115,6 +116,7 @@ func (s *Service) Info(name string) (*InfoResult, error) {
 		FinishedCount:   finished,
 		TotalDurationMs: totalMs,
 		Running:         RunningState{Alive: len(alive) > 0, PIDs: runningPIDs},
+		Console:         runner.IsConsoleExe(tool.Path),
 	}, nil
 }
 

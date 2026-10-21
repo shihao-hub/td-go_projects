@@ -13,6 +13,13 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// 启动模式：detached = 无控制台后台分离（GUI/托盘/服务类）；
+// console = 独立控制台窗口（命令行工具，用户可见、可交互）。
+const (
+	ModeDetached = "detached"
+	ModeConsole  = "console"
+)
+
 // StartResult start 命令的 JSON 输出形状
 type StartResult struct {
 	Name           string `json:"name"`
@@ -20,6 +27,7 @@ type StartResult struct {
 	PID            int    `json:"pid"`
 	StartedAt      string `json:"started_at"`
 	AlreadyRunning bool   `json:"already_running"` // 启动前已有活实例（仅提示，不拦截）
+	Mode           string `json:"mode"`            // detached / console
 }
 
 // Start 后台分离启动：DETACHED_PROCESS（无控制台，GUI/托盘不闪黑框）+
@@ -66,6 +74,64 @@ func Start(st *store.Store, name string, args []string) (StartResult, *RunError)
 		PID:            pid,
 		StartedAt:      start.UTC().Format(store.TimeFmt),
 		AlreadyRunning: alreadyRunning,
+		Mode:           ModeDetached,
+	}, nil
+}
+
+// StartConsole 为命令行工具开独立控制台窗口启动（CREATE_NEW_CONSOLE），
+// 后台等待退出并闭环记录。
+//
+// 与 Start 的差异只在 CreationFlags：console 程序在 DETACHED 下没有控制台，
+// 输出与交互全部不可见；CREATE_NEW_CONSOLE 让系统分配新窗口，进程本身仍是
+// 分离的（不挂 clictl 的生命周期）。窗口关闭即进程结束，Wait 返回后回写
+// duration/exit_code；pid 为真实 exe，探活与 stop 树杀语义与后台启动一致。
+func StartConsole(st *store.Store, name string, args []string) (StartResult, *RunError) {
+	tool, rerr := lookup(st, name)
+	if rerr != nil {
+		return StartResult{}, rerr
+	}
+
+	unfinished, err := st.UnfinishedStarts(tool.ID)
+	if err != nil {
+		return StartResult{}, &RunError{Code: "db_error", Message: "查询启动记录失败: " + err.Error(), ExitCode: 1}
+	}
+	alreadyRunning := len(FilterAlive(unfinished, tool.Path)) > 0
+
+	start := time.Now()
+	launchID, err := st.InsertLaunch(tool.ID, start)
+	if err != nil {
+		return StartResult{}, &RunError{Code: "db_error", Message: "写入启动记录失败: " + err.Error(), ExitCode: 1}
+	}
+
+	cmd := exec.Command(tool.Path, args...)
+	cmd.SysProcAttr = &windows.SysProcAttr{
+		CreationFlags: windows.CREATE_NEW_CONSOLE,
+	}
+	if err := cmd.Start(); err != nil {
+		_ = st.FinishLaunch(launchID, time.Since(start).Milliseconds(), 127)
+		return StartResult{}, &RunError{Code: "start_failed", Message: "启动失败: " + err.Error(), ExitCode: 127}
+	}
+	pid := cmd.Process.Pid
+	if err := st.SetLaunchPID(launchID, pid); err != nil {
+		return StartResult{}, &RunError{Code: "db_error", Message: "回写 PID 失败: " + err.Error(), ExitCode: 1}
+	}
+
+	go func() {
+		_ = cmd.Wait()
+		exitCode := cmd.ProcessState.ExitCode()
+		if exitCode < 0 {
+			exitCode = 1 // 被强制结束等无法取码的情况
+		}
+		_ = st.FinishLaunch(launchID, time.Since(start).Milliseconds(), exitCode)
+	}()
+
+	return StartResult{
+		Name:           tool.Name,
+		Path:           tool.Path,
+		PID:            pid,
+		StartedAt:      start.UTC().Format(store.TimeFmt),
+		AlreadyRunning: alreadyRunning,
+		Mode:           ModeConsole,
 	}, nil
 }
 

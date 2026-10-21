@@ -10,7 +10,8 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 - **管理命令永远输出 JSON**：`{"ok":true,"data":...}` / `{"ok":false,"error":{"code":"...","message":"..."}}`
 - **MCP server（`clictl mcp`）**：标准 MCP stdio 协议通道，把注册/启动/执行暴露为带 JSON Schema 的 MCP 工具（`clictl.list` / `clictl.run` 等 10 个）；`clictl schema` 可离线导出与 `tools/list` 同源的工具定义
 - **前台透传启动（run）**：stdin/stdout/stderr/退出码全部直通子进程，不经任何 shell 包裹，管理数据不混入 stdout
-- **后台分离启动（start）**：GUI/托盘/服务类工具点火即走，DETACHED 无控制台不闪黑框，记录 PID 供探活；`stop` 全量树杀
+- **双模式启动（start）**：窗口程序默认 DETACHED 后台分离（点火即走、不闪黑框）；`--console` 为命令行工具开独立控制台窗口（可见、可交互），记录 PID 供探活；`stop` 全量树杀
+- **类型自识别**：读取 exe 的 PE 子系统，WebUI 自动区分「命令行」与「窗口程序」，主按钮对应「终端启动」/「启动」
 - **PID 探活**：OpenProcess 存在性 + 终止态 + exe 路径比对三重校验（防 PID 回收复用误判）
 - **智能提示**：`run`/`start`/`stop` 未注册名时附相似名建议；PowerShell Tab 补全子命令与工具名
 - **启动记账**：启动次数、上次启动时间、耗时、退出码、后台实例 PID
@@ -28,14 +29,14 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 
 ## run vs start
 
-> **要在终端看它输出、等它干完的用 `run`；点火就走的用 `start`。** WebUI 只提供 `start`（浏览器无法接管 TTY），需要前台透传请用 `clictl-cli run`。
+> **要在当前终端看输出、等它干完的用 `run`；点火就走的用 `start`；命令行工具要在独立窗口里跑的用 `start --console`。** WebUI 只提供 `start`（浏览器无法接管 TTY），需要前台透传/管道仍请用 `clictl-cli run`。
 
-| | `run` | `start` |
-|---|---|---|
-| 语义 | 前台透传，阻塞到子进程退出 | 后台分离（DETACHED），立即返回 |
-| IO | stdin/stdout/stderr 直通 | 全部断开（console 程序无输出能力） |
-| 退出码 | 透传子进程码 | 0 成功 / 127 未注册或失效 |
-| 记账 | started_at + duration + exit_code 闭环 | 只落 started_at + pid；`stop` 杀完闭环（exit_code=1 强杀约定值） |
+| | `run` | `start` | `start --console` |
+|---|---|---|---|
+| 语义 | 前台透传，阻塞到子进程退出 | 后台分离（DETACHED），立即返回 | 开独立控制台窗口，立即返回 |
+| IO | 当前终端 stdin/stdout/stderr 直通 | 全部断开 | 子进程独占新窗口的控制台 |
+| 退出码 | 透传子进程码 | 0 成功 / 127 未注册或失效 | 0 成功 / 127 未注册或失效 |
+| 记账 | 闭环 | 只落 started_at + pid；`stop` 闭环 | 同 start；GUI/serve 常驻时窗口关闭即闭环 |
 
 ## 命令（`clictl-cli`）
 
@@ -47,7 +48,7 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 | `clictl list [--status active\|invalid] [--running]` | 全部工具，launch_count 降序；`--running` 只看后台活实例 | 0 |
 | `clictl info <name>` | 详情 + 最近 10 条启动 + 累计耗时 + 后台运行状态 | 0 / 1 |
 | `clictl run <name> [args...]` | 前台透传启动；未注册时 stderr 错误附相似名 `suggestions` | =子进程码 / 127 |
-| `clictl start <name> [args...]` | 后台分离启动，输出 pid；已有活实例时附 `already_running` | 0 / 127 |
+| `clictl start [--console] <name> [args...]` | 启动并输出 pid；`--console` 开独立控制台窗口，缺省 DETACHED 后台分离；已有活实例时附 `already_running` | 0 / 127 |
 | `clictl stop <name>` | 全量终止该工具后台活实例（taskkill /T /F 树杀）并闭环记录 | 0 / 1 |
 | `clictl cp <name> <dest_dir> [--force]` | 复制已注册 exe 到目标目录（目录须已存在） | 0 / 1 |
 | `clictl serve [--port 0] [--open]` | 启动内置 WebUI + REST（与 GUI 同一 Handler；默认动态端口） | 阻塞 |
@@ -73,7 +74,7 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 | GET | `/api/tools/{name}` | 详情 + 最近启动 + running |
 | DELETE | `/api/tools/{name}` | 删除注册 |
 | PUT | `/api/tools/{name}/meta` | 替换 meta `{meta:{...}}` |
-| POST | `/api/tools/{name}/start` | 后台启动 `{args:[...]}` |
+| POST | `/api/tools/{name}/start` | 启动 `{args:[...],mode:"console"\|"detached"}`；mode 省略按 PE 子系统自动选择 |
 | POST | `/api/tools/{name}/stop` | 树杀全部后台实例 |
 | POST | `/api/tools/{name}/reveal` | 资源管理器定位 |
 | GET | `/api/fs?dir=` | 只读目录浏览（注册时选 exe） |

@@ -174,7 +174,7 @@ func EmitHelp() {
 			{"cmd": "list [--status active|invalid] [--running]", "desc": "全部工具，launch_count 降序；--running 只看后台活实例"},
 			{"cmd": "info <name>", "desc": "详情 + 最近 10 条启动 + 累计耗时 + 后台运行状态"},
 			{"cmd": "run <name> [args...]", "desc": "前台透传启动（要看输出、等结果的用它）；退出码=子进程码，未注册/失效=127；未注册时附相似名 suggestions"},
-			{"cmd": "start <name> [args...]", "desc": "后台分离启动（GUI/托盘/服务类），立即返回并输出 pid；未注册/失效=127"},
+			{"cmd": "start [--console] <name> [args...]", "desc": "启动并立即返回 pid；--console 为命令行工具开独立控制台窗口，缺省后台分离（GUI/托盘/服务类）；未注册/失效=127"},
 			{"cmd": "stop <name>", "desc": "终止该工具全部后台活实例（taskkill 树杀）并闭环记录"},
 			{"cmd": "cp <name> <dest_dir> [--force]", "desc": "复制已注册 exe 到目标目录；目录须已存在，目标同名文件需 --force 覆盖"},
 			{"cmd": "serve [--port 0] [--open]", "desc": "启动内置 WebUI 与 REST 服务（与 GUI 同一 Handler；默认动态端口）"},
@@ -306,11 +306,17 @@ func cmdRun(args []string) int {
 }
 
 func cmdStart(args []string) int {
+	// --console 只在前置段生效；工具名之后的同名参数属于子进程。
+	mode := ""
+	for len(args) > 0 && args[0] == "--console" {
+		mode = runner.ModeConsole
+		args = args[1:]
+	}
 	if len(args) < 1 {
-		Fail("bad_args", "用法: clictl start <name> [args...]")
+		Fail("bad_args", "用法: clictl start [--console] <name> [args...]")
 		return 1
 	}
-	res, err := mustService().Start(args[0], args[1:])
+	res, err := mustService().StartWithMode(args[0], args[1:], mode)
 	if err != nil {
 		failService(err, false)
 		return 1

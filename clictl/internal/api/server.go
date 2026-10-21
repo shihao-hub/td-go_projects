@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 
+	"clictl/internal/runner"
 	"clictl/internal/service"
 	"clictl/internal/web"
 )
@@ -204,6 +205,7 @@ func (s *Server) handleSetMeta(w http.ResponseWriter, r *http.Request) {
 
 type startRequest struct {
 	Args []string `json:"args"`
+	Mode string   `json:"mode"` // console | detached；空 = 按 PE 子系统自动选择
 }
 
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +216,13 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	res, err := s.svc.Start(r.PathValue("name"), req.Args)
+	switch req.Mode {
+	case "", runner.ModeConsole, runner.ModeDetached:
+	default:
+		writeErr(w, http.StatusBadRequest, "bad_args", "mode 仅支持 console | detached")
+		return
+	}
+	res, err := s.svc.StartWithMode(r.PathValue("name"), req.Args, req.Mode)
 	if err != nil {
 		fail(w, err)
 		return

@@ -15,6 +15,37 @@ func (s *Service) Start(name string, args []string) (runner.StartResult, error) 
 	return res, nil
 }
 
+// StartConsole 在独立控制台窗口启动（命令行工具：用户可见、可交互）。
+func (s *Service) StartConsole(name string, args []string) (runner.StartResult, error) {
+	res, err := runner.StartConsole(s.st, store.NormalizeName(name), args)
+	if err != nil {
+		return runner.StartResult{}, runErrToService(err)
+	}
+	return res, nil
+}
+
+// StartWithMode 按显式模式启动；mode 为空时按 PE 子系统自动选择
+// （console 程序走终端窗口，其余走后台分离）。
+func (s *Service) StartWithMode(name string, args []string, mode string) (runner.StartResult, error) {
+	switch mode {
+	case runner.ModeConsole:
+		return s.StartConsole(name, args)
+	case runner.ModeDetached:
+		return s.Start(name, args)
+	case "":
+		tool, err := s.PreflightRun(name)
+		if err != nil {
+			return runner.StartResult{}, err
+		}
+		if runner.IsConsoleExe(tool.Path) {
+			return s.StartConsole(name, args)
+		}
+		return s.Start(name, args)
+	default:
+		return runner.StartResult{}, &Error{Code: "bad_args", Message: "mode 仅支持 console | detached", ExitCode: 1}
+	}
+}
+
 // Stop 终止该工具全部后台活实例（树杀）并闭环记录。
 // 部分失败（杀后复探仍存活）不算 error，由调用方按结果字段判定——CLI 层
 // 据此返回退出码 1，MCP 层据此置 isError。

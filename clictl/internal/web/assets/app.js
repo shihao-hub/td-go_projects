@@ -225,7 +225,13 @@
 
     const tool = info.tool;
     const running = info.running && info.running.alive;
+    const isConsole = !!info.console;
     el("detailName").textContent = tool.name;
+    el("detailType").textContent = isConsole ? "命令行" : "窗口程序";
+    el("detailType").className = `type-badge ${isConsole ? "console" : "gui"}`;
+    el("startBtn").textContent = isConsole ? "终端启动" : "启动";
+    el("startBtn").title = isConsole ? "在独立控制台窗口启动" : "后台分离启动";
+    el("startAltBtn").hidden = !isConsole;
     el("detailDesc").textContent = tool.description || "未填写描述";
     el("detailStatus").textContent = tool.status === "active" ? (running ? "运行中" : "就绪") : "文件失效";
     const dot = el("detailStatusDot");
@@ -261,22 +267,30 @@
 
   // ---------- 动作 ----------
 
-  async function startTool(args, button) {
+  async function startTool(args, button, mode) {
     if (!state.current) return;
     const name = state.current.tool.name;
     await withBusy(button, async () => {
       try {
-        const res = await post(`/api/tools/${encodeURIComponent(name)}/start`, { args: args || [] });
+        const payload = { args: args || [] };
+        if (mode) payload.mode = mode;
+        const res = await post(`/api/tools/${encodeURIComponent(name)}/start`, payload);
+        const where = res.mode === "console" ? "终端窗口" : "后台";
         if (res.already_running) {
-          toast(`${name} 已有实例在运行（PID ${res.pid}）`);
+          toast(`${name} 已在${where}启动（PID ${res.pid}），已有实例在运行`);
         } else {
-          toast(`已启动 ${name}（PID ${res.pid}）`);
+          toast(`已在${where}启动 ${name}（PID ${res.pid}）`);
         }
         await loadTools();
       } catch (err) {
         reportError(err);
       }
     });
+  }
+
+  // 主启动模式：命令行工具开控制台窗口，窗口程序后台分离。
+  function primaryMode() {
+    return state.current && state.current.console ? "console" : "detached";
   }
 
   async function stopTool(button) {
@@ -472,9 +486,10 @@
       renderList();
     });
 
-    el("startBtn").addEventListener("click", (event) => startTool([], event.currentTarget));
+    el("startBtn").addEventListener("click", (event) => startTool([], event.currentTarget, primaryMode()));
+    el("startAltBtn").addEventListener("click", (event) => startTool([], event.currentTarget, "detached"));
     el("startArgsBtn").addEventListener("click", (event) =>
-      startTool(parseArgs(el("startArgs").value), event.currentTarget)
+      startTool(parseArgs(el("startArgs").value), event.currentTarget, primaryMode())
     );
     el("stopBtn").addEventListener("click", (event) => stopTool(event.currentTarget));
 

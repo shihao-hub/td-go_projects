@@ -11,6 +11,8 @@
 - `clictl serve [--port 0] [--open]`：CLI 通道托管与 GUI 完全相同的 WebUI + REST Handler（根路径不再是裸 API）
 - REST API：`/api/meta`、`/api/tools`、`/api/tools/{name}` 及其 `/meta`、`/start`、`/stop`、`/reveal`、`/api/fs`，包络与 CLI 一致
 - `clictl where`：自省通道、版本、库路径、工具数、两通道 GUI 运行状态与建议
+- 命令行工具终端启动：`clictl start --console` 与 WebUI「终端启动」用 `CREATE_NEW_CONSOLE` 打开独立控制台窗口，`mode` 字段区分 `console`/`detached`
+- PE 子系统自识别：`runner.IsConsoleExe` 读取 exe 头判定命令行/窗口程序，WebUI 显示类型徽标并按类型切换主按钮，mode 省略时后端自动选择
 - 窗口几何记忆：`window.json` 保存尺寸/位置/最大化（700ms 防抖 + 关闭前同步落盘 + 外接屏兜底）
 - dev / release 五维隔离：产物名、版本号、数据目录、单实例 ID（`wails-app-shihao.langproj.clictl.gui[.dev]-sim`）、图标
 - 数据目录改为 `%APPDATA%\language_projects\clictl\{dev,prod}\clictl.db`；旧库在每通道首次启动时复制一份（旧文件保留）

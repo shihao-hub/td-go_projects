@@ -194,6 +194,37 @@ func TestFSBrowseListsDirsAndExe(t *testing.T) {
 	}
 }
 
+func TestStartRejectsUnknownMode(t *testing.T) {
+	h, _ := newTestServer(t)
+	exe := fakeExe(t)
+	do(t, h, http.MethodPost, "/api/tools", map[string]any{"path": exe, "name": "demo"})
+
+	rec, env := do(t, h, http.MethodPost, "/api/tools/demo/start", map[string]any{"mode": "bogus"})
+	if rec.Code != http.StatusBadRequest || env.OK {
+		t.Fatalf("非法 mode 应 400，实际 HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	if env.Error == nil || env.Error.Code != "bad_args" {
+		t.Fatalf("错误码 = %+v, want bad_args", env.Error)
+	}
+}
+
+func TestInfoReportsConsoleFlag(t *testing.T) {
+	h, _ := newTestServer(t)
+	exe := fakeExe(t) // 内容不是合法 PE，应安全回落为窗口程序
+	do(t, h, http.MethodPost, "/api/tools", map[string]any{"path": exe, "name": "demo"})
+
+	_, env := do(t, h, http.MethodGet, "/api/tools/demo", nil)
+	var info struct {
+		Console bool `json:"console"`
+	}
+	if err := json.Unmarshal(env.Data, &info); err != nil {
+		t.Fatalf("解析 info 失败: %v", err)
+	}
+	if info.Console {
+		t.Fatal("非法 PE 应回落为非 console")
+	}
+}
+
 func TestMetaEndpoint(t *testing.T) {
 	h, _ := newTestServer(t)
 	_, env := do(t, h, http.MethodGet, "/api/meta", nil)
