@@ -228,6 +228,7 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - [x] 22. 构建：双产物 + go-winres VERSIONINFO/manifest/图标 + release 门禁；`render_icon.py` 专属图标
 - [x] 23. 文档：README / CHANGELOG / 父仓使用指南 / 双通道计划
 - [x] 24. 命令行工具终端启动：`runner.IsConsoleExe`（PE Subsystem）、`StartConsole`（CREATE_NEW_CONSOLE + Wait 闭环）、API `mode`、CLI `start --console`、WebUI 类型徽标与主按钮切换
+- [x] 25. 修复终端启动 stdio：`os/exec` 会强制 DevNull + STARTF_USESTDHANDLES，改用原生 `windows.CreateProcess`（Flags=0、InheritHandles=false），使 `isTTY=true`；taskmon TUI 实测正常
 
 验收标准（已实测）：
 

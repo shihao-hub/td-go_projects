@@ -5,8 +5,11 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"clictl/internal/store"
 
@@ -81,10 +84,14 @@ func Start(st *store.Store, name string, args []string) (StartResult, *RunError)
 // StartConsole 为命令行工具开独立控制台窗口启动（CREATE_NEW_CONSOLE），
 // 后台等待退出并闭环记录。
 //
-// 与 Start 的差异只在 CreationFlags：console 程序在 DETACHED 下没有控制台，
-// 输出与交互全部不可见；CREATE_NEW_CONSOLE 让系统分配新窗口，进程本身仍是
-// 分离的（不挂 clictl 的生命周期）。窗口关闭即进程结束，Wait 返回后回写
-// duration/exit_code；pid 为真实 exe，探活与 stop 树杀语义与后台启动一致。
+// 不能用 os/exec：它会把未设置的 stdin/stdout/stderr 替换为 os.DevNull 并
+// 设置 STARTF_USESTDHANDLES，导致新窗口里的 stdout 不是 TTY（isTTY=false），
+// 依赖终端的 TUI 会误判为非交互模式后立即退出。这里用原生 CreateProcess，
+// StartupInfo.Flags 保持 0，由系统把标准句柄初始化到新控制台。
+//
+// 进程本身仍是分离的（不挂 clictl 生命周期）；窗口关闭即进程结束，
+// WaitForSingleObject 返回后回写 duration/exit_code。pid 为真实 exe，
+// 探活与 stop 树杀语义与后台启动一致。
 func StartConsole(st *store.Store, name string, args []string) (StartResult, *RunError) {
 	tool, rerr := lookup(st, name)
 	if rerr != nil {
@@ -103,26 +110,24 @@ func StartConsole(st *store.Store, name string, args []string) (StartResult, *Ru
 		return StartResult{}, &RunError{Code: "db_error", Message: "写入启动记录失败: " + err.Error(), ExitCode: 1}
 	}
 
-	cmd := exec.Command(tool.Path, args...)
-	cmd.SysProcAttr = &windows.SysProcAttr{
-		CreationFlags: windows.CREATE_NEW_CONSOLE,
-	}
-	if err := cmd.Start(); err != nil {
+	pid, procHandle, err := spawnConsoleProcess(tool.Path, args)
+	if err != nil {
 		_ = st.FinishLaunch(launchID, time.Since(start).Milliseconds(), 127)
 		return StartResult{}, &RunError{Code: "start_failed", Message: "启动失败: " + err.Error(), ExitCode: 127}
 	}
-	pid := cmd.Process.Pid
 	if err := st.SetLaunchPID(launchID, pid); err != nil {
+		_ = windows.CloseHandle(procHandle)
 		return StartResult{}, &RunError{Code: "db_error", Message: "回写 PID 失败: " + err.Error(), ExitCode: 1}
 	}
 
 	go func() {
-		_ = cmd.Wait()
-		exitCode := cmd.ProcessState.ExitCode()
-		if exitCode < 0 {
-			exitCode = 1 // 被强制结束等无法取码的情况
+		defer windows.CloseHandle(procHandle)
+		_, _ = windows.WaitForSingleObject(procHandle, windows.INFINITE)
+		var exitCode uint32
+		if err := windows.GetExitCodeProcess(procHandle, &exitCode); err != nil {
+			exitCode = 1
 		}
-		_ = st.FinishLaunch(launchID, time.Since(start).Milliseconds(), exitCode)
+		_ = st.FinishLaunch(launchID, time.Since(start).Milliseconds(), int(exitCode))
 	}()
 
 	return StartResult{
@@ -133,6 +138,57 @@ func StartConsole(st *store.Store, name string, args []string) (StartResult, *Ru
 		AlreadyRunning: alreadyRunning,
 		Mode:           ModeConsole,
 	}, nil
+}
+
+// spawnConsoleProcess 以原生 CreateProcess 启动独立控制台进程。
+//
+// 关键点：StartupInfo.Flags = 0（不设 STARTF_USESTDHANDLES），
+// InheritHandles = false。系统会为新控制台初始化标准输入/输出句柄，
+// 子进程的 stdout.isTTY 才为 true。返回进程句柄由调用方负责等待与关闭；
+// thread 句柄在此立即关闭。
+func spawnConsoleProcess(exePath string, args []string) (int, windows.Handle, error) {
+	appName, err := windows.UTF16PtrFromString(exePath)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, syscall.EscapeArg(exePath))
+	for _, arg := range args {
+		parts = append(parts, syscall.EscapeArg(arg))
+	}
+	cmdLine, err := windows.UTF16PtrFromString(strings.Join(parts, " "))
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// 工作目录设为 exe 所在目录，贴近资源管理器双击的行为。
+	var currentDir *uint16
+	if dir := filepath.Dir(exePath); dir != "" {
+		if p, err := windows.UTF16PtrFromString(dir); err == nil {
+			currentDir = p
+		}
+	}
+
+	si := windows.StartupInfo{Cb: uint32(unsafe.Sizeof(windows.StartupInfo{}))}
+	var pi windows.ProcessInformation
+	if err := windows.CreateProcess(
+		appName,
+		cmdLine,
+		nil,
+		nil,
+		false,
+		windows.CREATE_NEW_CONSOLE,
+		nil,
+		currentDir,
+		&si,
+		&pi,
+	); err != nil {
+		return 0, 0, err
+	}
+
+	_ = windows.CloseHandle(pi.Thread)
+	return int(pi.ProcessId), pi.Process, nil
 }
 
 // lookup run/start/stop 共用的前置校验：查注册 + 现场校验文件有效性 + 未注册相似名建议

@@ -12,6 +12,7 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 - **前台透传启动（run）**：stdin/stdout/stderr/退出码全部直通子进程，不经任何 shell 包裹，管理数据不混入 stdout
 - **双模式启动（start）**：窗口程序默认 DETACHED 后台分离（点火即走、不闪黑框）；`--console` 为命令行工具开独立控制台窗口（可见、可交互），记录 PID 供探活；`stop` 全量树杀
 - **类型自识别**：读取 exe 的 PE 子系统，WebUI 自动区分「命令行」与「窗口程序」，主按钮对应「终端启动」/「启动」
+- **真实控制台句柄**：终端启动用原生 `CreateProcess`（不设置 `STARTF_USESTDHANDLES`），窗口内 stdin/stdout/stderr 是真正的控制台设备（`isTTY=true`），TUI 程序可正常渲染与交互
 - **PID 探活**：OpenProcess 存在性 + 终止态 + exe 路径比对三重校验（防 PID 回收复用误判）
 - **智能提示**：`run`/`start`/`stop` 未注册名时附相似名建议；PowerShell Tab 补全子命令与工具名
 - **启动记账**：启动次数、上次启动时间、耗时、退出码、后台实例 PID
