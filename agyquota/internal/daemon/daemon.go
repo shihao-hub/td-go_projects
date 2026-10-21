@@ -21,6 +21,7 @@ import (
 	"agyquota/internal/appdata"
 	"agyquota/internal/buildinfo"
 	"agyquota/internal/service"
+	"agyquota/internal/webui"
 )
 
 // Config 是 daemon 的启动配置。
@@ -69,6 +70,9 @@ func serve(ctx context.Context, cfg Config, svc *service.Service) error {
 		buildID: buildinfo.BuildID,
 		pid:     os.Getpid(),
 		started: started,
+		web: webui.New(svc, func(format string, args ...any) {
+			logger.Printf(format, args...)
+		}).Handler(),
 	}
 	h.lastActivity.Store(started.UnixNano())
 
@@ -114,6 +118,7 @@ func serve(ctx context.Context, cfg Config, svc *service.Service) error {
 
 	logger.Printf("daemon 已启动: http://%s (version=%s buildID=%s pid=%d idle=%s)",
 		addr, buildinfo.Version, buildinfo.BuildID, os.Getpid(), cfg.IdleTimeout)
+	logger.Printf("WebUI 已启动: http://%s", addr)
 
 	// 信号与外部 ctx 取消走同一优雅退出路径。
 	sigCtx, stopSignals := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)

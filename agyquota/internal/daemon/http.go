@@ -18,6 +18,7 @@ import (
 // handler 承载 daemon 的 HTTP 层：路由、包络、SSE、握手校验与活动计数。
 type handler struct {
 	svc     *service.Service
+	web     http.Handler // 内嵌 WebUI；与 /v1/* JSON API 同端口共存
 	version string
 	buildID string
 	pid     int
@@ -39,6 +40,12 @@ func (h *handler) Handler() http.Handler {
 	mux.HandleFunc("POST "+api.EndpointQuotaGet, h.handleQuotaGet)
 	mux.HandleFunc("POST "+api.EndpointQuotaRaw, h.handleQuotaRaw)
 	mux.HandleFunc("POST "+api.EndpointStop, h.handleStop)
+	if h.web != nil {
+		// WebUI 静态资源 + /api/*；daemon 的 /v1/* 是更具体的模式，优先匹配。
+		mux.Handle("/", h.web)
+		// API 命名空间下的未知路径仍按 404 处理，不落入静态文件服务。
+		mux.Handle("/v1/", http.NotFoundHandler())
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.inflight.Add(1)

@@ -1,4 +1,4 @@
-package app
+package webui
 
 import (
 	"encoding/json"
@@ -7,9 +7,10 @@ import (
 	"sync"
 
 	"agyquota/internal/api"
+	"agyquota/internal/appdata"
 )
 
-// lastQuotaFileName 是 GUI 上次配额快照的落盘文件名。
+// lastQuotaFileName 是上次配额快照的落盘文件名。
 // 桌面壳默认不发起网络查询，启动时直接展示这份缓存，用户点击「查询」才刷新。
 const lastQuotaFileName = "last_quota.json"
 
@@ -17,6 +18,7 @@ const lastQuotaFileName = "last_quota.json"
 type quotaCache struct {
 	mu      sync.Mutex
 	entries map[string]api.Snapshot
+	logf    Logf
 }
 
 type quotaCacheFile struct {
@@ -24,14 +26,17 @@ type quotaCacheFile struct {
 	Entries map[string]api.Snapshot `json:"entries"`
 }
 
-func newQuotaCache() *quotaCache {
-	c := &quotaCache{entries: map[string]api.Snapshot{}}
+func newQuotaCache(logf Logf) *quotaCache {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	c := &quotaCache{entries: map[string]api.Snapshot{}, logf: logf}
 	c.loadFromDisk()
 	return c
 }
 
 func quotaCachePath() string {
-	dir := appDataDir()
+	dir := appdata.Dir()
 	if dir == "" {
 		return ""
 	}
@@ -67,7 +72,7 @@ func (c *quotaCache) loadFromDisk() {
 	}
 	var file quotaCacheFile
 	if err := json.Unmarshal(raw, &file); err != nil {
-		logf("解析上次配额缓存失败，忽略: %v", err)
+		c.logf("解析上次配额缓存失败，忽略: %v", err)
 		return
 	}
 	for source, snap := range file.Entries {
@@ -84,20 +89,20 @@ func (c *quotaCache) writeToDisk(payload quotaCacheFile) {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		logf("创建配额缓存目录失败: %v", err)
+		c.logf("创建配额缓存目录失败: %v", err)
 		return
 	}
 	raw, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		logf("编码配额缓存失败: %v", err)
+		c.logf("编码配额缓存失败: %v", err)
 		return
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, append(raw, '\n'), 0o644); err != nil {
-		logf("写入配额缓存失败: %v", err)
+		c.logf("写入配额缓存失败: %v", err)
 		return
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		logf("替换配额缓存失败: %v", err)
+		c.logf("替换配额缓存失败: %v", err)
 	}
 }

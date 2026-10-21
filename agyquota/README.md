@@ -6,7 +6,7 @@
 - **`--agy`**：基于官方 **Antigravity CLI (`agy`)** 驱动，查询终端与桌面 GUI 账号配额；执行完毕强制回收进程树，绝无后台残留；
 - **`--zed`**：基于 **Zed (`antigravity-acp`)** 独立凭据直连 Google 官方接口，带 50 分钟内存级安全缓存与 1:1 官方 User-Agent 伪装。
 
-遵循《CLI 工具开发标准 v2（daemon 架构）》：单二进制双角色（`agyquota serve` + 客户端）、HTTP+JSON 唯一契约、buildID 握手；CLI 人读输出 + `--json` 信封 + `mcp` stdio 桥 + `schema` 契约导出。
+遵循《CLI 工具开发标准 v2（daemon 架构）》：单二进制双角色（`agyquota serve` + 客户端）、HTTP+JSON 唯一契约、buildID 握手；CLI 人读输出 + `--json` 信封 + `mcp` stdio 桥 + `schema` 契约导出。`serve` 在同一端口同时托管内嵌 WebUI 与 JSON API，浏览器打开回环地址即可使用配额面板（与 GUI 通道共用同一套页面与 `/api/*`）。
 
 ## 构建与安装
 
@@ -62,7 +62,7 @@ Claude and GPT models
 | `agyquota --zed --once` | **单次查询模式**：若未运行 daemon 则自动启动临时实例，查询完毕后立即优雅退出并清理，0 残留 |
 | `agyquota --agy --json` | JSON 信封输出：`{"ok":true,"data":…}` / `{"ok":false,"error":{…}}` |
 | `agyquota --zed --raw` | 打印底层接口原始响应（排障/调试用） |
-| `agyquota serve` | 前台启动 daemon（`--bind` 默认 127.0.0.1、`--port` 默认 17625、`--idle-timeout` 默认 0=不退出） |
+| `agyquota serve` | 前台启动 daemon（`--bind` 默认 127.0.0.1、`--port` 默认 17625、`--idle-timeout` 默认 0=不退出）；同一端口提供内嵌 WebUI（浏览器打开 `http://127.0.0.1:17625`）与 `/v1/*` JSON API |
 | `agyquota stop` | 停止正在运行的 daemon（未运行时不报错） |
 | `agyquota mcp` | 以 stdio MCP server 运行（工具名 `agyquota.quota.get`，支持 `source: agy|zed`） |
 | `agyquota schema` | 导出与 tools/list 同源的 MCP 工具契约目录 |
@@ -76,6 +76,7 @@ Claude and GPT models
 查询不再由 CLI/MCP 进程内直接执行业务，而是统一交给后台 daemon（`agyquota serve`）：
 
 - **地址发现优先级**：`--host` → 环境变量 `AGYQUOTA_HOST` → 地址文件 → 默认 `127.0.0.1:17625`；
+- **WebUI 同端口**：`serve` 的根路径返回内嵌配额面板（`/`、`/api/meta`、`/api/cache`、`/api/quota`），`/v1/*` 仍是 CLI/MCP 的 JSON 契约，两者互不干扰；页面请求同样计入 daemon 活动，不会在浏览时被空闲退出；
 - **单次即退模式 (`--once`)**：若无常驻 daemon 在运行，CLI 自动拉起临时专属 daemon 并注入 `--idle-timeout 10s` 兜底；查询完成后立即通过 `POST /v1/stop` 回收退出并清理地址文件，不留后台进程（无论开发构建还是生产构建均适用；若已有常驻 daemon 则直接复用且不杀已有进程）；
 - **生产构建自动拉起**：buildID 的 describe 部分为干净 tag（如 `agyquota/v1.2.3`）且未显式指定地址时，CLI/MCP 会用自身 exe 自动拉起常驻 daemon（Windows `DETACHED_PROCESS`，无窗口、不抢焦点、关闭终端不退出），等待就绪后继续请求；
 - **开发构建不拉起**：describe 带 `-g<hash>`/`-dirty` 且未指定 `--once` 时连不上直接报错，提示先运行 `agyquota serve`（双终端工作流）或添加 `--once` 标志；

@@ -19,9 +19,10 @@ func NewServeCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "以 daemon 方式运行（回环 HTTP API，供 CLI/MCP 调用）",
-		Long: "在前台运行 agyquota daemon：在回环地址监听 HTTP+JSON API，写出地址文件，\n" +
-			"Ctrl+C 优雅退出。前台 serve 不设空闲退出；自动拉起的 daemon 由客户端注入\n" +
+		Short: "以 daemon 方式运行（回环 HTTP API + 内嵌 WebUI）",
+		Long: "在前台运行 agyquota daemon：在回环地址同时托管内嵌 WebUI 与 HTTP+JSON API，\n" +
+			"写出地址文件，Ctrl+C 优雅退出。浏览器打开输出地址即可使用配额面板；\n" +
+			"前台 serve 不设空闲退出；自动拉起的 daemon 由客户端注入\n" +
 			"--idle-timeout 30m 控制。",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
