@@ -4,18 +4,24 @@
 # ///
 """Anatomy Manager 单文件二进制构建流水线。
 
-产物规则（严格隔离，每条通道出两个二进制）：
-  - dev（默认）：anatomymanager-dev.exe（GUI 通道）+ anatomymanager-cli-dev.exe（Console 通道）
-  - release：anatomymanager.exe（GUI 通道）+ anatomymanager-cli.exe（Console 通道）
+产物规则（严格隔离，每条通道出两个二进制，命名固定为 `anatomymanager-<通道>[-dev].exe`）：
+  - dev（默认）：anatomymanager-gui-dev.exe（GUI 通道）+ anatomymanager-cli-dev.exe（Console 通道）
+  - release：anatomymanager-gui.exe（GUI 通道）+ anatomymanager-cli.exe（Console 通道）
   只有 HEAD 精确命中 anatomymanager/v* tag 且工作区干净时才允许 release；
   dev 与 release 产物名不同，互不覆盖。
 
 双通道设计（为何不能只出一个）：
-  - GUI 通道用 -H windowsgui 构建，双击零黑框，但父 shell（PowerShell / cmd）
-    对 GUI 子系统进程不等待，prompt 会先于程序输出渲染，终端里跑 CLI 必然出现
-    「输出黏在 prompt 行 + 末尾光标悬空」；
-  - Console 通道为 console 子系统，shell 正常等待，prompt / 光标 / 管道 / 重定向全合规，
-    终端、脚本与 Agent 一律用它。
+  - GUI 通道用 -H windowsgui 构建，双击零黑框；它**不承担 CLI 语义**：
+    不管从哪里启动（双击 / 终端 / 快捷方式 / 带任意参数）结果都是显示 GUI，
+    唯一语义参数是 --hidden（开机自启的静默托盘），其余参数一律忽略；
+  - Console 通道为 console 子系统，父 shell 正常等待，
+    prompt / 光标 / 管道 / 输出重定向全合规，终端、脚本与 Agent 一律用它。
+
+为何不保留「单产物双模」（GUI 子系统 + AttachConsole 抢父控制台）：
+  PowerShell / cmd 对 GUI 子系统进程不等待，prompt 先于程序输出渲染，
+  输出必顶在 prompt 行上、末尾光标悬空；且 PowerShell 不向 GUI 进程传管道句柄，
+  `> out.json` 会拿到空文件。业内（git / git-gui、docker / Docker Desktop、
+  python / pythonw）一律拆成两个产物。
 
 构建内容：
   - 图标按通道区分：release 用专属精密机械图标，dev 用 Go 地鼠图标
@@ -48,18 +54,26 @@ MANIFEST = PROJECT_ROOT / "wails.exe.manifest"
 ICON_RELEASE = PROJECT_ROOT / "icon.ico"
 ICON_DEV = PROJECT_ROOT / "internal" / "app" / "icon_dev.ico"
 SYSO_OUT = PROJECT_ROOT / "cmd" / "anatomymanager" / "rsrc_windows_amd64.syso"
-EXE_RELEASE = PROJECT_ROOT / "anatomymanager.exe"
-EXE_DEV = PROJECT_ROOT / "anatomymanager-dev.exe"
+EXE_GUI_RELEASE = PROJECT_ROOT / "anatomymanager-gui.exe"
+EXE_GUI_DEV = PROJECT_ROOT / "anatomymanager-gui-dev.exe"
 EXE_CLI_RELEASE = PROJECT_ROOT / "anatomymanager-cli.exe"
 EXE_CLI_DEV = PROJECT_ROOT / "anatomymanager-cli-dev.exe"
+
+# 历史单产物命名（双通道拆分前），构建后自动清理，避免与新产物混淆。
+LEGACY_EXES = (
+    PROJECT_ROOT / "anatomymanager.exe",
+    PROJECT_ROOT / "anatomymanager-dev.exe",
+)
 RENDER_ICON = PROJECT_ROOT / "scripts" / "render_icon.py"
 
 # 构建自身生成的未跟踪文件：不计入「工作区不干净」
 GENERATED_SUFFIXES = (
-    "/anatomymanager.exe",
-    "/anatomymanager-dev.exe",
+    "/anatomymanager-gui.exe",
+    "/anatomymanager-gui-dev.exe",
     "/anatomymanager-cli.exe",
     "/anatomymanager-cli-dev.exe",
+    "/anatomymanager.exe",
+    "/anatomymanager-dev.exe",
     "/cmd/anatomymanager/rsrc_windows_amd64.syso",
     "/icon.ico",
     "/icon.png",
@@ -193,7 +207,7 @@ def main() -> int:
 
     # 3. 逐通道 go build（每通道两个产物：GUI 零黑框 + Console 终端友好）
     targets = (
-        (EXE_RELEASE if release else EXE_DEV, True),
+        (EXE_GUI_RELEASE if release else EXE_GUI_DEV, True),
         (EXE_CLI_RELEASE if release else EXE_CLI_DEV, False),
     )
     for out_exe, gui in targets:
@@ -231,6 +245,12 @@ def main() -> int:
     for out_exe, gui in targets:
         size_mb = out_exe.stat().st_size / (1024 * 1024)
         print(f"🎉 构建完成 [{'GUI' if gui else 'Console'}]: {out_exe.name} ({size_mb:.2f} MB)")
+
+    # 5. 清理历史命名的单产物（双通道拆分前的 anatomymanager[-dev].exe）
+    for legacy in LEGACY_EXES:
+        if legacy.exists():
+            legacy.unlink()
+            print(f"🧹 已清理历史产物: {legacy.name}")
     return 0
 
 

@@ -24,8 +24,8 @@
 ### 1. 编译（dev / release 严格隔离，每条通道两个二进制）
 ```bash
 cd D:\Users\language_projects\go_projects\anatomymanager
-uv run scripts/build.py            # 开发构建 → anatomymanager-dev.exe + anatomymanager-cli-dev.exe
-uv run scripts/build.py --release  # 发布构建 → anatomymanager.exe + anatomymanager-cli.exe
+uv run scripts/build.py            # 开发构建 → anatomymanager-gui-dev.exe + anatomymanager-cli-dev.exe
+uv run scripts/build.py --release  # 发布构建 → anatomymanager-gui.exe + anatomymanager-cli.exe
 ```
 
 - 仅当 HEAD 精确命中 `anatomymanager/v*` tag 且工作区干净时才产出 release，否则 `--release` 直接报错退出；
@@ -38,10 +38,10 @@ uv run scripts/build.py --release  # 发布构建 → anatomymanager.exe + anato
 
 | 产物 | PE 子系统 | 用途 |
 | :--- | :--- | :--- |
-| `anatomymanager[-dev].exe` | GUI (`-H windowsgui`) | 双击零黑框，无参数 = 桌面工作台与托盘；`--hidden` = 静默常驻 |
+| `anatomymanager-gui[-dev].exe` | GUI (`-H windowsgui`) | 双击零黑框；**不承担 CLI 语义**：不管从哪里启动（双击 / 终端 / 快捷方式 / 带任意参数）都是显示桌面工作台与托盘；唯一语义参数 `--hidden`（开机自启的静默托盘，`--tray` 同义） |
 | `anatomymanager-cli[-dev].exe` | Console | 终端 / 脚本 / Agent 调用：shell 正常等待、prompt 与光标正常、管道与重定向可用 |
 
-GUI 子系统进程在 PowerShell / cmd 里是**异步启动**的（shell 打印 prompt 后立即返回），程序随后 `AttachConsole` 抢父控制台写输出，必然出现「输出黏在 prompt 行 + 末尾光标悬空」，且 PowerShell 不会把管道句柄传给 GUI 进程，`--json > out.json` 会拿到空文件。因此终端场景务必走 console 通道产物（下文示例统一用 `anatomymanager-cli`）。
+GUI 子系统进程在 PowerShell / cmd 里是**异步启动**的（shell 打印 prompt 后立即返回），若让它兼跑 CLI，输出只能靠 `AttachConsole` 抢父控制台，必然出现「输出黏在 prompt 行 + 末尾光标悬空」；且 PowerShell 不会把管道句柄传给 GUI 进程，`--json > out.json` 会拿到空文件。这也是 git / git-gui、docker / Docker Desktop、python / pythonw 的做法：**GUI 产物不做 CLI，console 产物不做窗口**。上文示例统一用 `anatomymanager-cli`。
 
 ### 2. 摄取归档产物 (Ingest)
 以会话 `6970a9e0-1c38-4f75-bd66-ec8a26d10e6a` 生成的精密限流定标仪为例：
@@ -111,10 +111,8 @@ anatomymanager-cli serve --port 8765   # 需要固定端口时显式指定
 anatomymanager/
 ├── cmd/
 │   └── anatomymanager/
-│       ├── main.go                 # 命令行入口 (CLI 子命令派发)
-│       ├── mode_gui.go             # GUI 通道标记 (windowsgui)
-│       ├── mode_cli.go             # Console 通道标记 (-tags cli)
-│       └── console_windows.go      # GUI 通道的终端兼容层 (仅 !cli 编译)
+│       ├── cli.go                  # Console 通道入口 + 子命令 (-tags cli)
+│       └── main.go                 # GUI 通道入口 (默认，只拉桌面壳)
 ├── internal/
 │   ├── model/
 │   │   └── model.go                # 领域数据实体 (Artwork, ArtifactFile, Schemas)
