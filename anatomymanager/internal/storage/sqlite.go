@@ -18,6 +18,13 @@ type Store struct {
 	db *sql.DB
 }
 
+// sqliteDSNParams 统一给所有连接加并发保护，解决 GUI 内嵌服务与 CLI（serve/ingest）
+// 多进程共用同一库时的争用：
+//   - busy_timeout：锁被其他连接占用时等待而非立即失败（上游默认 0，会直接 database is locked）
+//   - journal_mode(WAL)：读不阻塞写、写不阻塞读（GUI 只读、CLI 写入可并行）
+//   - synchronous(NORMAL)：WAL 下兼顾安全与写入吞吐
+const sqliteDSNParams = "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+
 // NewStore 打开并初始化 dbPath 指定的 SQLite 数据库。
 // 路径必须由调用方显式给出（默认路径由 internal/app.DefaultDBPath 按 dev/prod 通道解析），
 // 避免数据文件散落到家目录等非规范位置。
@@ -28,7 +35,7 @@ func NewStore(dbPath string) (*Store, error) {
 	dir := filepath.Dir(dbPath)
 	_ = os.MkdirAll(dir, 0755)
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath+sqliteDSNParams)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db error: %w", err)
 	}

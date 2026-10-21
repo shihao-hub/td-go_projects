@@ -25,6 +25,7 @@ const (
 type App struct {
 	app       *application.App
 	serverURL string
+	store     *storage.Store
 
 	winMu sync.Mutex
 	win   *application.WebviewWindow
@@ -94,6 +95,7 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 	appInstance = &App{
 		app:       wailsApp,
 		serverURL: serverURL,
+		store:     store,
 	}
 
 	appInstance.buildTray()
@@ -263,6 +265,11 @@ func (a *App) quit() {
 
 	if win != nil {
 		win.Close()
+	}
+
+	// 先关闭数据库连接，让 SQLite 完成 WAL checkpoint 再退出进程。
+	if a.store != nil {
+		_ = a.store.Close()
 	}
 
 	a.app.Quit()
