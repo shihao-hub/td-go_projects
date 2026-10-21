@@ -33,6 +33,7 @@ uv run scripts/build.py --release  # 发布构建 → anatomymanager-gui.exe + a
 - dev / release 的数据目录与单实例互斥 ID 相互隔离：`%APPDATA%\language_projects\anatomymanager\{dev,prod}`；
 - 开机自启仅 release 版可注册，dev 版菜单项置灰禁用。
 - 图标按通道区分：dev 版用 Go 地鼠图标，release 版用专属精密机械图标（exe 文件图标与窗口/托盘图标一致）。
+- 窗口几何（尺寸 / 位置 / 是否最大化）自动记忆：变更后防抖写入 `%APPDATA%\language_projects\anatomymanager\<dev|prod>\window.json`，下次拉起或从托盘重建窗口时原样恢复；外接屏被拔掉导致旧坐标不可见时自动回落到主屏居中。
 
 #### 双通道产物（为何一条通道不能只出一个 exe）
 
@@ -55,6 +56,8 @@ anatomymanager-cli ingest \
   --tags "rate-limiter,token-bucket,leaky-bucket,isometric,svg" \
   --json
 ```
+
+可选 `--description "..."` 覆盖自动生成的简介；不传 `--session-id` 时简介回落为「由 anatomy 生成物归档的机械原理图谱」，不会拼出会话为空的病句。
 
 **JSON 响应：**
 ```json

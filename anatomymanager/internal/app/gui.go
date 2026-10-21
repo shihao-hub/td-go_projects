@@ -30,6 +30,11 @@ type App struct {
 	winMu sync.Mutex
 	win   *application.WebviewWindow
 
+	// 窗口几何快照：启动时从 window.json 读取，之后随用户操作回写。
+	stateMu    sync.Mutex
+	stateTimer *time.Timer
+	winState   windowState
+
 	ensureMu sync.Mutex
 	tray     *application.SystemTray
 	exiting  atomic.Bool
@@ -96,6 +101,7 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 		app:       wailsApp,
 		serverURL: serverURL,
 		store:     store,
+		winState:  loadWindowState(),
 	}
 
 	appInstance.buildTray()
@@ -107,30 +113,56 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 }
 
 func (a *App) buildWindowLocked(hidden bool) {
-	win := a.app.Window.NewWithOptions(application.WebviewWindowOptions{
+	state := a.currentWindowState()
+	opts := application.WebviewWindowOptions{
 		Title:            windowTitle,
-		Width:            1280,
-		Height:           850,
-		MinWidth:         900,
-		MinHeight:        600,
+		Width:            state.Width,
+		Height:           state.Height,
+		MinWidth:         minWindowWidth,
+		MinHeight:        minWindowHeight,
 		Hidden:           hidden,
 		URL:              a.serverURL,
 		BackgroundColour: application.NewRGB(22, 22, 28),
-	})
+	}
+	if state.HasPos {
+		opts.InitialPosition = application.WindowXY
+		opts.X = state.X
+		opts.Y = state.Y
+	}
+
+	win := a.app.Window.NewWithOptions(opts)
 	a.win = win
 
 	// 注册窗口显示与激活钩子，HWND 创建就绪后即刻写入大小图标与窗口类属性
 	win.RegisterHook(events.Windows.WindowShow, func(*application.WindowEvent) {
 		a.applyWindowIcon(win)
+		a.ensureWindowOnScreen(win)
 	})
 	win.RegisterHook(events.Windows.WindowActive, func(*application.WindowEvent) {
 		a.applyWindowIcon(win)
 	})
 
+	// 几何变更（拖拽 / 缩放 / 最大化 / 还原）防抖落盘，崩溃或强杀也不丢状态。
+	for _, evt := range []events.WindowEventType{
+		events.Common.WindowDidResize,
+		events.Common.WindowDidMove,
+		events.Common.WindowMaximise,
+		events.Common.WindowUnMaximise,
+	} {
+		win.OnWindowEvent(evt, func(*application.WindowEvent) {
+			a.scheduleSaveWindowState(win)
+		})
+	}
+
 	win.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) {
+		// 窗口即将销毁，尺寸信息此后不可读，必须先同步落盘一次。
+		a.stopWindowStateTimer()
+		a.saveWindowState(win)
+
 		if a.exiting.Load() {
 			return
 		}
+
 		a.winMu.Lock()
 		if a.win == win {
 			a.win = nil
@@ -143,6 +175,101 @@ func (a *App) buildWindowLocked(hidden bool) {
 			debug.FreeOSMemory()
 		}()
 	})
+}
+
+// currentWindowState 返回启动时生效的几何快照（副本）。
+func (a *App) currentWindowState() windowState {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.winState
+}
+
+// scheduleSaveWindowState 防抖保存：拖拽 / 缩放过程中事件密集，只在停止操作后落盘一次。
+func (a *App) scheduleSaveWindowState(win *application.WebviewWindow) {
+	a.stateMu.Lock()
+	if a.stateTimer != nil {
+		a.stateTimer.Stop()
+	}
+	a.stateTimer = time.AfterFunc(windowStateSaveDelay*time.Millisecond, func() {
+		a.saveWindowState(win)
+	})
+	a.stateMu.Unlock()
+}
+
+func (a *App) stopWindowStateTimer() {
+	a.stateMu.Lock()
+	if a.stateTimer != nil {
+		a.stateTimer.Stop()
+		a.stateTimer = nil
+	}
+	a.stateMu.Unlock()
+}
+
+// saveWindowState 采集当前窗口几何并落盘。
+//
+// 最大化 / 最小化 / 全屏时窗口报告的尺寸不是用户期望的"还原尺寸"，
+// 因此只翻转 Maximised 标记，保留上一次记录的还原几何。
+func (a *App) saveWindowState(win *application.WebviewWindow) {
+	if win == nil {
+		return
+	}
+
+	state := a.currentWindowState()
+	switch {
+	case win.IsMinimised(), win.IsFullscreen():
+		return
+	case win.IsMaximised():
+		state.Maximised = true
+	default:
+		width, height := win.Size()
+		if width < minWindowWidth || height < minWindowHeight {
+			return
+		}
+		x, y := win.Position()
+		state.Width, state.Height = width, height
+		state.X, state.Y, state.HasPos = x, y, true
+		state.Maximised = false
+	}
+
+	a.stateMu.Lock()
+	changed := state != a.winState
+	if changed {
+		a.winState = state
+	}
+	a.stateMu.Unlock()
+	if !changed {
+		return
+	}
+
+	if err := writeWindowState(state); err != nil {
+		logf("保存窗口状态失败: %v", err)
+	}
+}
+
+// ensureWindowOnScreen 兜底纠正：恢复的坐标若落在已拔掉的外接屏上，
+// 窗口会完全不可见，此时回落到主屏居中并回写新坐标。
+func (a *App) ensureWindowOnScreen(win *application.WebviewWindow) {
+	if win == nil || win.IsMaximised() || win.IsMinimised() {
+		return
+	}
+	screens := a.app.Screen.GetAll()
+	if len(screens) == 0 {
+		return
+	}
+
+	x, y := win.Position()
+	width, height := win.Size()
+	centreX, centreY := x+width/2, y+height/2
+	for _, screen := range screens {
+		area := screen.WorkArea
+		if centreX >= area.X && centreX < area.X+area.Width && centreY >= area.Y && centreY < area.Y+area.Height {
+			return
+		}
+	}
+
+	logf("上次窗口位置 (%d,%d) 不在任何屏幕工作区内，回落到主屏居中", x, y)
+	win.Center()
+	a.scheduleSaveWindowState(win)
 }
 
 func (a *App) applyWindowIcon(win *application.WebviewWindow) {
@@ -208,6 +335,9 @@ func (a *App) showMainWindow() {
 	}
 
 	win.Show()
+	if a.currentWindowState().Maximised {
+		win.Maximise()
+	}
 	win.Focus()
 	a.applyWindowIcon(win)
 }

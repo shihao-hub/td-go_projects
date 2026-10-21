@@ -100,6 +100,7 @@ func handleIngest(args []string) {
 	dir := fs.String("dir", "", "生成物目录路径")
 	docPath := fs.String("doc", "", "原理解释 Markdown 文件路径")
 	sessionID := fs.String("session-id", "", "来源 Agent 会话 ID")
+	description := fs.String("description", "", "图谱简介（缺省时按来源会话自动生成）")
 	category := fs.String("category", "figure", "图谱分类 (figure / part / exploded / rig)")
 	tagsStr := fs.String("tags", "", "标签列表 (逗号分隔)")
 	dbPath := fs.String("db", "", "SQLite 数据库路径 (默认 %APPDATA%\\language_projects\\anatomymanager\\<dev|prod>\\anatomy.db)")
@@ -185,11 +186,21 @@ func handleIngest(args []string) {
 		displayTitle = *name
 	}
 
+	// 无会话 ID 时不能拼出"由 Agent 会话  生成"这种双空格病句，回落通用说明。
+	displayDescription := *description
+	if displayDescription == "" {
+		if *sessionID != "" {
+			displayDescription = fmt.Sprintf("由 Agent 会话 %s 生成的 anatomy 图谱", *sessionID)
+		} else {
+			displayDescription = "由 anatomy 生成物归档的机械原理图谱"
+		}
+	}
+
 	artwork := &model.Artwork{
 		ID:          *name,
 		Title:       displayTitle,
 		Category:    *category,
-		Description: fmt.Sprintf("由 Agent 会话 %s 生成的 anatomy 图谱", *sessionID),
+		Description: displayDescription,
 		Tags:        tags,
 		SessionID:   *sessionID,
 		PrimaryHTML: primaryHTML,
@@ -304,13 +315,14 @@ func handleSchema(args []string) {
 			"title":   "AnatomyIngestCommand",
 			"type":    "object",
 			"properties": map[string]any{
-				"name":      map[string]any{"type": "string", "description": "唯一作品标识符，如 rate-limiter"},
-				"title":     map[string]any{"type": "string", "description": "人类可读标题"},
-				"dir":       map[string]any{"type": "string", "description": "生成的静态网页与脚本所在目录"},
-				"doc":       map[string]any{"type": "string", "description": "原理解释 Markdown 文件路径"},
-				"sessionId": map[string]any{"type": "string", "description": "产生该作品的 Agent 会话 ID"},
-				"category":  map[string]any{"type": "string", "enum": []string{"figure", "part", "exploded", "rig"}},
-				"tags":      map[string]any{"type": "string", "description": "逗号分隔的标签"},
+				"name":        map[string]any{"type": "string", "description": "唯一作品标识符，如 rate-limiter"},
+				"title":       map[string]any{"type": "string", "description": "人类可读标题"},
+				"dir":         map[string]any{"type": "string", "description": "生成的静态网页与脚本所在目录"},
+				"doc":         map[string]any{"type": "string", "description": "原理解释 Markdown 文件路径"},
+				"sessionId":   map[string]any{"type": "string", "description": "产生该作品的 Agent 会话 ID"},
+				"description": map[string]any{"type": "string", "description": "图谱简介，缺省时按来源会话自动生成"},
+				"category":    map[string]any{"type": "string", "enum": []string{"figure", "part", "exploded", "rig"}},
+				"tags":        map[string]any{"type": "string", "description": "逗号分隔的标签"},
 			},
 			"required": []string{"name", "dir"},
 		}
