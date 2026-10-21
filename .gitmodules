@@ -1,6 +1,6 @@
-[submodule "glmquotawatch-gui"]
-	path = glmquotawatch-gui
-	url = git@github.com:shihao-hub/td-go_projects-glmquotawatch-gui.git
+[submodule "glmquotawatch"]
+	path = glmquotawatch
+	url = git@github.com:shihao-hub/td-go_projects-glmquotawatch.git
 	branch = main
 	ignore = all
 [submodule "nginx-ai-proxy"]
