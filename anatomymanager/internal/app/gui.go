@@ -57,19 +57,22 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 	}
 	serverURL := api.URL(listener)
 	logf("WebUI 已启动: %s", serverURL)
+	logf("数据通道: %s，数据库: %s", Channel(), dbPath)
 
-	server := api.NewServer(store)
+	server := api.NewServer(store, api.Meta{
+		Channel:   Channel(),
+		BuildMode: BuildMode,
+		Version:   Version,
+		DBPath:    dbPath,
+	})
 	go func() {
 		_ = server.Serve(listener)
 	}()
 
 	var appInstance *App
 
-	// 单实例互斥 ID 按构建通道隔离，避免 dev 调试实例与常驻正式版互相挤掉。
-	singleInstanceID := "shihao.langproj.anatomymanager.gui"
-	if !IsRelease() {
-		singleInstanceID += ".dev"
-	}
+	// 单实例互斥 ID 按构建通道隔离，避免 dev 调试实例与常驻正式版互相挤掉（与 where 探测同源）。
+	singleInstanceID := guiSingleInstanceID(IsRelease())
 
 	wailsApp := application.New(application.Options{
 		Name:        appName,

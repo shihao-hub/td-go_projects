@@ -29,8 +29,26 @@
   // Init
   window.addEventListener("DOMContentLoaded", () => {
     bindEvents();
+    loadMeta();
     loadArtworks();
   });
+
+  // 通道徽标：让用户一眼确认当前窗口看的是 dev 还是 prod 库（出问题先看这里）。
+  async function loadMeta() {
+    const badge = document.getElementById("dbBadge");
+    if (!badge) return;
+    try {
+      const res = await fetch("/api/meta");
+      if (!res.ok) return;
+      const meta = await res.json();
+      badge.textContent = `${(meta.channel || "?").toUpperCase()} DB`;
+      badge.title = `${meta.dbPath}\n版本 ${meta.version} · ${meta.artworks} 个图谱 / ${meta.files} 个文件`;
+      badge.classList.toggle("channel-dev", meta.channel === "dev");
+      badge.classList.toggle("channel-prod", meta.channel === "prod");
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   function bindEvents() {
     refreshBtn.addEventListener("click", loadArtworks);
@@ -65,6 +83,7 @@
       if (!res.ok) throw new Error("加载图谱列表失败");
       artworks = await res.json();
       renderList(artworks);
+      loadMeta();
 
       if (artworks && artworks.length > 0 && !currentArtwork) {
         selectArtwork(artworks[0].id);

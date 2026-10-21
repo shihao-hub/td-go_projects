@@ -176,6 +176,17 @@ body {
   color: var(--text-muted);
 }
 
+/* 通道标识：dev 用告警色，避免把开发库误当正式库 */
+.storage-info.channel-dev {
+  color: #f59e0b;
+  border-color: #f59e0b66;
+}
+
+.storage-info.channel-prod {
+  color: #22d3ee;
+  border-color: #22d3ee55;
+}
+
 .artwork-list {
   flex: 1;
   overflow-y: auto;

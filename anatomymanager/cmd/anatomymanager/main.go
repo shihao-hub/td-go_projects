@@ -36,14 +36,20 @@ func main() {
 
 // fallbackServe 桌面壳不可用时的兜底：起内置 HTTP 服务，可选自动打开浏览器。
 func fallbackServe(openBrowser bool) {
-	store, err := storage.NewStore(app.DefaultDBPath())
+	dbPath := app.DefaultDBPath()
+	store, err := storage.NewStore(dbPath)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "打开数据库失败: %v\n", err)
 		return
 	}
 	defer store.Close()
 
-	server := api.NewServer(store)
+	server := api.NewServer(store, api.Meta{
+		Channel:   app.Channel(),
+		BuildMode: app.BuildMode,
+		Version:   app.Version,
+		DBPath:    dbPath,
+	})
 	if _, err := server.Start(0, openBrowser); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "服务异常终止: %v\n", err)
 	}

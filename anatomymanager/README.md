@@ -15,7 +15,8 @@
    - **WebUI 层**：纯原生 HTML + CSS + Vanilla JS（零 npm/webpack 依赖，编译期通过 `//go:embed` 打包），内置夜间/明亮主题切换、全屏 iframe 沙箱渲染、文档阅读与源码查看。
    - **Wails 兼容层**：共享前端资产与后端方法，随时可无缝打包为桌面客户端。
 3. **Agent 协同接入规范**
-   - 其他 Agent 在使用 `anatomy` skill 完成制图后，仅需调用一次 `anatomymanager ingest`，即可完成自动分类、元数据归纳与归档入库。
+   - 其他 Agent 在使用 `anatomy` skill 完成制图后，仅需调用一次 `anatomymanager ingest`，即可完成自动分类、元数据归纳与归档入库；
+   - `anatomymanager-cli where --json` 让 Agent 在写入前自证「本二进制对应哪个库、另一个通道的 GUI 是否在跑」，避免写进用户看不见的库（详见「Agent 接入与通道判定」）。
 
 ---
 
@@ -105,6 +106,60 @@ anatomymanager-cli serve --open        # 默认由系统动态探测可用端口
 anatomymanager-cli serve --port 8765   # 需要固定端口时显式指定
 ```
 启动后终端会打印实际访问地址（形如 `http://127.0.0.1:<动态端口>`），浏览器打开该地址即可体验包含缩略图卡片流、深浅色渲染切换、沙箱交互、Markdown 原理解析与代码查看的全功能工作台。
+
+> 现成的 Agent 包装器是 `~/.agents/skills/anatomy-curator`：它负责「制图 → ingest → 交付」，并按下面的规则先跑 `where` 再决定调哪个通道的 CLI。
+
+---
+
+## 🧭 Agent 接入与通道判定（多 Agent 协作必读）
+
+**唯一推导链**：二进制名 → 编译期通道 → 数据目录。没有任何配置项能「顺便」改库：
+
+| 调哪个 exe | 通道 | 读写的库 |
+| :--- | :--- | :--- |
+| `anatomymanager-cli.exe` | prod (release) | `%APPDATA%\language_projects\anatomymanager\prod\anatomy.db` |
+| `anatomymanager-cli-dev.exe` | dev | `...\dev\anatomy.db` |
+
+GUI 只读自己通道的库（`-gui-dev` 读 dev），**写只能走 CLI**。**禁止用 `--db` 手拼路径**：会造出用户 GUI 永远看不到的孤儿库。
+
+### 归档前自证：`where`
+
+```bash
+anatomymanager-cli where          # 人读
+anatomymanager-cli where --json   # Agent 读
+```
+
+```json
+{
+  "binary": "anatomymanager-cli.exe",
+  "channel": "prod",
+  "buildMode": "release",
+  "version": "v1.2.0",
+  "dbPath": "C:\\Users\\<you>\\AppData\\Roaming\\language_projects\\anatomymanager\\prod\\anatomy.db",
+  "dbExists": true,
+  "artworks": 3,
+  "files": 12,
+  "runningGuis": { "dev": true, "prod": false },
+  "recommendation": "注意：GUI 正运行在 dev 通道，要让窗口直接看到请改用 anatomymanager-cli-dev.exe（或告知用户当前在看哪个通道）"
+}
+```
+
+- `runningGuis` 用 Wails 单实例互斥（`wails-app-shihao.langproj.anatomymanager.gui[.dev]-sim`）实测探测，不靠进程名匹配；
+- `dbExists` 为 false 时**不会**创建空库（自省命令无副作用）；
+- `recommendation` 就是可直接执行的决策结论，Agent 照做即可。
+
+### 通道选择规则（多 Agent 统一口径）
+
+1. **用户有 GUI 在跑 → 跟随该 GUI 通道**（否则用户点刷新看不到，会以为没归档）；
+2. **都没有 GUI 在跑 → 默认 prod**（用户日常双击的是正式版）；
+3. 用户明确说「我在开发 anatomymanager / 用 dev 版」→ 一律 dev；
+4. 归档完成后必须报出 **artworkId + 文件数 + 实际库路径**（`ingest --json` 回执已含 `channel` / `dbPath`）。
+
+### 人侧确认（看出「我在看哪个库」）
+
+- WebUI 侧栏徽标：`PROD DB`（青）/ `DEV DB`（橙），悬停可看完整库路径 + 版本 + 图谱/文件数（数据来自 `/api/meta`）；
+- GUI 启动日志 `<通道目录>\anatomymanager.log` 第二行：`数据通道: <dev|prod>，数据库: <path>`；
+- `anatomymanager-cli list` 文本模式末尾同样打印通道与库路径。
 
 ---
 

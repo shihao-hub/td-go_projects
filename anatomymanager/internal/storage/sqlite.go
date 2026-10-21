@@ -151,6 +151,17 @@ func (s *Store) SaveArtwork(art *model.Artwork, fileContents map[string][]byte) 
 	return tx.Commit()
 }
 
+// Stats 返回库内图谱与文件总数，供自省命令（where）与 WebUI 元数据展示。
+func (s *Store) Stats() (artworks int, files int, err error) {
+	if err = s.db.QueryRow(`SELECT COUNT(*) FROM artworks`).Scan(&artworks); err != nil {
+		return 0, 0, err
+	}
+	if err = s.db.QueryRow(`SELECT COUNT(*) FROM artifact_files`).Scan(&files); err != nil {
+		return artworks, 0, err
+	}
+	return artworks, files, nil
+}
+
 // ListArtworks returns summary list of all artworks.
 func (s *Store) ListArtworks() ([]model.Artwork, error) {
 	rows, err := s.db.Query(`

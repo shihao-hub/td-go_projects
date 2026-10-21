@@ -13,3 +13,12 @@ var (
 func IsRelease() bool {
 	return BuildMode == "release"
 }
+
+// Channel 返回当前构建通道名：release → prod，dev → dev。
+// 数据目录、库路径、GUI 读取目标全部由它派生，是「我在哪个库」的唯一答案。
+func Channel() string {
+	if IsRelease() {
+		return "prod"
+	}
+	return "dev"
+}

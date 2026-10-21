@@ -18,14 +18,25 @@ import (
 
 type Server struct {
 	store *storage.Store
+	meta  Meta
 }
 
-func NewServer(store *storage.Store) *Server {
-	return &Server{store: store}
+// Meta 描述当前服务实例所属的构建通道与数据落点，
+// 经 /api/meta 暴露给 WebUI，让用户能一眼确认「这个窗口看的是哪个库」。
+type Meta struct {
+	Channel   string `json:"channel"`
+	BuildMode string `json:"buildMode"`
+	Version   string `json:"version"`
+	DBPath    string `json:"dbPath"`
+}
+
+func NewServer(store *storage.Store, meta Meta) *Server {
+	return &Server{store: store, meta: meta}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/meta", s.handleMeta)
 	mux.HandleFunc("/api/artworks", s.handleArtworks)
 	mux.HandleFunc("/api/artworks/", s.handleArtworkResource)
 	subFS, err := fs.Sub(web.Assets, "assets")
@@ -66,6 +77,22 @@ func (s *Server) Start(port int, openBrowser bool) (string, error) {
 	}
 
 	return url, s.Serve(listener)
+}
+
+func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	payload := struct {
+		Meta
+		Artworks int `json:"artworks"`
+		Files    int `json:"files"`
+	}{Meta: s.meta}
+	if artworks, files, err := s.store.Stats(); err == nil {
+		payload.Artworks, payload.Files = artworks, files
+	}
+	writeJSON(w, payload)
 }
 
 func (s *Server) handleArtworks(w http.ResponseWriter, r *http.Request) {

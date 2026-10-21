@@ -45,6 +45,8 @@ func main() {
 		handleExport(os.Args[2:])
 	case "serve":
 		handleServe(os.Args[2:])
+	case "where":
+		handleWhere(os.Args[2:])
 	case "version", "-v", "--version":
 		modeStr := "development"
 		if app.IsRelease() {
@@ -80,6 +82,7 @@ func printUsage() {
   get        查看指定图谱的元数据详情与文件清单 (支持 --json)
   schema     输出 Agent 协同 JSON Schema 规范 (ingest / artwork)
   export     将数据库中的指定作品导出为独立的本地目录
+  where      自省：本二进制的通道、库路径、图谱数与各通道 GUI 运行状态 (支持 --json)
   version    打印版本信息
 
 使用 '%[1]s <command> --help' 获取更多选项。`, prog)
@@ -91,6 +94,24 @@ func resolveDBPath(flagValue string) string {
 		return flagValue
 	}
 	return app.DefaultDBPath()
+}
+
+// currentMeta 构造 WebUI 与自省命令共用的通道元数据。
+func currentMeta(dbPath string) api.Meta {
+	return api.Meta{
+		Channel:   app.Channel(),
+		BuildMode: app.BuildMode,
+		Version:   app.Version,
+		DBPath:    dbPath,
+	}
+}
+
+// channelExeHint 返回与通道对应的 CLI 产物名（prod 无后缀，dev 带 -dev）。
+func channelExeHint(channel string) string {
+	if channel == "dev" {
+		return "anatomymanager-cli-dev.exe"
+	}
+	return "anatomymanager-cli.exe"
 }
 
 func handleIngest(args []string) {
@@ -220,11 +241,14 @@ func handleIngest(args []string) {
 			"filesCount":  len(fileContents),
 			"primaryHtml": primaryHTML,
 			"savedAt":     artwork.UpdatedAt,
+			"channel":     app.Channel(),
+			"dbPath":      resolveDBPath(*dbPath),
 		}
 		out, _ := json.MarshalIndent(res, "", "  ")
 		fmt.Println(string(out))
 	} else {
 		fmt.Printf("✅ 成功摄取图谱 [%s] (%s)，已归档 %d 个文件到 SQLite。\n", artwork.ID, artwork.Title, len(fileContents))
+		fmt.Printf("   通道: %s   数据库: %s\n", app.Channel(), resolveDBPath(*dbPath))
 	}
 }
 
@@ -252,7 +276,8 @@ func handleList(args []string) {
 	}
 
 	if len(list) == 0 {
-		fmt.Println("暂无图谱。使用 'anatomymanager ingest' 导入。")
+		fmt.Printf("暂无图谱。使用 'anatomymanager ingest' 导入。\n")
+		fmt.Printf("通道: %s   数据库: %s\n", app.Channel(), resolveDBPath(*dbPath))
 		return
 	}
 
@@ -261,6 +286,7 @@ func handleList(args []string) {
 	for _, a := range list {
 		fmt.Printf("%-18s %-25s %-10s %-12s\n", a.ID, truncate(a.Title, 24), a.Category, a.UpdatedAt.Format("2006-01-02"))
 	}
+	fmt.Printf("\n通道: %s   数据库: %s\n", app.Channel(), resolveDBPath(*dbPath))
 }
 
 func handleGet(args []string) {
@@ -300,6 +326,100 @@ func handleGet(args []string) {
 	for _, f := range art.Files {
 		fmt.Printf("  - %s\n", f)
 	}
+}
+
+// whereOutput 是 `where` 子命令的机器可读契约，供 Agent 在执行 ingest 前自证通道与库位。
+type whereOutput struct {
+	Binary         string    `json:"binary"`
+	Channel        string    `json:"channel"`
+	BuildMode      string    `json:"buildMode"`
+	Version        string    `json:"version"`
+	DBPath         string    `json:"dbPath"`
+	DBExists       bool      `json:"dbExists"`
+	Artworks       int       `json:"artworks"`
+	Files          int       `json:"files"`
+	RunningGUIs    whereGUIs `json:"runningGuis"`
+	Recommendation string    `json:"recommendation"`
+}
+
+type whereGUIs struct {
+	Dev  bool `json:"dev"`
+	Prod bool `json:"prod"`
+}
+
+// whereRecommendation 给出本二进制与运行中 GUI 的匹配结论。
+// 口径：GUI 在跑就以它为目标库（否则用户刷新窗口看不到）；都没跑时默认 prod。
+func whereRecommendation(channel string, guis whereGUIs) string {
+	running := map[string]bool{"dev": guis.Dev, "prod": guis.Prod}
+	if running[channel] {
+		return "OK：本 CLI 与运行中的 GUI 同通道，写入后窗口点刷新即可见"
+	}
+	for _, other := range []string{"dev", "prod"} {
+		if other != channel && running[other] {
+			return fmt.Sprintf("注意：GUI 正运行在 %s 通道，要让窗口直接看到请改用 %s（或告知用户当前在看哪个通道）", other, channelExeHint(other))
+		}
+	}
+	if channel == "prod" {
+		return "当前无 GUI 运行；本 CLI 写入 prod 通道库，与用户日常双击的正式版一致（推荐默认）"
+	}
+	return "当前无 GUI 运行；本 CLI 写入 dev 通道库（仅供开发调试；非开发场景请改用 anatomymanager-cli.exe 写 prod）"
+}
+
+func handleWhere(args []string) {
+	fs := flag.NewFlagSet("where", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "以结构化 JSON 输出")
+	dbPath := fs.String("db", "", "覆盖数据库路径（仅调试用，Agent 不应传）")
+	_ = fs.Parse(args)
+
+	resolved := resolveDBPath(*dbPath)
+
+	// 先 stat 再打开：where 是只读自省，不能因为好奇就在另一个通道里凭空造出空库。
+	dbExists := false
+	artworks, files := 0, 0
+	if _, err := os.Stat(resolved); err == nil {
+		dbExists = true
+		if store, err := storage.NewStore(resolved); err == nil {
+			artworks, files, _ = store.Stats()
+			_ = store.Close()
+		}
+	}
+
+	info := whereOutput{
+		Binary:      filepath.Base(os.Args[0]),
+		Channel:     app.Channel(),
+		BuildMode:   app.BuildMode,
+		Version:     app.Version,
+		DBPath:      resolved,
+		DBExists:    dbExists,
+		Artworks:    artworks,
+		Files:       files,
+		RunningGUIs: whereGUIs{Dev: app.GUIRunning(false), Prod: app.GUIRunning(true)},
+	}
+	info.Recommendation = whereRecommendation(info.Channel, info.RunningGUIs)
+
+	if *asJSON {
+		out, _ := json.MarshalIndent(info, "", "  ")
+		fmt.Println(string(out))
+		return
+	}
+
+	guiState := func(running bool) string {
+		if running {
+			return "运行中"
+		}
+		return "未运行"
+	}
+	fmt.Printf("二进制    : %s\n", info.Binary)
+	fmt.Printf("通道      : %s (%s)\n", info.Channel, info.BuildMode)
+	fmt.Printf("版本      : %s\n", info.Version)
+	if info.DBExists {
+		fmt.Printf("数据库    : %s\n", info.DBPath)
+		fmt.Printf("图库内容  : %d 个图谱 / %d 个文件\n", info.Artworks, info.Files)
+	} else {
+		fmt.Printf("数据库    : %s（尚未创建）\n", info.DBPath)
+	}
+	fmt.Printf("GUI 状态  : dev=%s  prod=%s\n", guiState(info.RunningGUIs.Dev), guiState(info.RunningGUIs.Prod))
+	fmt.Printf("建议      : %s\n", info.Recommendation)
 }
 
 func handleSchema(args []string) {
@@ -406,7 +526,7 @@ func handleServe(args []string) {
 	}
 	defer store.Close()
 
-	server := api.NewServer(store)
+	server := api.NewServer(store, currentMeta(resolveDBPath(*dbPath)))
 	if _, err := server.Start(*port, *openBrowser); err != nil {
 		fmt.Fprintf(os.Stderr, "服务异常终止: %v\n", err)
 		os.Exit(1)
