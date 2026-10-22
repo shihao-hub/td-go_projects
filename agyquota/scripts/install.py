@@ -15,6 +15,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPTS_DIR.parent
+OUT_DIR = PROJECT_ROOT / "bin"
 TARGET_DIR = Path(r"D:\Users\language_projects_bin")
 
 PAIRS = (
@@ -35,13 +36,13 @@ def build() -> int:
 
 
 def main() -> int:
-    missing = [name for name, _ in PAIRS if not (PROJECT_ROOT / name).is_file()]
+    missing = [name for name, _ in PAIRS if not (OUT_DIR / name).is_file()]
     if missing:
         print(f"未找到 {', '.join(missing)}，先执行构建...")
         rc = build()
         if rc != 0:
             return rc
-        missing = [name for name, _ in PAIRS if not (PROJECT_ROOT / name).is_file()]
+        missing = [name for name, _ in PAIRS if not (OUT_DIR / name).is_file()]
         if missing:
             print(f"构建后仍未找到: {', '.join(missing)}", file=sys.stderr)
             return 1
@@ -51,7 +52,7 @@ def main() -> int:
         return 1
 
     for source_name, target_name in PAIRS:
-        shutil.copy2(PROJECT_ROOT / source_name, TARGET_DIR / target_name)
+        shutil.copy2(OUT_DIR / source_name, TARGET_DIR / target_name)
         print(f"已安装: {TARGET_DIR / target_name}")
 
     for legacy_name in LEGACY_NAMES:

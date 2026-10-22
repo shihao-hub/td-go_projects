@@ -4,11 +4,8 @@
 /icon.png
 /cmd/agyquota/rsrc_windows_amd64.syso
 
-# 双通道产物（父仓 .gitignore 已忽略 *.exe，这里显式声明一次）
-/agyquota-gui.exe
-/agyquota-gui-dev.exe
-/agyquota-cli.exe
-/agyquota-cli-dev.exe
+# 双通道产物统一落 bin/（dev/release 共四个 exe）
+/bin/
 
 # Python 运行缓存
 __pycache__/

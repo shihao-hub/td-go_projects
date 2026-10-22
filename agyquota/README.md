@@ -15,21 +15,24 @@
 ### 1. 使用 scripts 构建脚本（推荐）
 
 ```powershell
-# 构建 agyquota.exe（版本与 buildID 由 git describe --tags --always --dirty 注入）
+# 双通道产物统一落 bin/（版本与 buildID 由 git describe --tags --always --dirty 注入）
+# dev：bin\agyquota-gui-dev.exe + bin\agyquota-cli-dev.exe
 uv run scripts/build.py
 
 # 发布构建：仅干净 tag 检出（describe 形如 agyquota/v1.2.3）允许通过
+# release：bin\agyquota-gui.exe + bin\agyquota-cli.exe
 uv run scripts/build.py --release
 
-# 构建并自动安装部署至系统 PATH
+# 构建并自动安装部署至系统 PATH（安装 agyquota-gui.exe / agyquota-cli.exe）
 uv run scripts/install.py
 ```
 
-### 2. 手动构建
+### 2. 手动构建（不推荐）
+
+双通道产物需要 `go-winres` 注入 PE 资源与版本号，手工 `go build` 仅供快速验证：
 
 ```powershell
-$describe = git describe --tags --always --dirty
-go build -trimpath -ldflags "-s -w -X agyquota/internal/buildinfo.Version=$describe" -o agyquota.exe ./cmd/agyquota
+go build -trimpath -tags dev,cli -o bin\agyquota-cli-dev.exe ./cmd/agyquota
 ```
 
 ## 快速上手
