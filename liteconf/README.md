@@ -6,7 +6,7 @@
 
 ## 特性
 
-- **双通道产物**：`liteconf-gui.exe` 只开桌面控制台（托盘常驻、窗口几何记忆）；`liteconf-cli.exe` 只跑终端子命令（`serve` / `http` / `mcp` / `schema` / `url`），互不混淆
+- **双通道产物**：`bin/liteconf-gui.exe` 只开桌面控制台（托盘常驻、窗口几何记忆）；`bin/liteconf-cli.exe` 只跑终端子命令（`serve` / `http` / `mcp` / `schema` / `url`），互不混淆
 - **文件即数据库**：配置按 `configs/{app}/{env}.json` 二级目录存储，直接用编辑器改文件就能生效
 - **版本化**：每次变更版本号 +1，内存维护版本/哈希/修改时间元数据
 - **长轮询热更新**：客户端携带已知版本挂起，变更秒级感知（Apollo 同款机制）
@@ -15,7 +15,7 @@
 - **SDK 容错**：断线指数退避自动重连，故障期间继续读最后一份可用配置
 - **内嵌 Web 控制台**：GUI 窗口与浏览器共用同一套 `/ui/` 页面，配置浏览、查看、双模式编辑（JSON 文本 / 键值表）与新建；静态资源经 `go:embed` 随二进制分发
 - **动态端口 + 自动发现**：GUI 与 `serve` 默认绑定 `127.0.0.1:0`，实际地址写入 `runtime.json`，`liteconf url` 与 MCP 子命令自动发现，无需约定端口
-- **MCP 入口**：`liteconf-cli.exe mcp` 启动 stdio MCP server（官方 go-sdk v1.8.0，协议基线 2025-11-25），AI 客户端可直接发现、读取、写入配置
+- **MCP 入口**：`bin/liteconf-cli.exe mcp` 启动 stdio MCP server（官方 go-sdk v1.8.0，协议基线 2025-11-25），AI 客户端可直接发现、读取、写入配置
 - **调试 CLI**：`http` 子命令把参数原样透传给 curlie（HTTPie 语法 + curl 引擎）调试 API，`schema` 导出契约目录（MCP 工具 + CLI 命令同源）
 - **零依赖数据面**：服务端与 client SDK 仅用标准库，GUI 产物才包含 Wails/WebView2 依赖
 
@@ -25,8 +25,8 @@
 
 ```powershell
 cd go_projects\liteconf
-uv run scripts/build.py                 # dev     → build\liteconf-gui-dev.exe + build\liteconf-cli-dev.exe
-uv run scripts/build.py --release       # release → build\liteconf-gui.exe     + build\liteconf-cli.exe
+uv run scripts/build.py                 # dev     → .\bin\liteconf-gui-dev.exe + .\bin\liteconf-cli-dev.exe
+uv run scripts/build.py --release       # release → .\bin\liteconf-gui.exe     + .\bin\liteconf-cli.exe
 ```
 
 release 只在 HEAD 精确命中 `liteconf/v*` tag 且工作区干净时产出，其余情况一律 dev（`--release` 条件不足时退出码 2）。PE 版本资源由 `go-winres` 注入，GUI 与 CLI 的「文件说明」不同。
@@ -34,7 +34,7 @@ release 只在 HEAD 精确命中 `liteconf/v*` tag 且工作区干净时产出�
 ### 启动桌面控制台（推荐）
 
 ```powershell
-.\build\liteconf-gui-dev.exe
+.\bin\liteconf-gui-dev.exe
 ```
 
 - 双击零黑框，窗口显示内嵌 WebUI；关闭窗口不退出进程，托盘常驻，双击托盘图标可重建窗口。
@@ -45,8 +45,8 @@ release 只在 HEAD 精确命中 `liteconf/v*` tag 且工作区干净时产出�
 ### 启动无窗口服务（脚本 / 服务器）
 
 ```powershell
-.\build\liteconf-cli-dev.exe serve                  # 默认 127.0.0.1:0，地址打印在 stdout
-.\build\liteconf-cli-dev.exe serve -addr :8646      # 固定端口（需要外部固定地址时使用）
+.\bin\liteconf-cli-dev.exe serve                  # 默认 127.0.0.1:0，地址打印在 stdout
+.\bin\liteconf-cli-dev.exe serve -addr :8646      # 固定端口（需要外部固定地址时使用）
 ```
 
 | 参数 | 默认值 | 说明 |
@@ -63,20 +63,20 @@ release 只在 HEAD 精确命中 `liteconf/v*` tag 且工作区干净时产出�
 `gui` 产物不接受任何子命令；所有终端能力都在 CLI 产物中：
 
 ```powershell
-.\build\liteconf-cli-dev.exe url                      # 输出运行中实例的地址（GUI/serve 自动发现）
-.\build\liteconf-cli-dev.exe serve                    # 无窗口启动 WebUI + API
-.\build\liteconf-cli-dev.exe http GET :8646/api/app1/dev
-.\build\liteconf-cli-dev.exe http PUT :8646/api/app1/dev key=value
-.\build\liteconf-cli-dev.exe mcp                      # stdio MCP server（自动发现，回退 :8646）
-.\build\liteconf-cli-dev.exe mcp -server http://192.168.1.10:8646
-.\build\liteconf-cli-dev.exe schema                   # 输出契约目录（JSON）：tools + commands
+.\bin\liteconf-cli-dev.exe url                      # 输出运行中实例的地址（GUI/serve 自动发现）
+.\bin\liteconf-cli-dev.exe serve                    # 无窗口启动 WebUI + API
+.\bin\liteconf-cli-dev.exe http GET :8646/api/app1/dev
+.\bin\liteconf-cli-dev.exe http PUT :8646/api/app1/dev key=value
+.\bin\liteconf-cli-dev.exe mcp                      # stdio MCP server（自动发现，回退 :8646）
+.\bin\liteconf-cli-dev.exe mcp -server http://192.168.1.10:8646
+.\bin\liteconf-cli-dev.exe schema                   # 输出契约目录（JSON）：tools + commands
 ```
 
 `--hidden` / `--tray` 在 CLI 通道退化为无窗口 `serve`，供开机自启脚本使用。
 
 `url` 优先读取当前通道的 `runtime.json`，未命中再尝试另一通道，并校验进程存活；实例已退出时自动回退默认地址 `http://127.0.0.1:8646`，不会把陈旧地址交给调用方。
 
-`http` 把全部参数原样透传给 PATH 中的 curlie，stdin/stdout/stderr 直通、不经 shell 包裹，`--help` 等参数归 curlie 而非 liteconf。退出码：0 成功；1 运行失败（如 curlie 缺失，stderr 给出安装指引）；2 调用参数错误；`http` 子命令透传 curlie 的退出码。版本号由构建脚本 `-ldflags -X` 注入（`liteconf-cli-dev.exe --version` 查看）。
+`http` 把全部参数原样透传给 PATH 中的 curlie，stdin/stdout/stderr 直通、不经 shell 包裹，`--help` 等参数归 curlie 而非 liteconf。退出码：0 成功；1 运行失败（如 curlie 缺失，stderr 给出安装指引）；2 调用参数错误；`http` 子命令透传 curlie 的退出码。版本号由构建脚本 `-ldflags -X` 注入（`bin/liteconf-cli-dev.exe --version` 查看）。
 
 ### 依赖
 
@@ -119,7 +119,7 @@ release 只在 HEAD 精确命中 `liteconf/v*` tag 且工作区干净时产出�
 - `liteconf schema` 自本版起输出 `{"name","version","tools":[...],"commands":[...]}`，**移除存量 `interface:"cli"` 字段**（提供 MCP 入口后不再适用《CLI 工具开发标准》5.5 的 cli 例外）；tools 与 MCP 注册同源，新增 `mcp` 子命令。
 - 双通道改造后 CLI 命令契约新增 `serve` 与 `url`；`http` / `mcp` / `schema` / `version` / `help` 语义不变。
 - go.mod 的 go 指令自 1.25.0 升至 **1.26.0**（Wails v3.0.0-beta.33 硬要求）；服务端与 client SDK 业务代码仍仅标准库。
-- `liteconf-server.exe` 已移除，由 `liteconf-cli.exe serve` 取代（同一 Handler、同一 WebUI）；旧启动脚本请改命令，配置数据目录不变。
+- `liteconf-server.exe` 已移除，由 `bin/liteconf-cli.exe serve` 取代（同一 Handler、同一 WebUI）；旧启动脚本请改命令，配置数据目录不变。
 
 ### curlie 常用语法速查
 
@@ -144,15 +144,15 @@ curlie 兼容 HTTPie 语法；本机 Windows 自带 curl 未内置手册（`curl
 示例（PowerShell，固定端口 `serve -addr :8646` 或旧部署）：
 
 ```powershell
-.\build\liteconf-cli-dev.exe http GET :8646/api/discovery
-.\build\liteconf-cli-dev.exe http PUT :8646/api/app1/dev timeout:=30 db:='{\"host\":\"127.0.0.1\"}'
+.\bin\liteconf-cli-dev.exe http GET :8646/api/discovery
+.\bin\liteconf-cli-dev.exe http PUT :8646/api/app1/dev timeout:=30 db:='{\"host\":\"127.0.0.1\"}'
 ```
 
 动态端口下可先取地址再拼接：
 
 ```powershell
-$base = .\build\liteconf-cli-dev.exe url
-.\build\liteconf-cli-dev.exe http GET "$base/api/discovery"
+$base = .\bin\liteconf-cli-dev.exe url
+.\bin\liteconf-cli-dev.exe http GET "$base/api/discovery"
 ```
 
 ### 写入配置
@@ -198,7 +198,7 @@ go get github.com/shihao-hub/liteconf
 import "github.com/shihao-hub/liteconf/client"
 
 c, err := client.New(client.Config{
-    // 服务固定端口（如 `liteconf-cli serve -addr :8646`）时直接写地址；
+    // 服务固定端口（如 `bin/liteconf-cli serve -addr :8646`）时直接写地址；
     // GUI 动态端口场景请读取 runtime.json 的 url，或给 serve 指定固定端口。
     ServerURL: "http://localhost:8646",
     App:       "taskmon", // 应用名，对应 configs/taskmon/
@@ -247,7 +247,7 @@ v := c.Version()
 - 一次 `GET /api/{app}/{env}`，语言自带 HTTP 客户端即可（Python 用 `urllib`，零第三方依赖）
 - 解析统一包络，`code != "ok"` 即视为失败
 - 远程键与本地默认值合并，配置中心里只放必改键（如 `PG_PASSWORD`），其余走代码内默认值
-- 错误显式兜底、绝不静默降级：连不上 → 提示启动 liteconf（GUI 或 `liteconf-cli serve`）；HTTP 404 → 提示去控制台建 app/env；缺必填键 → 启动即报错退出
+- 错误显式兜底、绝不静默降级：连不上 → 提示启动 liteconf（GUI 或 `bin/liteconf-cli serve`）；HTTP 404 → 提示去控制台建 app/env；缺必填键 → 启动即报错退出
 - 服务地址留环境变量覆盖口子（如 `LITECONF_URL`），方便换实例/端口调试
 
 ```python
@@ -296,7 +296,7 @@ liteconf/
 ├── icon.png / icon.ico    # release 图标（构建生成，不入库）
 ├── info.json              # 无 git tag 时的版本基线
 ├── wails.exe.manifest     # 4 段式 WinSxS 清单
-└── build/                 # 构建产物（gitignore）
+└── bin/                   # 构建产物（gitignore）
 ```
 
 运行时数据（`%APPDATA%\language_projects\liteconf\`）：
@@ -312,10 +312,10 @@ liteconf/
 
 | 入口 | 产物 / 通道 | 适用场景 |
 |---|---|---|
-| 桌面控制台 | `liteconf-gui.exe`（GUI） | 本机日常浏览、编辑、新建配置；托盘常驻、窗口几何记忆 |
-| 浏览器 / 无窗口服务 | `liteconf-cli.exe serve`（Console） | 服务器、脚本、远程浏览器访问；动态端口或 `-addr` 固定端口 |
+| 桌面控制台 | `bin/liteconf-gui.exe`（GUI） | 本机日常浏览、编辑、新建配置；托盘常驻、窗口几何记忆 |
+| 浏览器 / 无窗口服务 | `bin/liteconf-cli.exe serve`（Console） | 服务器、脚本、远程浏览器访问；动态端口或 `-addr` 固定端口 |
 | Go 业务进程 | import `client/` SDK | 读优化 + 长轮询热更新 + 变更回调 |
-| AI 客户端 | `liteconf-cli.exe mcp`（stdio MCP） | 发现/读取/写入配置；自动发现运行中实例 |
-| 人调试 | `liteconf-cli.exe http` 透传 + Web 控制台 | HTTPie 语法快速验证 API |
+| AI 客户端 | `bin/liteconf-cli.exe mcp`（stdio MCP） | 发现/读取/写入配置；自动发现运行中实例 |
+| 人调试 | `bin/liteconf-cli.exe http` 透传 + Web 控制台 | HTTPie 语法快速验证 API |
 
-`http` 为纯终端透传，无合理 MCP 形态，不重复暴露；MCP 未暴露 watch 长轮询（挂起 30~120s 与 MCP 请求-响应的等待预算/冲突），等价替代是重读 `liteconf.config.get` 对比 `version`。依赖偏离说明：GUI 产物引入 Wails v3 与 WebView2；CLI 的 MCP 入口引入官方 go-sdk v1.8.0；服务端与 client SDK 保持仅标准库，`liteconf-cli.exe serve` 不包含 Wails 代码。
+`http` 为纯终端透传，无合理 MCP 形态，不重复暴露；MCP 未暴露 watch 长轮询（挂起 30~120s 与 MCP 请求-响应的等待预算/冲突），等价替代是重读 `liteconf.config.get` 对比 `version`。依赖偏离说明：GUI 产物引入 Wails v3 与 WebView2；CLI 的 MCP 入口引入官方 go-sdk v1.8.0；服务端与 client SDK 保持仅标准库，`bin/liteconf-cli.exe serve` 不包含 Wails 代码。
