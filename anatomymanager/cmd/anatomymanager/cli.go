@@ -21,6 +21,8 @@ import (
 )
 
 func main() {
+	defer app.Recover(false)
+
 	if len(os.Args) < 2 {
 		printUsage()
 		return

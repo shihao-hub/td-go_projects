@@ -46,6 +46,7 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
 	}
+	logf("启动 version=%s mode=%s", Version, BuildMode)
 	store, err := storage.NewStore(dbPath)
 	if err != nil {
 		return fmt.Errorf("打开数据库失败: %w", err)
@@ -75,6 +76,7 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 	singleInstanceID := guiSingleInstanceID(IsRelease())
 
 	wailsApp := application.New(application.Options{
+		Logger:      wailsLogger(),
 		Name:        appName,
 		Description: "Anatomy Manager - 精密机械图谱桌面客户端",
 		Icon:        iconICO,
