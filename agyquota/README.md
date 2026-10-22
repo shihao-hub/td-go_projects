@@ -10,7 +10,11 @@
 
 ## 构建与安装
 
-要求 Go 1.25+：
+要求 Go 1.25+，并安装 `go-winres`（注入 PE VERSIONINFO，`rsrc` 不支持）：
+
+```powershell
+go install github.com/tc-hib/go-winres@latest   # 确认 %GOPATH%\bin 在 PATH
+```
 
 ### 1. 使用 scripts 构建脚本（推荐）
 
