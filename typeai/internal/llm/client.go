@@ -5,11 +5,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
+
+	"typeai/internal/buildinfo"
 )
 
 // Message 是发送给聊天接口的一条消息。
@@ -83,6 +87,20 @@ type Client struct {
 	APIKey  string
 	Model   string
 	HTTP    *http.Client
+
+	// SessionID 用于 OpenCode Go 的 x-opencode-session 路由头；同一对话内保持稳定。
+	SessionID string
+}
+
+// NewSessionID 生成一个 UUID v4 文本，作为 OpenCode Go 的会话路由标识。
+func NewSessionID() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("typeai-%d", time.Now().UnixNano())
+	}
+	buf[6] = (buf[6] & 0x0f) | 0x40
+	buf[8] = (buf[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16])
 }
 
 type chatRequest struct {
@@ -140,6 +158,14 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, onDelta fun
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	req.Header.Set("User-Agent", "typeai/"+buildinfo.Version)
+	if strings.Contains(c.BaseURL, "opencode.ai") {
+		sessionID := c.SessionID
+		if sessionID == "" {
+			sessionID = NewSessionID()
+		}
+		req.Header.Set("x-opencode-session", sessionID)
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

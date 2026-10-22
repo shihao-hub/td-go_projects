@@ -33,9 +33,10 @@ func NewChat(cfg config.Config, dataDir string, now time.Time) (*Chat, error) {
 	}
 	return &Chat{
 		client: &llm.Client{
-			BaseURL: cfg.BaseURL,
-			APIKey:  cfg.APIKey,
-			Model:   cfg.Model,
+			BaseURL:   cfg.BaseURL,
+			APIKey:    cfg.APIKey,
+			Model:     cfg.Model,
+			SessionID: llm.NewSessionID(),
 		},
 		store:      store,
 		dataDir:    dataDir,
@@ -81,7 +82,12 @@ func (c *Chat) UpdateConfig(cfg config.Config) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.client = &llm.Client{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Model: cfg.Model}
+	c.client = &llm.Client{
+		BaseURL:   cfg.BaseURL,
+		APIKey:    cfg.APIKey,
+		Model:     cfg.Model,
+		SessionID: llm.NewSessionID(),
+	}
 	c.session.Model = cfg.Model
 	c.session.UpdatedAt = time.Now()
 	if c.hasSaved {
