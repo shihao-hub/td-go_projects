@@ -385,7 +385,7 @@ type sessionSummaryView struct {
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	chat, _, _ := s.snapshot()
-	summaries, err := chat.SessionSummaries()
+	summaries, err := chat.AllSessionSummaries()
 	if err != nil {
 		writeOperationError(w, err)
 		return

@@ -376,9 +376,13 @@ async function loadSessions() {
       els.sessionList.append(note);
       return;
     }
+    const currentSessionID = state.data && state.data.session ? state.data.session.id : "";
     for (const item of items) {
       const button = document.createElement("button");
       button.className = "session-item";
+      if (item.id === currentSessionID) {
+        button.classList.add("active");
+      }
       const title = document.createElement("div");
       title.className = "session-title";
       title.textContent = item.first_user || item.id;
@@ -387,8 +391,14 @@ async function loadSessions() {
       const when = new Date(item.updated_at).toLocaleString();
       meta.textContent = `${when} · ${item.message_count} 条 · ${item.model}`;
       button.append(title, meta);
-      button.title = `恢复会话 ${item.id}`;
-      button.addEventListener("click", () => resumeSession(item.id));
+      button.title = item.id === currentSessionID ? ("当前会话 " + item.id) : ("恢复会话 " + item.id);
+      button.addEventListener("click", () => {
+        if (item.id === currentSessionID) {
+          els.input.focus();
+          return;
+        }
+        resumeSession(item.id);
+      });
       els.sessionList.append(button);
     }
   } catch (error) {

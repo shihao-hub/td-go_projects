@@ -319,6 +319,11 @@ func isValidBranchName(name string) bool {
 	return true
 }
 
+// AllSessionSummaries 返回包含当前会话在内的全量持久化会话摘要，按更新时间降序排列。
+func (c *Chat) AllSessionSummaries() ([]session.SessionSummary, error) {
+	return session.ListSessions(c.dataDir)
+}
+
 // Resume 根据 session ID 恢复会话，替换 Store 和 session 状态。
 func (c *Chat) Resume(sessionID string) (*session.Session, error) {
 	c.mu.Lock()
@@ -332,10 +337,13 @@ func (c *Chat) Resume(sessionID string) (*session.Session, error) {
 	c.store = newStore
 	c.session = *loadedSess
 	c.hasSaved = true
+	if c.client != nil && c.client.Model != "" {
+		c.session.Model = c.client.Model
+	}
 	c.imageMu.Lock()
 	c.imageCache = make(map[imageCacheKey]Image)
 	c.imageMu.Unlock()
-	return loadedSess, nil
+	return &c.session, nil
 }
 
 // SessionSummaries 返回可选择的持久化会话摘要，并隐藏当前进程所在会话。

@@ -133,3 +133,63 @@ func TestSendRequiresAPIKey(t *testing.T) {
 		t.Errorf("error code = %q, want not_configured", operation.Code)
 	}
 }
+
+func TestResumeAlignsModelWithClient(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 10, 9, 22, 0, 0, 0, time.UTC)
+	oldStore, err := session.New(dir, now)
+	if err != nil {
+		t.Fatalf("session.New() error = %v", err)
+	}
+	oldSess := session.Session{
+		SchemaVersion: session.SchemaVersion,
+		ID: oldStore.ID(),
+		Model: "glm-5.3-flash",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Branches: []session.Branch{
+			{
+				ID: session.DefaultRootBranchID,
+				CreatedAt: now,
+				Messages: []session.Message{
+					{Role: "user", Content: "hello", CreatedAt: now},
+					{Role: "assistant", Content: "hi", CreatedAt: now},
+				},
+			},
+		},
+	}
+	if err := oldStore.Save(oldSess); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	chat, err := NewChat(config.Config{
+		BaseURL: "http://localhost",
+		APIKey: "k",
+		Model: "deepseek-v4.1-flash",
+	}, dir, time.Now())
+	if err != nil {
+		t.Fatalf("NewChat() error = %v", err)
+	}
+
+	resumed, err := chat.Resume(oldStore.ID())
+	if err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if resumed.Model != "deepseek-v4.1-flash" {
+		t.Errorf("resumed.Model = %q, want deepseek-v4.1-flash", resumed.Model)
+	}
+	if chat.Model() != "deepseek-v4.1-flash" {
+		t.Errorf("chat.Model() = %q, want deepseek-v4.1-flash", chat.Model())
+	}
+	if chat.Session().Model != "deepseek-v4.1-flash" {
+		t.Errorf("chat.Session().Model = %q, want deepseek-v4.1-flash", chat.Session().Model)
+	}
+
+	all, err := chat.AllSessionSummaries()
+	if err != nil {
+		t.Fatalf("AllSessionSummaries() error = %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("AllSessionSummaries len = %d, want 1", len(all))
+	}
+}
