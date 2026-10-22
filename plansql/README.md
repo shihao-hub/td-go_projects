@@ -18,10 +18,10 @@
 
 | 通道 | 产物 | 用途 |
 |---|---|---|
-| GUI | `plansql-gui.exe`（dev: `plansql-gui-dev.exe`） | 双击即开桌面工作台，不解析任何子命令；托盘常驻，`--hidden` 为静默托盘 |
-| Console | `plansql-cli.exe`（dev: `plansql-cli-dev.exe`） | 终端 / 脚本 / Agent / MCP 专用，prompt、管道与重定向全合规 |
+| GUI | `bin/plansql-gui.exe`（dev: `bin/plansql-gui-dev.exe`） | 双击即开桌面工作台，不解析任何子命令；托盘常驻，`--hidden` 为静默托盘 |
+| Console | `bin/plansql-cli.exe`（dev: `bin/plansql-cli-dev.exe`） | 终端 / 脚本 / Agent / MCP 专用，prompt、管道与重定向全合规 |
 
-- GUI 窗口内嵌同一套 WebUI 与 REST API，**不依赖后台 daemon**；`plansql-cli ui` 仍可打开由 daemon 托管的浏览器看板。
+- GUI 窗口内嵌同一套 WebUI 与 REST API，**不依赖后台 daemon**；`bin/plansql-cli ui` 仍可打开由 daemon 托管的浏览器看板。
 - GUI 会记住上次打开的项目根；首次启动弹出目录选择。托盘菜单与 WebUI 顶栏都支持随时切换项目。
 - dev 与 release 的产物名、版本号、数据目录、单实例 ID、图标完全隔离：
   - 数据目录 `%APPDATA%\language_projects\plansql\{dev,prod}`（回退 `~/.language_projects/plansql/<通道>`）；
@@ -35,8 +35,8 @@
 go install github.com/tc-hib/go-winres@latest
 
 cd go_projects/plansql
-uv run scripts/build.py            # 开发构建 → plansql-gui-dev.exe + plansql-cli-dev.exe
-uv run scripts/build.py --release  # 发布构建 → plansql-gui.exe + plansql-cli.exe
+uv run scripts/build.py            # 开发构建 → bin/plansql-gui-dev.exe + bin/plansql-cli-dev.exe
+uv run scripts/build.py --release  # 发布构建 → bin/plansql-gui.exe + bin/plansql-cli.exe
 ```
 
 发布构建要求 HEAD 精确命中 `plansql/vX.Y.Z` tag 且工作区干净，否则退出码 2 且不产出正式名。
@@ -51,7 +51,7 @@ go build -tags cli,dev -o plansql-cli-dev.exe ./cmd/plansql
 
 ## CLI 常用命令
 
-以下命令均以 Console 通道 `plansql-cli.exe` 执行：
+以下命令均以 Console 通道 `bin/plansql-cli.exe` 执行：
 
 ```bash
 # 1. 扫描当前工作区所有 **/plans/** 和 **/specs/** 文档与 SQL 的对齐情况
@@ -81,7 +81,7 @@ plansql-cli schema
 
 ## 桌面工作台
 
-双击 `plansql-gui.exe` 即可打开；窗口尺寸、位置与最大化状态会自动记忆（`window.json`）。
+双击 `bin/plansql-gui.exe` 即可打开；窗口尺寸、位置与最大化状态会自动记忆（`window.json`）。
 托盘菜单提供：打开工作台、在默认浏览器中打开、切换项目目录、开机自启（仅 release）、彻底退出。
 
 ## MCP 集成 (给 AI Agent 使用)

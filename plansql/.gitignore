@@ -1,5 +1,6 @@
 # 构建生成物（由 scripts/build.py 与 scripts/render_icon.py 自动重建，不入库）
 # 仅限项目根目录，internal/app/icon.ico 是 go:embed 资源，必须入库
+/bin/
 /icon.ico
 /icon.png
 /cmd/plansql/rsrc_windows_amd64.syso
