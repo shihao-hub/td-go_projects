@@ -92,6 +92,7 @@ func LaunchGUI(root string, port int, hidden bool) error {
 	singleInstanceID := guiSingleInstanceID(version.IsRelease())
 
 	wailsApp := application.New(application.Options{
+		Logger:      appenv.WailsLogger(),
 		Name:        appName,
 		Description: "liteconf - 轻量配置中心桌面控制台",
 		Icon:        iconICO,
