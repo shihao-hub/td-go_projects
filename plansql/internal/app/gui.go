@@ -73,6 +73,7 @@ func LaunchGUI(hidden bool) error {
 	var appInstance *App
 
 	wailsApp := application.New(application.Options{
+		Logger:      wailsLogger(),
 		Name:        appName,
 		Description: "plansql - Plan/Spec 状态管理桌面工作台",
 		Icon:        iconICO,
