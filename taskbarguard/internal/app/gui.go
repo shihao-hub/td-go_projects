@@ -44,6 +44,7 @@ type App struct {
 // LaunchGUI 启动 WebUI + Wails 桌面壳。port 传 0 时动态探测可用端口，
 // 让 dev 与 release 实例可并行运行而互不抢占。
 func LaunchGUI(port int, hidden bool) error {
+	logf("启动 version=%s channel=%s hidden=%v", buildinfo.Version, buildinfo.Channel(), hidden)
 	paths := core.ResolvePaths(buildinfo.Channel(), "", "")
 	service := core.New(paths)
 
@@ -75,6 +76,7 @@ func LaunchGUI(port int, hidden bool) error {
 	singleInstanceID := guiSingleInstanceID(buildinfo.IsRelease())
 
 	wailsApp := application.New(application.Options{
+		Logger:      wailsLogger(),
 		Name:        appName,
 		Description: "TaskbarGuard - Windows 任务栏图标守卫",
 		Icon:        iconICO,
