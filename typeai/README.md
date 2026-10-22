@@ -2,8 +2,8 @@
 
 `typeai` 是一个本地优先的 AI 对话工具，提供两条互不干扰的使用通道：
 
-- **桌面工作台**：双击 `typeai-gui.exe` 打开 Wails 窗口，窗口内是原生 WebUI（HTTP/SSE），支持 Markdown、thinking 折叠、分支树、会话恢复与图片输入。
-- **终端 TUI**：`typeai-cli.exe` 在 TTY 下进入 Bubble Tea TUI；管理命令、脚本与 Agent 一律使用 console 通道。
+- **桌面工作台**：双击 `bin/typeai-gui.exe` 打开 Wails 窗口，窗口内是原生 WebUI（HTTP/SSE），支持 Markdown、thinking 折叠、分支树、会话恢复与图片输入。
+- **终端 TUI**：`bin/typeai-cli.exe` 在 TTY 下进入 Bubble Tea TUI；管理命令、脚本与 Agent 一律使用 console 通道。
 
 两条通道共享同一套业务层、同一份配置与会话数据；GUI 与 `serve` 共用同一个 HTTP Handler，业务通信只走 HTTP/SSE，Wails 仅承担窗口、托盘与自启等宿主能力。
 
@@ -11,8 +11,8 @@
 
 | 通道 | dev | release | 用途 |
 |---|---|---|---|
-| GUI | `typeai-gui-dev.exe` | `typeai-gui.exe` | 双击即开桌面工作台，不解析任何子命令；`--hidden` / `--tray` 为静默托盘 |
-| Console | `typeai-cli-dev.exe` | `typeai-cli.exe` | 终端 TUI、`config` / `schema` / `version` / `help` / `serve` |
+| GUI | `bin/typeai-gui-dev.exe` | `bin/typeai-gui.exe` | 双击即开桌面工作台，不解析任何子命令；`--hidden` / `--tray` 为静默托盘 |
+| Console | `bin/typeai-cli-dev.exe` | `bin/typeai-cli.exe` | 终端 TUI、`config` / `schema` / `version` / `help` / `serve` |
 
 - GUI 产物（PE Subsystem 2）不输出任何 CLI 文本；CLI 产物（Subsystem 3）不开窗口。
 - dev 与 release 的产物名、版本、数据目录、单实例 ID、图标完全隔离。
@@ -175,8 +175,8 @@ session JSON 采用 **Schema Version 3** 结构：
 go install github.com/tc-hib/go-winres@latest
 
 cd D:\Users\language_projects\go_projects\typeai
-uv run scripts/build.py            # dev     → typeai-gui-dev.exe + typeai-cli-dev.exe
-uv run scripts/build.py --release  # release → typeai-gui.exe     + typeai-cli.exe
+uv run scripts/build.py            # dev     → bin/typeai-gui-dev.exe + bin/typeai-cli-dev.exe
+uv run scripts/build.py --release  # release → bin/typeai-gui.exe     + bin/typeai-cli.exe
 ```
 
 发布构建要求 HEAD 精确命中 `typeai/vX.Y.Z` tag 且工作区干净，否则退出码 2 且不产出正式名。
@@ -184,9 +184,9 @@ uv run scripts/build.py --release  # release → typeai-gui.exe     + typeai-cli
 验收：
 
 ```powershell
-.\typeai-cli-dev.exe version
-.\typeai-cli-dev.exe schema
-.\typeai-cli-dev.exe serve --open
+.\bin\typeai-cli-dev.exe version
+.\bin\typeai-cli-dev.exe schema
+.\bin\typeai-cli-dev.exe serve --open
 go vet ./...
 go test ./...
 ```

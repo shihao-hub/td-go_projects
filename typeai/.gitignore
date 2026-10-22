@@ -1,12 +1,9 @@
-# 旧构建输出目录（保留忽略，避免历史产物入库）
+# 旧构建输出目录（历史产物，构建脚本会清理其中 exe）
 build/
 
 # 构建生成物（由 scripts/build.py 与 scripts/render_icon.py 自动重建，不入库）
 # 仅限项目根目录，internal/app/icon.ico 是 go:embed 资源，必须入库
-/typeai-gui.exe
-/typeai-gui-dev.exe
-/typeai-cli.exe
-/typeai-cli-dev.exe
+/bin/
 /icon.ico
 /icon.png
 /cmd/typeai/rsrc_windows_amd64.syso

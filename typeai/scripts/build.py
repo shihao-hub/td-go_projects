@@ -33,6 +33,8 @@ import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 四个产物统一落 bin/；勿用 build/（Wails 资源目录）或 dist/（前端产物）。
+OUT_DIR = PROJECT_ROOT / "bin"
 TAG_PREFIX = "typeai/"
 
 WINRES_EXE = Path(os.environ.get("GO_WINRES") or (shutil.which("go-winres") or ""))
@@ -43,19 +45,31 @@ ICON_RELEASE = PROJECT_ROOT / "icon.ico"
 ICON_DEV = PROJECT_ROOT / "internal" / "app" / "icon_dev.ico"
 SYSO_OUT = PROJECT_ROOT / "cmd" / "typeai" / "rsrc_windows_amd64.syso"
 
-EXE_GUI_RELEASE = PROJECT_ROOT / "typeai-gui.exe"
-EXE_GUI_DEV = PROJECT_ROOT / "typeai-gui-dev.exe"
-EXE_CLI_RELEASE = PROJECT_ROOT / "typeai-cli.exe"
-EXE_CLI_DEV = PROJECT_ROOT / "typeai-cli-dev.exe"
+EXE_GUI_RELEASE = OUT_DIR / "typeai-gui.exe"
+EXE_GUI_DEV = OUT_DIR / "typeai-gui-dev.exe"
+EXE_CLI_RELEASE = OUT_DIR / "typeai-cli.exe"
+EXE_CLI_DEV = OUT_DIR / "typeai-cli-dev.exe"
+
+# 历史产物（旧单产物与迁移前根目录双通道产物），构建后自动清理，避免与新产物混淆。
+LEGACY_EXES = (
+    PROJECT_ROOT / "typeai.exe",
+    PROJECT_ROOT / "typeai-dev.exe",
+    PROJECT_ROOT / "typeai-gui.exe",
+    PROJECT_ROOT / "typeai-gui-dev.exe",
+    PROJECT_ROOT / "typeai-cli.exe",
+    PROJECT_ROOT / "typeai-cli-dev.exe",
+    PROJECT_ROOT / "build" / "typeai.exe",
+    PROJECT_ROOT / "build" / "typeai.exe~",
+)
 
 RENDER_ICON = PROJECT_ROOT / "scripts" / "render_icon.py"
 
 # 构建自身生成的未跟踪文件：不计入「工作区不干净」
 GENERATED_SUFFIXES = (
-    "/typeai-gui.exe",
-    "/typeai-gui-dev.exe",
-    "/typeai-cli.exe",
-    "/typeai-cli-dev.exe",
+    "/bin/typeai-gui.exe",
+    "/bin/typeai-gui-dev.exe",
+    "/bin/typeai-cli.exe",
+    "/bin/typeai-cli-dev.exe",
     "/cmd/typeai/rsrc_windows_amd64.syso",
     "/winres/.tmp-winres.json",
     "/icon.ico",
@@ -227,6 +241,8 @@ def main() -> int:
         render_release_icon()
 
     # 3. 逐通道 go build（每通道两个产物：GUI 零黑框 + Console 终端友好）
+    OUT_DIR.mkdir(parents=True, exist_ok=True)   # go build 不会自动建父目录
+
     targets = (
         (EXE_GUI_RELEASE if release else EXE_GUI_DEV, True),
         (EXE_CLI_RELEASE if release else EXE_CLI_DEV, False),
@@ -273,6 +289,19 @@ def main() -> int:
     for out_exe, gui in targets:
         size_mb = out_exe.stat().st_size / (1024 * 1024)
         print(f"🎉 构建完成 [{'GUI' if gui else 'Console'}]: {out_exe.name} ({size_mb:.2f} MB)")
+
+    for legacy in LEGACY_EXES:
+        if not legacy.exists():
+            continue
+        try:
+            legacy.unlink()
+        except OSError as exc:
+            print(
+                f"⚠️ 无法清理历史产物（可能仍在运行）: {legacy.relative_to(PROJECT_ROOT)} ({exc})",
+                file=sys.stderr,
+            )
+            continue
+        print(f"🧹 已清理历史产物: {legacy.relative_to(PROJECT_ROOT)}")
     return 0
 
 
