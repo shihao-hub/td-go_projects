@@ -34,8 +34,8 @@ go install github.com/tc-hib/go-winres@latest   # 一次性，装到 %GOPATH%\bi
 
 ```bash
 cd D:\Users\language_projects\go_projects\anatomymanager
-uv run scripts/build.py            # 开发构建 → anatomymanager-gui-dev.exe + anatomymanager-cli-dev.exe
-uv run scripts/build.py --release  # 发布构建 → anatomymanager-gui.exe + anatomymanager-cli.exe
+uv run scripts/build.py            # 开发构建 → bin/anatomymanager-gui-dev.exe + bin/anatomymanager-cli-dev.exe
+uv run scripts/build.py --release  # 发布构建 → bin/anatomymanager-gui.exe + bin/anatomymanager-cli.exe
 ```
 
 - 仅当 HEAD 精确命中 `anatomymanager/v*` tag 且工作区干净时才产出 release，否则 `--release` 直接报错退出；
@@ -50,8 +50,8 @@ uv run scripts/build.py --release  # 发布构建 → anatomymanager-gui.exe + a
 
 | 产物 | PE 子系统 | 用途 |
 | :--- | :--- | :--- |
-| `anatomymanager-gui[-dev].exe` | GUI (`-H windowsgui`) | 双击零黑框；**不承担 CLI 语义**：不管从哪里启动（双击 / 终端 / 快捷方式 / 带任意参数）都是显示桌面工作台与托盘；唯一语义参数 `--hidden`（开机自启的静默托盘，`--tray` 同义） |
-| `anatomymanager-cli[-dev].exe` | Console | 终端 / 脚本 / Agent 调用：shell 正常等待、prompt 与光标正常、管道与重定向可用 |
+| `bin/anatomymanager-gui[-dev].exe` | GUI (`-H windowsgui`) | 双击零黑框；**不承担 CLI 语义**：不管从哪里启动（双击 / 终端 / 快捷方式 / 带任意参数）都是显示桌面工作台与托盘；唯一语义参数 `--hidden`（开机自启的静默托盘，`--tray` 同义） |
+| `bin/anatomymanager-cli[-dev].exe` | Console | 终端 / 脚本 / Agent 调用：shell 正常等待、prompt 与光标正常、管道与重定向可用 |
 
 GUI 子系统进程在 PowerShell / cmd 里是**异步启动**的（shell 打印 prompt 后立即返回），若让它兼跑 CLI，输出只能靠 `AttachConsole` 抢父控制台，必然出现「输出黏在 prompt 行 + 末尾光标悬空」；且 PowerShell 不会把管道句柄传给 GUI 进程，`--json > out.json` 会拿到空文件。这也是 git / git-gui、docker / Docker Desktop、python / pythonw 的做法：**GUI 产物不做 CLI，console 产物不做窗口**。上文示例统一用 `anatomymanager-cli`。
 
@@ -127,8 +127,8 @@ anatomymanager-cli serve --port 8765   # 需要固定端口时显式指定
 
 | 调哪个 exe | 通道 | 读写的库 |
 | :--- | :--- | :--- |
-| `anatomymanager-cli.exe` | prod (release) | `%APPDATA%\language_projects\anatomymanager\prod\anatomy.db` |
-| `anatomymanager-cli-dev.exe` | dev | `...\dev\anatomy.db` |
+| `bin/anatomymanager-cli.exe` | prod (release) | `%APPDATA%\language_projects\anatomymanager\prod\anatomy.db` |
+| `bin/anatomymanager-cli-dev.exe` | dev | `...\dev\anatomy.db` |
 
 GUI 只读自己通道的库（`-gui-dev` 读 dev），**写只能走 CLI**。**禁止用 `--db` 手拼路径**：会造出用户 GUI 永远看不到的孤儿库。
 
