@@ -25,6 +25,14 @@ func IsDev() bool {
 	return BuildMode != ModeRelease
 }
 
+// ModeName 返回归一化后的通道名，供日志与界面展示。
+func ModeName() string {
+	if IsDev() {
+		return ModeDev
+	}
+	return ModeRelease
+}
+
 func SingleInstanceID() string {
 	if IsDev() {
 		return baseSingleInstanceID + ".dev"

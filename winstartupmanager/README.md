@@ -68,3 +68,19 @@ uv run build.py --release
   - `backups/`：删除前的 `.reg` 快照（旧版 `%LOCALAPPDATA%\WinStartupManager\backups` 会在首次访问时复制过来，源目录保留）
   - `webview2/`：WebView2 用户数据
   - `window.json`：窗口尺寸/位置/最大化状态
+  - `winstartupmanager.log`：运行日志
+
+## 生产排障（release 无控制台）
+
+release 产物使用 `-H windowsgui`，没有控制台窗口，排障只依赖落盘日志：
+
+- dev 与 release **都**双写 `stderr + <数据目录>/winstartupmanager.log`，dev 只是额外能看到控制台。
+- 单文件上限 2 MB，超限后下次启动轮转为 `winstartupmanager.log.1`（只保留一份）。
+- 启动横幅记录 `version / commit / mode`；Wails 内部日志（WebView2、AssetServer）与前端 JS 异常（`[FE]` 前缀，同消息 1 分钟去重）一并写入。
+- 安全约定：日志不记录启动项命令行原文与注册表值内容，只记来源、名称与错误。
+- release 启动失败会弹出对话框并给出日志路径。
+
+```powershell
+Get-Content -Encoding UTF8 -Tail 50 "$env:APPDATA\language_projects\winstartupmanager\prod\winstartupmanager.log"
+```
+

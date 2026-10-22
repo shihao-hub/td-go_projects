@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"winstartupmanager/internal/env"
+	"winstartupmanager/internal/logx"
 )
 
 func DataDir() (string, error) {
@@ -74,25 +75,27 @@ func migrateLegacyBackups(destDir string) {
 		if _, err := os.Stat(dst); err == nil {
 			continue
 		}
-		copyFile(src, dst)
+		if err := copyFile(src, dst); err != nil {
+			logx.Warnf("迁移旧备份失败 file=%s: %v", entry.Name(), err)
+		}
 	}
 }
 
-func copyFile(src, dst string) {
+func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
-		return
+		return err
 	}
 	defer in.Close()
 
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
-		return
+		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
 		os.Remove(dst)
-		return
+		return err
 	}
-	out.Close()
+	return out.Close()
 }

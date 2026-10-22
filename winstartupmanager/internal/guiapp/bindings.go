@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"winstartupmanager/internal/engine"
+	"winstartupmanager/internal/logx"
 	"winstartupmanager/internal/model"
 )
 
@@ -73,7 +76,48 @@ func (s *StartupAppService) IsAdmin() bool {
 
 // RestartAsAdmin triggers UAC elevation and restarts.
 func (s *StartupAppService) RestartAsAdmin() error {
-	return engine.RestartAsAdmin()
+	if err := engine.RestartAsAdmin(); err != nil {
+		logx.Errorf("提权重启失败: %v", err)
+		return err
+	}
+	return nil
+}
+
+var (
+	frontendErrorMu   sync.Mutex
+	frontendErrorSeen = make(map[string]time.Time)
+)
+
+// ReportFrontendError 把前端运行时异常写入同一份日志，带同消息 1 分钟去重。
+func (s *StartupAppService) ReportFrontendError(message string, stack string) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+
+	key := message
+	if len(key) > 200 {
+		key = key[:200]
+	}
+
+	frontendErrorMu.Lock()
+	now := time.Now()
+	for k, seenAt := range frontendErrorSeen {
+		if now.Sub(seenAt) >= time.Minute {
+			delete(frontendErrorSeen, k)
+		}
+	}
+	if _, exists := frontendErrorSeen[key]; exists {
+		frontendErrorMu.Unlock()
+		return
+	}
+	frontendErrorSeen[key] = now
+	frontendErrorMu.Unlock()
+
+	if len(stack) > 2000 {
+		stack = stack[:2000]
+	}
+	logx.Errorf("[FE] %s\n%s", message, stack)
 }
 
 // SelectExeFileDialog opens a Windows native file picker for selecting an executable.

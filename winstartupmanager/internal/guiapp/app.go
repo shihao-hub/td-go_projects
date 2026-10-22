@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"winstartupmanager/internal/env"
+	"winstartupmanager/internal/logx"
 	"winstartupmanager/internal/store"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -46,6 +47,7 @@ func Run(opts RunOptions) {
 	}
 
 	app := application.New(application.Options{
+		Logger:      logx.SystemLogger(),
 		Name:        "winstartupmanager",
 		Description: "Windows 开机自启可视化管理工具",
 		Services: []application.Service{
@@ -75,6 +77,7 @@ func Run(opts RunOptions) {
 	})
 
 	a.app = app
+	logx.Infof("初始化 GUI 通道=%s 单实例ID=%s webview2=%s", env.ModeName(), env.SingleInstanceID(), webviewDataPath)
 
 	// Always pre-create window before app.Run() (hidden if started with --hidden)
 	// This guarantees WebView2 environment is properly initialized and avoids
@@ -114,6 +117,8 @@ func (a *App) createWindowLocked(hidden bool) {
 	}
 
 	a.win = a.app.Window.NewWithOptions(opts)
+	logx.Infof("主窗口已创建 width=%d height=%d hasPosition=%v maximised=%v hidden=%v",
+		state.Width, state.Height, state.HasPos, state.Maximised, hidden)
 
 	a.win.RegisterHook(events.Common.WindowShow, func(event *application.WindowEvent) {
 		a.ensureWindowOnScreen(a.win)
@@ -172,6 +177,7 @@ func (a *App) ensureMainWindow() {
 }
 
 func (a *App) quit() {
+	logx.Infof("收到退出请求")
 	a.exiting.Store(true)
 	a.stopWindowStateTimer()
 	a.winMu.Lock()
@@ -247,7 +253,9 @@ func (a *App) saveWindowState(win *application.WebviewWindow) {
 		return
 	}
 	a.setWindowState(state)
-	_ = writeWindowState(state)
+	if err := writeWindowState(state); err != nil {
+		logx.Warnf("保存窗口状态失败: %v", err)
+	}
 }
 
 // ensureWindowOnScreen 在窗口落到已拔掉的外接屏时拉回主屏。

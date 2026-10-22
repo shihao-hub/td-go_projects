@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"golang.org/x/sys/windows/registry"
+	"winstartupmanager/internal/logx"
 	"winstartupmanager/internal/model"
 )
 
@@ -178,7 +179,9 @@ func SaveItem(source model.StartupSource, name string, exePath string, args stri
 	}
 
 	// Default new entry to enabled in StartupApproved
-	_ = SetStartupApproved(source, name, true)
+	if err := SetStartupApproved(source, name, true); err != nil {
+		logx.Warnf("新启动项默认启用写入失败 source=%s name=%s: %v", source, name, err)
+	}
 	return nil
 }
 
@@ -228,7 +231,9 @@ func DeleteItem(source model.StartupSource, name string) error {
 	}
 
 	// 4. Clean StartupApproved
-	_ = DeleteStartupApproved(source, name)
+	if err := DeleteStartupApproved(source, name); err != nil {
+		logx.Warnf("清理 StartupApproved 失败 source=%s name=%s: %v", source, name, err)
+	}
 	return nil
 }
 
