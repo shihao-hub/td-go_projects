@@ -1,9 +1,6 @@
 # 构建生成物（scripts/build.py 与 scripts/render_icon.py 自动重建，不入库）
 # internal/app/icon.ico 是 go:embed 资源，必须入库
-/clictl-gui.exe
-/clictl-gui-dev.exe
-/clictl-cli.exe
-/clictl-cli-dev.exe
+/bin/
 /icon.ico
 /icon.png
 /cmd/clictl/rsrc_windows_amd64.syso

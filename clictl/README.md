@@ -1,11 +1,11 @@
 # clictl
 
-Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台透传启动，`clictl start <名>` 后台分离启动，启动过程被接管并记录。提供**双通道产物**——`clictl-gui`（Wails v3 托盘 + 内嵌 WebUI）与 `clictl-cli`（终端/脚本/Agent），二者共用同一套 HTTP 层与 SQLite 库。
+Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台透传启动，`clictl start <名>` 后台分离启动，启动过程被接管并记录。提供**双通道产物**——`bin/clictl-gui`（Wails v3 托盘 + 内嵌 WebUI）与 `bin/clictl-cli`（终端/脚本/Agent），二者共用同一套 HTTP 层与 SQLite 库。
 
 ## 特性
 
 - **桌面启动台（clictl-gui）**：托盘常驻，窗口内完成注册/搜索/启动/停止/定位/编辑 meta/查看启动记录；关闭窗口不退进程，再次打开精确恢复上次尺寸与位置
-- **双通道产物**：`clictl-gui[-dev].exe` 只出窗口（带任何参数都不做 CLI），`clictl-cli[-dev].exe` 是 console 子系统，prompt/管道/重定向全部合规；二者不可合并（原因见 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md`）
+- **双通道产物**：`bin/clictl-gui[-dev].exe` 只出窗口（带任何参数都不做 CLI），`bin/clictl-cli[-dev].exe` 是 console 子系统，prompt/管道/重定向全部合规；二者不可合并（原因见 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md`）
 - **同一 HTTP Handler**：GUI 与 `clictl serve` 托管完全相同的 WebUI + REST；WebUI 根路径永远是完整工作台，不存在「GUI 有页面、CLI 只有裸 API」的分裂
 - **管理命令永远输出 JSON**：`{"ok":true,"data":...}` / `{"ok":false,"error":{"code":"...","message":"..."}}`
 - **MCP server（`clictl mcp`）**：标准 MCP stdio 协议通道，把注册/启动/执行暴露为带 JSON Schema 的 MCP 工具（`clictl.list` / `clictl.run` 等 10 个）；`clictl schema` 可离线导出与 `tools/list` 同源的工具定义
@@ -22,8 +22,8 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 
 | 产物 | 子系统 | 用途 |
 |---|---|---|
-| `clictl-gui.exe` / `clictl-gui-dev.exe` | Windows GUI | 双击零黑框；只开桌面启动台，忽略除 `--hidden`/`--tray` 外的参数 |
-| `clictl-cli.exe` / `clictl-cli-dev.exe` | Console | 终端、脚本、Agent；全部子命令只在这里 |
+| `bin/clictl-gui.exe` / `bin/clictl-gui-dev.exe` | Windows GUI | 双击零黑框；只开桌面启动台，忽略除 `--hidden`/`--tray` 外的参数 |
+| `bin/clictl-cli.exe` / `bin/clictl-cli-dev.exe` | Console | 终端、脚本、Agent；全部子命令只在这里 |
 
 - dev 与 release 在**产物名、版本号、数据目录、单实例 ID、图标**五个维度完全隔离，可同时运行互不唤醒。
 - GUI 通道适配：`--hidden` / `--tray` 启动静默托盘（开机自启使用）；CLI 通道下它们退化为无窗口 `serve`。
@@ -107,8 +107,8 @@ clictl-cli completion powershell --install   # 写入 $PROFILE 标记区块，�
 
 ```powershell
 cd go_projects/clictl
-uv run scripts/build.py             # dev → clictl-gui-dev.exe + clictl-cli-dev.exe
-uv run scripts/build.py --release   # release → clictl-gui.exe + clictl-cli.exe（需 tag + 干净工作区）
+uv run scripts/build.py             # dev → bin/clictl-gui-dev.exe + bin/clictl-cli-dev.exe
+uv run scripts/build.py --release   # release → bin/clictl-gui.exe + bin/clictl-cli.exe（需 tag + 干净工作区）
 ```
 
 - release 门禁：HEAD 精确命中 `clictl/v*` tag，且 `go_projects` 工作区无未提交改动

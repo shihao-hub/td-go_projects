@@ -32,6 +32,8 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 四个产物统一落 bin/；勿用 build/（Wails 资源目录）或 dist/（前端产物）。
+OUT_DIR = PROJECT_ROOT / "bin"
 TAG_PREFIX = "clictl/"
 
 # go-winres 生成 VERSIONINFO（rsrc 不支持，exe 属性面板会全空）。
@@ -44,23 +46,27 @@ ICON_RELEASE = PROJECT_ROOT / "icon.ico"
 ICON_DEV = PROJECT_ROOT / "internal" / "app" / "icon_dev.ico"
 SYSO_DIR = PROJECT_ROOT / "cmd" / "clictl"
 SYSO_OUT = SYSO_DIR / "rsrc_windows_amd64.syso"
-EXE_GUI_RELEASE = PROJECT_ROOT / "clictl-gui.exe"
-EXE_GUI_DEV = PROJECT_ROOT / "clictl-gui-dev.exe"
-EXE_CLI_RELEASE = PROJECT_ROOT / "clictl-cli.exe"
-EXE_CLI_DEV = PROJECT_ROOT / "clictl-cli-dev.exe"
+EXE_GUI_RELEASE = OUT_DIR / "clictl-gui.exe"
+EXE_GUI_DEV = OUT_DIR / "clictl-gui-dev.exe"
+EXE_CLI_RELEASE = OUT_DIR / "clictl-cli.exe"
+EXE_CLI_DEV = OUT_DIR / "clictl-cli-dev.exe"
 
-# 双通道改造前的单产物，构建后被自动清理（仅删构建产物，不动源码）。
+# 历史产物（旧单产物与迁移前根目录双通道产物），构建后自动清理，避免与新产物混淆。
 LEGACY_EXES = (
     PROJECT_ROOT / "clictl.exe",
     PROJECT_ROOT / "clictl-dev.exe",
+    PROJECT_ROOT / "clictl-gui.exe",
+    PROJECT_ROOT / "clictl-gui-dev.exe",
+    PROJECT_ROOT / "clictl-cli.exe",
+    PROJECT_ROOT / "clictl-cli-dev.exe",
 )
 RENDER_ICON = PROJECT_ROOT / "scripts" / "render_icon.py"
 
 GENERATED_SUFFIXES = (
-    "/clictl-gui.exe",
-    "/clictl-gui-dev.exe",
-    "/clictl-cli.exe",
-    "/clictl-cli-dev.exe",
+    "/bin/clictl-gui.exe",
+    "/bin/clictl-gui-dev.exe",
+    "/bin/clictl-cli.exe",
+    "/bin/clictl-cli-dev.exe",
     "/clictl.exe",
     "/clictl-dev.exe",
     "/cmd/clictl/rsrc_windows_amd64.syso",
@@ -216,6 +222,8 @@ def main() -> int:
     if release:
         render_release_icon()
 
+    OUT_DIR.mkdir(parents=True, exist_ok=True)   # go build 不会自动建父目录
+
     targets = (
         (EXE_GUI_RELEASE if release else EXE_GUI_DEV, True),
         (EXE_CLI_RELEASE if release else EXE_CLI_DEV, False),
@@ -260,9 +268,17 @@ def main() -> int:
         print(f"🎉 构建完成 [{'GUI' if gui else 'Console'}]: {out_exe.name} ({size_mb:.2f} MB)")
 
     for legacy in LEGACY_EXES:
-        if legacy.exists():
+        if not legacy.exists():
+            continue
+        try:
             legacy.unlink()
-            print(f"🧹 已清理历史产物: {legacy.name}")
+        except OSError as exc:
+            print(
+                f"⚠️ 无法清理历史产物（可能仍在运行）: {legacy.relative_to(PROJECT_ROOT)} ({exc})",
+                file=sys.stderr,
+            )
+            continue
+        print(f"🧹 已清理历史产物: {legacy.relative_to(PROJECT_ROOT)}")
     return 0
 
 

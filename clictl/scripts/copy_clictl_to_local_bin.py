@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+OUT_DIR = PROJECT_ROOT / "bin"
 DEST_DIR = Path(r"D:\Users\language_projects_bin")
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -25,8 +26,8 @@ if sys.stderr.encoding and sys.stderr.encoding.lower() not in ("utf-8", "utf8"):
 def resolve(channel: str) -> tuple[Path, Path, str]:
     """返回 (cli 源, gui 源, 通道名)，优先用户指定通道，缺省自动选已存在的。"""
     candidates = {
-        "prod": (PROJECT_ROOT / "clictl-cli.exe", PROJECT_ROOT / "clictl-gui.exe"),
-        "dev": (PROJECT_ROOT / "clictl-cli-dev.exe", PROJECT_ROOT / "clictl-gui-dev.exe"),
+        "prod": (OUT_DIR / "clictl-cli.exe", OUT_DIR / "clictl-gui.exe"),
+        "dev": (OUT_DIR / "clictl-cli-dev.exe", OUT_DIR / "clictl-gui-dev.exe"),
     }
     if channel:
         cli, gui = candidates[channel]
