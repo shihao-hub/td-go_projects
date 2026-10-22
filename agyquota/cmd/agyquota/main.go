@@ -16,6 +16,8 @@ import (
 )
 
 func main() {
+	defer app.Recover(true)
+
 	hidden := false
 	for _, arg := range os.Args[1:] {
 		switch arg {

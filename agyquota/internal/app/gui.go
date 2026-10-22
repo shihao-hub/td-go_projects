@@ -39,6 +39,7 @@ type App struct {
 // LaunchGUI 启动内嵌 WebUI 与 Wails 桌面壳。port 传 0 时由系统动态探测可用端口
 // （默认行为，dev 与 release 实例可并行运行而互不冲突）。
 func LaunchGUI(port int, hidden bool) error {
+	logf("启动 version=%s mode=%s hidden=%v", Version, BuildMode, hidden)
 	serverURL, err := startEmbeddedServer(port)
 	if err != nil {
 		return err
@@ -53,6 +54,7 @@ func LaunchGUI(port int, hidden bool) error {
 	}
 
 	wailsApp := application.New(application.Options{
+		Logger:      wailsLogger(),
 		Name:        appName,
 		Description: "Antigravity 模型配额桌面客户端",
 		Icon:        iconICO,
