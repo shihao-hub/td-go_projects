@@ -10,8 +10,8 @@ Windows 任务栏应用质感图标守卫与自动恢复引擎。
 
 | 通道 | 产物 | 用途 |
 | :--- | :--- | :--- |
-| GUI | `taskbarguard-gui.exe` / `taskbarguard-gui-dev.exe` | 双击零黑框，托盘常驻 + 桌面工作台；**不接受任何子命令** |
-| Console | `taskbarguard-cli.exe` / `taskbarguard-cli-dev.exe` | 终端 / 脚本 / Agent / 计划任务专用，shell 正常等待，管道可用 |
+| GUI | `bin/taskbarguard-gui.exe` / `bin/taskbarguard-gui-dev.exe` | 双击零黑框，托盘常驻 + 桌面工作台；**不接受任何子命令** |
+| Console | `bin/taskbarguard-cli.exe` / `bin/taskbarguard-cli-dev.exe` | 终端 / 脚本 / Agent / 计划任务专用，shell 正常等待，管道可用 |
 
 > 终端里请始终使用 `-cli` 产物。GUI 产物是 `windowsgui` 子系统，PowerShell 不会等待它，`--json` 与重定向都不会有输出。
 
@@ -74,13 +74,13 @@ go_projects/taskbarguard/
 
 ```powershell
 # 打开窗口（默认动态端口）
-.\taskbarguard-gui-dev.exe
+.\bin\taskbarguard-gui-dev.exe
 
 # 静默托盘（开机自启用）
-.\taskbarguard-gui-dev.exe --hidden
+.\bin\taskbarguard-gui-dev.exe --hidden
 
 # 不装 GUI 也能用浏览器打开同一套界面
-.\taskbarguard-cli-dev.exe serve --open
+.\bin\taskbarguard-cli-dev.exe serve --open
 ```
 
 工作台能力：
@@ -100,37 +100,37 @@ go_projects/taskbarguard/
 
 ```powershell
 # 列出可调度的应用与款式
-.\taskbarguard-cli-dev.exe list
+.\bin\taskbarguard-cli-dev.exe list
 
 # 输出机器可读结果
-.\taskbarguard-cli-dev.exe list --json
+.\bin\taskbarguard-cli-dev.exe list --json
 
 # 输出 CLI 契约
-.\taskbarguard-cli-dev.exe schema
-.\taskbarguard-cli-dev.exe run --schema
+.\bin\taskbarguard-cli-dev.exe schema
+.\bin\taskbarguard-cli-dev.exe run --schema
 
 # 调度补丁
-.\taskbarguard-cli-dev.exe run --style blue vscode
-.\taskbarguard-cli-dev.exe run --style 8_underlit_chrome deepseek_harness
-.\taskbarguard-cli-dev.exe run --kill --style pure_dark wt
+.\bin\taskbarguard-cli-dev.exe run --style blue vscode
+.\bin\taskbarguard-cli-dev.exe run --style 8_underlit_chrome deepseek_harness
+.\bin\taskbarguard-cli-dev.exe run --kill --style pure_dark wt
 
 # 恢复官方图标
-.\taskbarguard-cli-dev.exe revert vscode
+.\bin\taskbarguard-cli-dev.exe revert vscode
 
 # 配置
-.\taskbarguard-cli-dev.exe config
-.\taskbarguard-cli-dev.exe set vscode --style silver
-.\taskbarguard-cli-dev.exe set deepseek_harness --custom-icon scripts/deepseek_harness/custom_icons/8_underlit_chrome.ico
+.\bin\taskbarguard-cli-dev.exe config
+.\bin\taskbarguard-cli-dev.exe set vscode --style silver
+.\bin\taskbarguard-cli-dev.exe set deepseek_harness --custom-icon scripts/deepseek_harness/custom_icons/8_underlit_chrome.ico
 
 # 按配置批量应用（--kill 强制关闭占用进程）
-.\taskbarguard-cli-dev.exe apply vscode
-.\taskbarguard-cli-dev.exe apply --kill
+.\bin\taskbarguard-cli-dev.exe apply vscode
+.\bin\taskbarguard-cli-dev.exe apply --kill
 
 # 内嵌 WebUI
-.\taskbarguard-cli-dev.exe serve --port 0 --open
+.\bin\taskbarguard-cli-dev.exe serve --port 0 --open
 
 # 注册登录守护计划任务（指向同目录的 taskbarguard-cli）
-.\taskbarguard-cli-dev.exe install-task
+.\bin\taskbarguard-cli-dev.exe install-task
 ```
 
 `run` 只负责发现脚本、校验参数并调度 `uv run`；不会在 Go 进程内执行 Python 逻辑。
@@ -143,10 +143,10 @@ VS Code、DeepSeek Harness 等应用后台静默更新后会覆盖 PE 图标资�
 
 ```powershell
 # 推荐：强制关闭占用进程并批量恢复所有已启用应用
-.\taskbarguard-cli-dev.exe apply --kill
+.\bin\taskbarguard-cli-dev.exe apply --kill
 
 # 或先手动完全退出目标应用
-.\taskbarguard-cli-dev.exe apply
+.\bin\taskbarguard-cli-dev.exe apply
 ```
 
 **Windows Terminal 独立版（wt）**：免安装版不带自动更新器。升级请用幂等命令 —— 已是最新则退出 0，失败自动回滚：

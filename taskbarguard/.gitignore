@@ -1,11 +1,6 @@
 # 构建生成物（scripts/build.py 与 scripts/render_icon.py 自动重建，不入库）
 # 注意：internal/app/icon.ico 是 go:embed 资源，必须入库
-/taskbarguard-gui.exe
-/taskbarguard-gui-dev.exe
-/taskbarguard-cli.exe
-/taskbarguard-cli-dev.exe
-/taskbarguard.exe
-/taskbarguard-dev.exe
+/bin/
 /icon.ico
 /icon.png
 /cmd/taskbarguard/rsrc_windows_amd64.syso

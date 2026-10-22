@@ -33,6 +33,8 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 四个产物统一落 bin/；勿用 build/（Wails 资源目录）或 dist/（前端产物）。
+OUT_DIR = PROJECT_ROOT / "bin"
 TAG_PREFIX = "taskbarguard/"
 
 # go-winres 支持 VERSIONINFO；rsrc 不支持，会导致 exe 属性面板版本全空。
@@ -44,24 +46,28 @@ MANIFEST = PROJECT_ROOT / "wails.exe.manifest"
 ICON_RELEASE = PROJECT_ROOT / "icon.ico"
 ICON_DEV = PROJECT_ROOT / "internal" / "app" / "icon_dev.ico"
 SYSO_OUT = PROJECT_ROOT / "cmd" / "taskbarguard" / "rsrc_windows_amd64.syso"
-EXE_GUI_RELEASE = PROJECT_ROOT / "taskbarguard-gui.exe"
-EXE_GUI_DEV = PROJECT_ROOT / "taskbarguard-gui-dev.exe"
-EXE_CLI_RELEASE = PROJECT_ROOT / "taskbarguard-cli.exe"
-EXE_CLI_DEV = PROJECT_ROOT / "taskbarguard-cli-dev.exe"
+EXE_GUI_RELEASE = OUT_DIR / "taskbarguard-gui.exe"
+EXE_GUI_DEV = OUT_DIR / "taskbarguard-gui-dev.exe"
+EXE_CLI_RELEASE = OUT_DIR / "taskbarguard-cli.exe"
+EXE_CLI_DEV = OUT_DIR / "taskbarguard-cli-dev.exe"
 
-# 双通道拆分前的单产物命名，构建后自动清理，避免混淆。
+# 历史产物（旧单产物与迁移前根目录双通道产物），构建后自动清理，避免与新产物混淆。
 LEGACY_EXES = (
     PROJECT_ROOT / "taskbarguard.exe",
     PROJECT_ROOT / "taskbarguard-dev.exe",
+    PROJECT_ROOT / "taskbarguard-gui.exe",
+    PROJECT_ROOT / "taskbarguard-gui-dev.exe",
+    PROJECT_ROOT / "taskbarguard-cli.exe",
+    PROJECT_ROOT / "taskbarguard-cli-dev.exe",
 )
 RENDER_ICON = PROJECT_ROOT / "scripts" / "render_icon.py"
 
 # 构建自身生成的未跟踪文件：不计入「工作区不干净」。
 GENERATED_SUFFIXES = (
-    "/taskbarguard-gui.exe",
-    "/taskbarguard-gui-dev.exe",
-    "/taskbarguard-cli.exe",
-    "/taskbarguard-cli-dev.exe",
+    "/bin/taskbarguard-gui.exe",
+    "/bin/taskbarguard-gui-dev.exe",
+    "/bin/taskbarguard-cli.exe",
+    "/bin/taskbarguard-cli-dev.exe",
     "/taskbarguard.exe",
     "/taskbarguard-dev.exe",
     "/cmd/taskbarguard/rsrc_windows_amd64.syso",
@@ -236,6 +242,8 @@ def main() -> int:
     if release:
         render_release_icon()
 
+    OUT_DIR.mkdir(parents=True, exist_ok=True)   # go build 不会自动建父目录
+
     targets = (
         (EXE_GUI_RELEASE if release else EXE_GUI_DEV, True),
         (EXE_CLI_RELEASE if release else EXE_CLI_DEV, False),
@@ -280,9 +288,17 @@ def main() -> int:
         print(f"🎉 构建完成 [{'GUI' if gui else 'Console'}]: {out_exe.name} ({size_mb:.2f} MB)")
 
     for legacy in LEGACY_EXES:
-        if legacy.exists():
+        if not legacy.exists():
+            continue
+        try:
             legacy.unlink()
-            print(f"🧹 已清理历史产物: {legacy.name}")
+        except OSError as exc:
+            print(
+                f"⚠️ 无法清理历史产物（可能仍在运行）: {legacy.relative_to(PROJECT_ROOT)} ({exc})",
+                file=sys.stderr,
+            )
+            continue
+        print(f"🧹 已清理历史产物: {legacy.relative_to(PROJECT_ROOT)}")
     return 0
 
 
