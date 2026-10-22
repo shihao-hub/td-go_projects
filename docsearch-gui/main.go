@@ -42,6 +42,8 @@ type App struct {
 }
 
 func main() {
+	defer Recover()
+
 	port := flag.Int("port", defaultPort, "docsearch 服务监听端口")
 	hidden := flag.Bool("hidden", false, "开机静默启动（仅常驻托盘，不弹窗）")
 	flag.Parse()
@@ -51,6 +53,7 @@ func main() {
 	var appInstance *App
 
 	wailsApp := application.New(application.Options{
+		Logger:      wailsLogger(),
 		Name:        appName,
 		Description: "docsearch 本地语义文档检索桌面托盘壳",
 		Windows: application.WindowsOptions{
