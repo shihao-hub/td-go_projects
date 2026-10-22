@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>typeai</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="brand">typeai</div>
+        <button class="icon-btn" id="new-session" title="新建会话">＋</button>
+      </div>
+      <div class="sidebar-sub">会话</div>
+      <div class="session-list" id="session-list"></div>
+      <div class="sidebar-foot">
+        <button class="text-btn" id="open-settings">连接设置</button>
+        <div class="channel" id="channel"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="tabs" id="tabs"></div>
+        <div class="top-meta" id="top-meta"></div>
+      </header>
+
+      <div class="error-bar" id="error-bar" hidden></div>
+
+      <section class="transcript" id="transcript"></section>
+
+      <footer class="composer">
+        <div class="attachments" id="attachments" hidden></div>
+        <div class="composer-box">
+          <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+          <div class="composer-actions">
+            <button class="icon-btn" id="pick-image" title="添加图片">▧</button>
+            <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden>
+            <span class="hint" id="hint"></span>
+            <button class="send-btn" id="send">发送</button>
+            <button class="send-btn danger" id="cancel" hidden>取消</button>
+          </div>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="settings">
+    <form method="dialog" class="settings-form" id="settings-form">
+      <h2>连接设置</h2>
+      <label>Base URL<input id="cfg-base-url" placeholder="https://api.openai.com/v1"></label>
+      <label>模型<input id="cfg-model" placeholder="gpt-4o-mini"></label>
+      <label>API Key<input id="cfg-api-key" type="password" placeholder="留空表示保持现有密钥"></label>
+      <p class="cfg-note" id="cfg-note"></p>
+      <div class="settings-actions">
+        <button type="button" class="text-btn" id="settings-cancel">取消</button>
+        <button type="submit" class="send-btn" id="settings-save">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

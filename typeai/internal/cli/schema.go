@@ -34,6 +34,12 @@ func commandContracts() []commandContract {
 			Output:      "人读文本或 {ok,data} JSON 包络",
 		},
 		{
+			Name:        "typeai serve",
+			Description: "启动内嵌 WebUI 与 REST/SSE 服务；与 GUI 共用同一 Handler",
+			Input:       "[--port N] [--open]",
+			Output:      "常驻进程；stdout 打印 WebUI URL，根路径为完整工作台",
+		},
+		{
 			Name:        "typeai schema",
 			Description: "导出 CLI 契约目录；不读取配置和数据文件",
 			Input:       "-",

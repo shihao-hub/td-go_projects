@@ -3,10 +3,12 @@ package cli
 import (
 	"fmt"
 	"os"
+
+	"typeai/internal/buildinfo"
 )
 
-// Version 由构建脚本通过 -ldflags 注入，开发构建保持 dev。
-var Version = "dev"
+// Version 由构建脚本通过 -ldflags 注入 buildinfo.Version，开发构建保持 dev。
+var Version = buildinfo.Version
 
 // Run 解析 CLI 参数并返回进程退出码。
 func Run(args []string) int {
@@ -24,6 +26,8 @@ func Run(args []string) int {
 		return cmdSchema(args[1:])
 	case "config":
 		return cmdConfig(args[1:])
+	case "serve":
+		return cmdServe(args[1:])
 	default:
 		fmt.Fprintln(os.Stderr, "typeai: 未知命令:", args[0])
 		fmt.Fprintln(os.Stderr, "用法: typeai help")

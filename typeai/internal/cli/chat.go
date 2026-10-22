@@ -5,13 +5,14 @@ import (
 	"os"
 	"time"
 
+	"typeai/internal/appdata"
 	"typeai/internal/config"
 	"typeai/internal/service"
 	"typeai/internal/tui"
 )
 
 func runChat() int {
-	dir, err := config.DefaultDir()
+	dir, err := appdata.Dir()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "typeai:", err)
 		return 1

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"typeai/internal/appdata"
 	"typeai/internal/config"
 	"typeai/internal/service"
 )
@@ -32,7 +33,7 @@ func configGet(args []string) int {
 	if err != nil {
 		return emitConfigError(badArg(err), jsonMode, 2)
 	}
-	dir, err := config.DefaultDir()
+	dir, err := appdata.Dir()
 	if err != nil {
 		return emitConfigError(err, jsonMode, 1)
 	}
@@ -59,7 +60,7 @@ func configGet(args []string) int {
 }
 
 func configSet(args []string) int {
-	dir, err := config.DefaultDir()
+	dir, err := appdata.Dir()
 	if err != nil {
 		return emitConfigError(err, false, 1)
 	}

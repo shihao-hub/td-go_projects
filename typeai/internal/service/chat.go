@@ -13,7 +13,9 @@ import (
 )
 
 // Chat 编排一次进程内的多轮对话。
+// mu 保护 session / store / hasSaved；流式请求在锁外进行，提交前再核对会话。
 type Chat struct {
+	mu         sync.Mutex
 	client     *llm.Client
 	store      *session.Store
 	dataDir    string
@@ -61,16 +63,72 @@ func NewChat(cfg config.Config, dataDir string, now time.Time) (*Chat, error) {
 }
 
 // Path 返回当前 session JSON 路径。
-func (c *Chat) Path() string { return c.store.Path() }
+func (c *Chat) Path() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.store.Path()
+}
 
 // Model 返回本次对话使用的模型名。
-func (c *Chat) Model() string { return c.session.Model }
+func (c *Chat) Model() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.session.Model
+}
 
-// Session 返回当前会话快照。
-func (c *Chat) Session() session.Session { return c.session }
+// UpdateConfig 热更新后续请求使用的连接配置，并同步会话模型名。
+func (c *Chat) UpdateConfig(cfg config.Config) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.client = &llm.Client{BaseURL: cfg.BaseURL, APIKey: cfg.APIKey, Model: cfg.Model}
+	c.session.Model = cfg.Model
+	c.session.UpdatedAt = time.Now()
+	if c.hasSaved {
+		if err := c.store.Save(c.session); err != nil {
+			return coded("internal", err.Error())
+		}
+	}
+	return nil
+}
+
+// Session 返回当前会话的深拷贝快照，调用方可安全并发读取。
+func (c *Chat) Session() session.Session {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return cloneSession(c.session)
+}
+
+func cloneSession(src session.Session) session.Session {
+	dst := src
+	dst.Messages = cloneMessages(src.Messages)
+	dst.Branches = make([]session.Branch, len(src.Branches))
+	for i, branch := range src.Branches {
+		dst.Branches[i] = branch
+		dst.Branches[i].Messages = cloneMessages(branch.Messages)
+	}
+	return dst
+}
+
+func cloneMessages(src []session.Message) []session.Message {
+	if src == nil {
+		return nil
+	}
+	dst := make([]session.Message, len(src))
+	for i, message := range src {
+		dst[i] = message
+		if message.Images != nil {
+			dst[i].Images = append([]session.Image(nil), message.Images...)
+		}
+	}
+	return dst
+}
 
 // AddBranch 添加一个新分支；如果当前会话已落盘，则立即原子保存。
 func (c *Chat) AddBranch(b session.Branch) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	candidate := c.session
 	candidate.Branches = append(copyBranches(candidate.Branches), b)
 	candidate.ActiveBranchID = b.ID
@@ -85,8 +143,36 @@ func (c *Chat) AddBranch(b session.Branch) error {
 	return nil
 }
 
+// ForkBranch 在 branchID 的第 forkMessageIndex 条消息之后创建子分支并激活。
+// forkMessageIndex 是父分支解析后历史的消息数量（即新分支继承的前缀长度）。
+func (c *Chat) ForkBranch(branchID string, forkMessageIndex int) (session.Branch, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+	newBranch, err := session.CreateBranch(branchID, forkMessageIndex, c.session.Branches, now)
+	if err != nil {
+		return session.Branch{}, coded("bad_args", err.Error())
+	}
+
+	candidate := c.session
+	candidate.Branches = append(copyBranches(candidate.Branches), newBranch)
+	candidate.ActiveBranchID = newBranch.ID
+	candidate.UpdatedAt = now
+	if c.hasSaved {
+		if err := c.store.Save(candidate); err != nil {
+			return session.Branch{}, coded("internal", err.Error())
+		}
+	}
+	c.session = candidate
+	return newBranch, nil
+}
+
 // SetActiveBranch 切换激活分支；如果当前会话已落盘，则立即原子保存。
 func (c *Chat) SetActiveBranch(branchID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if _, ok := session.GetBranch(branchID, c.session.Branches); !ok {
 		return coded("bad_args", fmt.Sprintf("分支 %s 不存在", branchID))
 	}
@@ -108,6 +194,9 @@ func (c *Chat) SetActiveBranch(branchID string) error {
 
 // DeleteBranch 删除指定分支。根分支或存在子分支的分支不能删除。
 func (c *Chat) DeleteBranch(branchID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	branchID = strings.TrimSpace(branchID)
 	if branchID == "" {
 		return coded("bad_args", "分支 ID 不能为空")
@@ -155,6 +244,9 @@ func (c *Chat) DeleteBranch(branchID string) error {
 
 // RenameBranch 重命名指定分支，并级联更新依赖该分支的子分支 ParentID。
 func (c *Chat) RenameBranch(oldID, newName string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	oldID = strings.TrimSpace(oldID)
 	newName = strings.TrimSpace(newName)
 	if oldID == "" || newName == "" {
@@ -223,6 +315,9 @@ func isValidBranchName(name string) bool {
 
 // Resume 根据 session ID 恢复会话，替换 Store 和 session 状态。
 func (c *Chat) Resume(sessionID string) (*session.Session, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	newStore, loadedSess, err := session.LoadByID(c.dataDir, sessionID)
 	if err != nil {
 		return nil, coded("bad_args", err.Error())
@@ -239,6 +334,10 @@ func (c *Chat) Resume(sessionID string) (*session.Session, error) {
 
 // SessionSummaries 返回可选择的持久化会话摘要，并隐藏当前进程所在会话。
 func (c *Chat) SessionSummaries() ([]session.SessionSummary, error) {
+	c.mu.Lock()
+	currentID := c.session.ID
+	c.mu.Unlock()
+
 	summaries, err := session.ListSessions(c.dataDir)
 	if err != nil {
 		return nil, coded("internal", err.Error())
@@ -246,7 +345,7 @@ func (c *Chat) SessionSummaries() ([]session.SessionSummary, error) {
 
 	selectable := make([]session.SessionSummary, 0, len(summaries))
 	for _, summary := range summaries {
-		if summary.ID != c.session.ID {
+		if summary.ID != currentID {
 			selectable = append(selectable, summary)
 		}
 	}
@@ -279,16 +378,21 @@ func (c *Chat) SendBranch(ctx context.Context, branchID string, input string, st
 	if strings.TrimSpace(requestText) == "" && len(images) == 0 {
 		return coded("bad_args", "输入不能为空")
 	}
+	// 构建请求只需一次会话快照；流式期间不持锁，允许其他入口读取状态。
+	c.mu.Lock()
 	if c.client.APIKey == "" {
+		c.mu.Unlock()
 		return coded("not_configured", "尚未配置 API Key，请先执行 typeai config set --api-key <KEY>")
 	}
-
+	sessionID := c.session.ID
+	client := c.client
 	resolvedHistory, err := session.ResolveMessages(branchID, c.session.Branches)
 	if err != nil {
+		c.mu.Unlock()
 		return coded("internal", fmt.Sprintf("解析分支历史失败: %v", err))
 	}
-
 	requestMessages, err := c.buildRequestMessagesFromHistory(resolvedHistory, requestText, images)
+	c.mu.Unlock()
 	if err != nil {
 		if operation := asCoded(err); operation != nil {
 			return operation
@@ -296,7 +400,7 @@ func (c *Chat) SendBranch(ctx context.Context, branchID string, input string, st
 		return coded("invalid_image", err.Error())
 	}
 
-	answer, err := c.client.ChatStream(ctx, requestMessages, onDelta)
+	answer, err := client.ChatStream(ctx, requestMessages, onDelta)
 	if err != nil {
 		if operation := asCoded(err); operation != nil {
 			return operation
@@ -305,6 +409,12 @@ func (c *Chat) SendBranch(ctx context.Context, branchID string, input string, st
 	}
 	if answer == "" {
 		return coded("upstream", "AI 返回了空回答")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.session.ID != sessionID {
+		return coded("internal", "会话已切换，本轮回答未保存")
 	}
 
 	now := time.Now()

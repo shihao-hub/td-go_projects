@@ -1,0 +1,34 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": "__ICON__"
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": "__MANIFEST__"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "__FIXED_VERSION__",
+          "product_version": "__FIXED_VERSION__"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "shihao",
+            "FileDescription": "typeai CLI - 终端 AI 对话工具",
+            "FileVersion": "__VERSION__",
+            "InternalName": "typeai-cli",
+            "LegalCopyright": "© 2026 shihao",
+            "OriginalFilename": "__ORIGINAL_NAME__",
+            "ProductName": "typeai",
+            "ProductVersion": "__VERSION__"
+          }
+        }
+      }
+    }
+  }
+}
