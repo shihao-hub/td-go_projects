@@ -49,3 +49,5 @@ uv run scripts/build.py              # dev 构建（含前端打包）
 - 关闭主窗口：销毁 WebView2 窗口、释放内存，termhub 进程与全部 PTY 会话继续驻留托盘。
 - 托盘左键 / 双击 / 「显示主窗口」：重建窗口，前端自动重连所有运行中会话。
 - 托盘「退出 termhub」：终止全部会话 PTY 后退出进程。
+- Windows 11 默认把新托盘图标收进 `^` 溢出区；点开溢出后单击/双击 termhub 图标即可重建窗口，也可拖到任务栏常显。
+- 构建产物为 GUI 子系统（`-H windowsgui`，无控制台）；日志见 `<dataDir>/termhub.log`。

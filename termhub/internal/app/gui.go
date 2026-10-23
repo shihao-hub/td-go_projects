@@ -73,9 +73,10 @@ func LaunchGUI(port int) error {
 	statePath := windowStatePath(data)
 
 	var (
-		winMu sync.Mutex
-		win   *application.WebviewWindow
-		show  func()
+		winMu    sync.Mutex
+		ensureMu sync.Mutex
+		win      *application.WebviewWindow
+		show     func()
 	)
 
 	wailsApp := application.New(application.Options{
@@ -101,7 +102,7 @@ func LaunchGUI(port int) error {
 			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
 				logger.Info("second instance launch, showing window")
 				if show != nil {
-					show()
+					go show()
 				}
 			},
 		},
@@ -201,11 +202,23 @@ func LaunchGUI(port int) error {
 	}
 
 	show = func() {
+		ensureMu.Lock()
+		defer ensureMu.Unlock()
+
 		winMu.Lock()
 		w := win
+		if w != nil {
+			// 窗口可能被其它路径销毁而指针未及时清理，按 ID 复核存活。
+			if _, exists := wailsApp.Window.GetByID(w.ID()); !exists {
+				logger.Warn("main window gone, rebuilding", "id", w.ID())
+				win = nil
+				w = nil
+			}
+		}
 		if w == nil {
 			w = buildWindow()
 			win = w
+			logger.Info("main window created", "id", w.ID())
 		}
 		winMu.Unlock()
 
@@ -214,6 +227,7 @@ func LaunchGUI(port int) error {
 		}
 		w.Show()
 		w.Focus()
+		logger.Info("main window shown", "id", w.ID())
 	}
 
 	tray := wailsApp.SystemTray.New()
@@ -221,12 +235,25 @@ func LaunchGUI(port int) error {
 	tray.SetTooltip(windowTitle)
 
 	trayMenu := wailsApp.NewMenu()
-	trayMenu.Add("显示主窗口").OnClick(func(*application.Context) { show() })
+	trayMenu.Add("显示主窗口").OnClick(func(*application.Context) {
+		logger.Info("tray menu: show")
+		go show()
+	})
 	trayMenu.AddSeparator()
-	trayMenu.Add("退出 termhub").OnClick(func(*application.Context) { wailsApp.Quit() })
+	trayMenu.Add("退出 termhub").OnClick(func(*application.Context) {
+		logger.Info("tray menu: quit")
+		go wailsApp.Quit()
+	})
 	tray.SetMenu(trayMenu)
-	tray.OnClick(show)
-	tray.OnDoubleClick(show)
+	tray.OnClick(func() {
+		logger.Info("tray left click")
+		go show()
+	})
+	tray.OnDoubleClick(func() {
+		logger.Info("tray double click")
+		go show()
+	})
+	logger.Info("system tray ready")
 
 	show()
 

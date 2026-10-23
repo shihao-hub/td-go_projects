@@ -122,6 +122,19 @@ def four_part_version(version: str) -> str:
     return ".".join(parts)
 
 
+def pe_subsystem(path: Path) -> int:
+    """读取 PE OptionalHeader.Subsystem：2=WINDOWS_GUI，3=CONSOLE。"""
+    with path.open("rb") as f:
+        head = f.read(0x400)
+    if len(head) < 0x40:
+        return 0
+    e_lfanew = int.from_bytes(head[0x3C:0x40], "little")
+    if head[e_lfanew : e_lfanew + 4] != b"PE\0\0":
+        return 0
+    optional_header = e_lfanew + 24
+    return int.from_bytes(head[optional_header + 68 : optional_header + 70], "little")
+
+
 def build_frontend() -> int:
     """esbuild 打包前端 TS 与静态资产到 internal/web/static。"""
     # Windows 下 npx 实为 npx.cmd，CreateProcess 需要完整路径。
@@ -238,8 +251,8 @@ def main() -> int:
     if rc != 0:
         return rc
 
-    # 4. go build（GUI 零黑框，-H windowsgui 经资源模板 manifest 定义子系统）
-    flags = ["-w", "-s"]
+    # 4. go build（GUI 零黑框：PE 子系统必须由 -H windowsgui 指定，manifest 不负责该字段）
+    flags = ["-w", "-s", "-H windowsgui"]
     flags.append(f"-X {MODULE}/internal/version.Version={version}")
     flags.append(f"-X {MODULE}/internal/version.BuildMode={build_mode}")
 
@@ -254,7 +267,16 @@ def main() -> int:
         print(f"❌ go build 失败（exit {r.returncode}）: {out_exe.name}", file=sys.stderr)
         return r.returncode
 
-    # 5. 产物名守卫：dev 必须带 -dev 后缀，release 不得带
+    # 5. PE 子系统守卫：GUI 产物必须是 WINDOWS_GUI，否则双击会弹控制台
+    subsystem = pe_subsystem(out_exe)
+    if subsystem != 2:
+        print(
+            f"❌ GUI 子系统校验失败: {out_exe.name} subsystem={subsystem}（期望 2）",
+            file=sys.stderr,
+        )
+        return 3
+
+    # 6. 产物名守卫：dev 必须带 -dev 后缀，release 不得带
     if release and "dev" in out_exe.stem:
         print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
         return 3
