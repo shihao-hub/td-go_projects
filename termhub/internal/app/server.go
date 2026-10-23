@@ -59,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/sessions", s.handleStartSession)
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleStopSession)
 	mux.HandleFunc("GET /api/v1/sessions/history", s.handleSessionHistory)
+	mux.HandleFunc("DELETE /api/v1/sessions/history/{id}", s.handleDeleteSessionHistory)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/agent", s.handleAgent)
 	mux.HandleFunc("GET /api/v1/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/v1/config", s.handlePutConfig)
@@ -120,6 +121,19 @@ func (s *Server) handleSessionHistory(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: s.svc.History()})
+}
+
+// handleDeleteSessionHistory DELETE /api/v1/sessions/history/{id}
+func (s *Server) handleDeleteSessionHistory(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: "存储未初始化"})
+		return
+	}
+	if err := s.store.DeleteSession(r.PathValue("id")); err != nil {
+		writeJSON(w, http.StatusNotFound, APIResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, APIResponse{OK: true})
 }
 
 // agentRequest POST /api/v1/sessions/{id}/agent

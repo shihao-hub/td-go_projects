@@ -489,3 +489,21 @@ body {
 .agent-followup { display: flex; gap: 8px; }
 .agent-followup input { flex: 1; min-width: 0; }
 
+
+/* 左侧已退出会话 */
+.tab-exited .tab-label { color: var(--text-dim); }
+.tab-exited .tab-sub { color: #6e7681; }
+.tab-status-exited { background: var(--text-dim); }
+.session-section {
+  padding: 10px 9px 4px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  user-select: none;
+}
+.session-card-target {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.22);
+}
+.tab-exited .tab-close { opacity: 0.7; }
+.tab-exited .tab-close:hover { opacity: 1; }

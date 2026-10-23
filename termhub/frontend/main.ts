@@ -42,6 +42,7 @@ interface AgentReply {
 const tabs = new Map<string, TabHandle>();
 let liveSessions: SessionInfo[] = [];
 let exitedSessions: SessionInfo[] = [];
+let exitedSignature = "";
 let config: Config = { entries: [], groups: [] };
 let editingEntryId: string | null = null;
 let editingGroupId: string | null = null;
@@ -175,7 +176,7 @@ async function closeTab(id: string): Promise<void> {
 }
 
 function removeTab(id: string): void {
-  const tabEl = sessionList.querySelector(`[data-id="${id}"]`);
+  const tabEl = sessionList.querySelector(`.tab:not(.tab-exited)[data-id="${id}"]`);
   const wasActive = tabEl?.classList.contains("active") ?? false;
   tabs.delete(id);
   tabEl?.remove();
@@ -218,9 +219,66 @@ async function refreshAllSessions(): Promise<void> {
     ]);
     liveSessions = live;
     exitedSessions = history;
+    renderExitedSidebar();
     if (!sessionsModal.hidden) renderSessionCards();
   } catch {
     // 面板轮询失败时静默，等待下一次刷新。
+  }
+}
+
+/** 已退出会话也进入左侧列表，重启后用户仍能看到并删除。 */
+function renderExitedSidebar(): void {
+  const signature = exitedSessions
+    .map((session) => `${session.id}:${(session.commands ?? []).length}:${session.exited_at ?? ""}`)
+    .join("|");
+  if (signature === exitedSignature) return;
+  exitedSignature = signature;
+
+  sessionList.querySelectorAll(".tab-exited, .session-section").forEach((el) => el.remove());
+  if (exitedSessions.length === 0) return;
+
+  const header = document.createElement("div");
+  header.className = "session-section";
+  header.textContent = "已退出";
+  sessionList.append(header);
+
+  for (const session of exitedSessions) {
+    const tabEl = document.createElement("div");
+    tabEl.className = "tab tab-exited";
+    tabEl.dataset.id = session.id;
+    tabEl.title = `${session.cwd || session.work_dir || ""}
+已退出${session.exit_code !== undefined ? ` · code ${session.exit_code}` : ""}${session.exited_at ? ` · ${new Date(session.exited_at).toLocaleString()}` : ""}`;
+    tabEl.innerHTML = `<span class="tab-status tab-status-exited"></span><span class="tab-body"><span class="tab-label"></span><span class="tab-sub"></span></span><span class="tab-close" title="删除记录">×</span>`;
+    (tabEl.querySelector(".tab-label") as HTMLElement).textContent =
+      dirBase(session.cwd || session.work_dir || "") || session.id;
+    (tabEl.querySelector(".tab-sub") as HTMLElement).textContent =
+      `已退出 · ${(session.commands ?? []).length} 条命令`;
+    tabEl.addEventListener("click", () => void openSessionsFor(session.id));
+    (tabEl.querySelector(".tab-close") as HTMLElement).addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      void deleteExitedSession(session.id);
+    });
+    sessionList.append(tabEl);
+  }
+}
+
+async function openSessionsFor(id: string): Promise<void> {
+  sessionsModal.hidden = false;
+  await refreshAllSessions();
+  const card = byId("session-cards").querySelector<HTMLElement>(`[data-session-id="${id}"]`);
+  if (!card) return;
+  card.scrollIntoView({ block: "nearest" });
+  card.classList.add("session-card-target");
+  setTimeout(() => card.classList.remove("session-card-target"), 1500);
+}
+
+async function deleteExitedSession(id: string): Promise<void> {
+  if (!confirm("删除这条已退出会话记录？")) return;
+  try {
+    await api("DELETE", `/api/v1/sessions/history/${id}`);
+    await refreshAllSessions();
+  } catch (err) {
+    alert(`删除失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -247,6 +305,7 @@ function renderSessionCards(): void {
     const running = session.status === "running";
     const card = document.createElement("div");
     card.className = "session-card";
+    card.dataset.sessionId = session.id;
 
     const head = document.createElement("div");
     head.className = "session-card-head";
@@ -292,7 +351,10 @@ function renderSessionCards(): void {
     if (running) {
       actions.append(miniButton("关闭", () => void terminateFromPanel(session.id), "danger"));
     } else {
-      actions.append(miniButton("重开", () => void reopenSession(session)));
+      actions.append(
+        miniButton("重开", () => void reopenSession(session)),
+        miniButton("删除", () => void deleteExitedSession(session.id), "danger"),
+      );
     }
 
     if (running) {

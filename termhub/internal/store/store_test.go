@@ -119,3 +119,33 @@ func TestWriteLinesNoBOM(t *testing.T) {
 		t.Fatalf("data = %q", data)
 	}
 }
+
+func TestDeleteSession(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendSession(SessionRecord{ID: "s1", WorkDir: `C:\a`}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendSession(SessionRecord{ID: "s2", WorkDir: `C:\b`}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteSession("s1"); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	reopened, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reopened.Session("s1"); ok {
+		t.Fatal("s1 应已删除")
+	}
+	if _, ok := reopened.Session("s2"); !ok {
+		t.Fatal("s2 应保留")
+	}
+	if err := reopened.DeleteSession("missing"); err == nil {
+		t.Fatal("删除不存在记录应报错")
+	}
+}

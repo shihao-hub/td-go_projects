@@ -215,6 +215,29 @@ func (s *Store) Sessions() []SessionRecord {
 	return out
 }
 
+// DeleteSession 删除一条已退出会话记录。
+func (s *Store) DeleteSession(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]SessionRecord, 0, len(s.sessions))
+	found := false
+	for _, rec := range s.sessions {
+		if rec.ID == id {
+			found = true
+			continue
+		}
+		kept = append(kept, rec)
+	}
+	if !found {
+		return fmt.Errorf("会话记录不存在: %s", id)
+	}
+	s.sessions = kept
+	doc := struct {
+		Sessions []SessionRecord `json:"sessions"`
+	}{Sessions: s.sessions}
+	return writeJSON(filepath.Join(s.dir, sessionsFileName), doc)
+}
+
 // Session 按 ID 查找已退出会话记录。
 func (s *Store) Session(id string) (SessionRecord, bool) {
 	s.mu.Lock()
