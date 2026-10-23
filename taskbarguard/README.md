@@ -15,6 +15,8 @@ Windows 任务栏应用质感图标守卫与自动恢复引擎。
 
 > 终端里请始终使用 `-cli` 产物。GUI 产物是 `windowsgui` 子系统，PowerShell 不会等待它，`--json` 与重定向都不会有输出。
 
+> 二进制已内嵌 WebUI 与 `scripts/` 资产：目标机没有外置 `scripts/` 时会释放到数据目录，因此分发单 exe 即可（仍需目标机具备 `uv` 与 Python 3.11+）。
+
 ---
 
 ## 项目结构
@@ -22,6 +24,7 @@ Windows 任务栏应用质感图标守卫与自动恢复引擎。
 ```text
 go_projects/taskbarguard/
 ├── go.mod
+├── scripts_embed.go            # go:embed scripts，单 exe 分发用的内嵌资产
 ├── cmd/taskbarguard/
 │   ├── main.go                 # GUI 入口（!cli）
 │   └── cli.go                  # Console 入口（cli）
@@ -50,7 +53,8 @@ go_projects/taskbarguard/
 - dev 产物写 `dev`，release 产物写 `prod`，互不覆盖；
 - GUI 与 CLI 共用同一通道配置；
 - 首次运行会把 exe 同级（或当前工作目录）的历史 `config.json` 复制到新目录，旧文件保留；
-- `scripts/` 默认按 exe 同级目录解析（仓库内开发时即项目根），可用 `--scripts-dir` 覆盖；
+- `scripts/` 依次探测 exe 同级、exe 上级、当前工作目录，可用 `--scripts-dir` 覆盖；
+- 以上位置都没有 `scripts/` 时（单 exe 分发），自动释放内嵌脚本到数据目录 `scripts/`，内容指纹一致则复用；
 - `--config` / `--file` 仍可显式指定配置路径。
 
 仓库根目录的 `config.json` 作为默认偏好快照随仓库分发，当前内容：

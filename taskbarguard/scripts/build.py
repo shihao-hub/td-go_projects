@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -122,8 +123,11 @@ def base_version() -> str:
 
 
 def worktree_dirty() -> bool:
-    """工作区是否含构建产物之外的改动；无法判定时保守按脏处理。"""
-    result = run_git("-c", "status.relativePaths=false", "status", "--porcelain", "--untracked-files=normal")
+    """本项目是否含构建产物之外的改动；无法判定时保守按脏处理。
+
+    范围限定在 taskbarguard 目录，monorepo 其他项目的未提交改动不阻塞发布。
+    """
+    result = run_git("-c", "status.relativePaths=false", "status", "--porcelain", "--untracked-files=normal", "--", ".")
     if result.returncode != 0:
         return True
     for line in result.stdout.splitlines():
@@ -135,6 +139,25 @@ def worktree_dirty() -> bool:
             continue
         return True
     return False
+
+
+def scripts_digest() -> str:
+    """计算 scripts 资产指纹；跳过以点或下划线开头的路径，与 go:embed 规则一致。"""
+    digest = hashlib.sha256()
+    root = PROJECT_ROOT / "scripts"
+    entries = []
+    for path in root.rglob("*"):
+        relative = path.relative_to(root)
+        if any(part.startswith((".", "_")) for part in relative.parts):
+            continue
+        if path.is_file():
+            entries.append((relative.as_posix(), path))
+    for relative, path in sorted(entries):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def render_release_icon() -> None:
@@ -233,6 +256,7 @@ def main() -> int:
     else:
         version = f"v{base}-dev" + ("-dirty" if dirty else "")
     build_mode = "release" if release else "dev"
+    scripts_hash = scripts_digest()
 
     print(
         f"📦 构建配置: Version={version}, Mode={build_mode} "
@@ -258,6 +282,7 @@ def main() -> int:
             flags.append("-H windowsgui")
         flags.append(f"-X taskbarguard/internal/buildinfo.Version={version}")
         flags.append(f"-X taskbarguard/internal/buildinfo.BuildMode={build_mode}")
+        flags.append(f"-X taskbarguard/internal/buildinfo.ScriptsHash={scripts_hash}")
 
         tags = [] if release else ["dev"]
         if not gui:

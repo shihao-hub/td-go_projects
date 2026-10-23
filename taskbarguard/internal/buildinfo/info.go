@@ -9,6 +9,8 @@ var (
 	Version = "dev"
 	// BuildMode 编译期通过 -ldflags "-X taskbarguard/internal/buildinfo.BuildMode=release" 注入。
 	BuildMode = "dev"
+	// ScriptsHash 编译期注入的 scripts 资产指纹；为空时运行期扫描内嵌文件树计算。
+	ScriptsHash = ""
 )
 
 // IsRelease 返回当前二进制是否为正式发行版；单一真源是 BuildMode。

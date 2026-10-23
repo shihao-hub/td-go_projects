@@ -132,8 +132,22 @@ func DataDir(channel string) string {
 // 3. 当前工作目录 /scripts（不存在时回退工作目录）
 //
 // config 取数据目录，并在首次运行时把 exe 同级、父级或工作目录里的旧 config.json 复制过去。
+//
+// 外置 scripts 目录不存在时（单 exe 分发），释放内嵌脚本到数据目录并改用该目录。
 func ResolvePaths(channel, scriptsOverride, configOverride string) Paths {
-	return resolvePathsWith(channel, scriptsOverride, configOverride, executableDir(), currentWorkingDir())
+	paths := resolvePathsWith(channel, scriptsOverride, configOverride, executableDir(), currentWorkingDir())
+	if scriptsOverride == "" && !dirExists(paths.ScriptsDir) {
+		if released, err := MaterializeEmbeddedScripts(paths.DataDir); err == nil {
+			paths.ScriptsDir = released
+		}
+	}
+	return paths
+}
+
+// dirExists 判断路径是否为已存在目录。
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func currentWorkingDir() string {
