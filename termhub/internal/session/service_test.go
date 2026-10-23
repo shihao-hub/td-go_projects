@@ -124,3 +124,39 @@ func TestResize_DelegatesToPTY(t *testing.T) {
 		t.Fatalf("Resize: %v", err)
 	}
 }
+
+// TestShutdown_ClosesAllSessions 应用退出时全部会话 PTY 关闭。
+func TestShutdown_ClosesAllSessions(t *testing.T) {
+	ff := &FakeFactory{}
+	svc := NewService(ff)
+	for i := 0; i < 2; i++ {
+		if _, err := svc.StartSession(context.Background(), pty.Options{}); err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+	}
+
+	svc.Shutdown()
+
+	for i, ft := range ff.Terms() {
+		if _, err := ft.Write([]byte("x")); err == nil {
+			t.Fatalf("会话 %d 的 PTY 未关闭", i)
+		}
+	}
+}
+
+// TestListSessions_IncludesWorkDir 快照带出初始目录，供窗口重建时恢复 tab。
+func TestListSessions_IncludesWorkDir(t *testing.T) {
+	ff := &FakeFactory{}
+	svc := NewService(ff)
+	if _, err := svc.StartSession(context.Background(), pty.Options{WorkDir: `C:\work`}); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	got := svc.ListSessions()
+	if len(got) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(got))
+	}
+	if got[0].WorkDir != `C:\work` {
+		t.Fatalf("work_dir = %q, want %q", got[0].WorkDir, `C:\work`)
+	}
+}

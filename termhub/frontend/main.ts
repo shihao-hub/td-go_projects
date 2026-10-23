@@ -122,3 +122,19 @@ function removeTab(id: string): void {
 newButton.addEventListener("click", () => {
   void newTerminal();
 });
+
+/** 窗口重建后自动重连后端仍在运行的会话。 */
+async function restoreSessions(): Promise<void> {
+  try {
+    const resp = await fetch("/api/v1/sessions");
+    const json = await resp.json();
+    if (!json.ok) return;
+    for (const session of json.data as { id: string; work_dir?: string }[]) {
+      openTab(session.id, session.work_dir ?? "");
+    }
+  } catch {
+    // 首次启动没有会话，或后端尚未就绪：保持空工作台。
+  }
+}
+
+void restoreSessions();

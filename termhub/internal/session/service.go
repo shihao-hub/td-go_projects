@@ -29,6 +29,8 @@ type Session struct {
 	ExitCode  int
 	// Source 会话来源：manual / 启动项 id（T02 起使用）。
 	Source string
+	// WorkDir 会话初始工作目录，窗口重建时用于恢复 tab。
+	WorkDir string
 
 	mu sync.Mutex
 	// pty 为 nil 时不允许写输入（会话已退出）。
@@ -86,6 +88,7 @@ func (s *Service) StartSession(ctx context.Context, opts pty.Options) (string, e
 		Status:    StatusRunning,
 		StartedAt: time.Now(),
 		Source:    opts.Source,
+		WorkDir:   opts.WorkDir,
 		pt:        t,
 		cols:      cols,
 		rows:      rows,
@@ -217,6 +220,7 @@ type Snapshot struct {
 	Status    Status      `json:"status"`
 	StartedAt time.Time   `json:"started_at"`
 	ExitCode  int         `json:"exit_code"`
+	WorkDir   string      `json:"work_dir"`
 	Opts      pty.Options `json:"-"`
 }
 
@@ -231,9 +235,29 @@ func (s *Service) ListSessions() []Snapshot {
 			Status:    sess.Status,
 			StartedAt: sess.StartedAt,
 			ExitCode:  sess.ExitCode,
+			WorkDir:   sess.WorkDir,
 		})
 	}
 	return out
+}
+
+// Shutdown 关闭全部会话的 PTY，供应用退出时回收整棵进程树。
+func (s *Service) Shutdown() {
+	s.mu.Lock()
+	sessions := make([]*Session, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.mu.Unlock()
+
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		pt := sess.pt
+		sess.mu.Unlock()
+		if pt != nil {
+			_ = pt.Close()
+		}
+	}
 }
 
 // maxBuffer 每会话保留的最多输出字节（约十几屏）。

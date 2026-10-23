@@ -187,3 +187,8 @@ func (s *Server) URL() string {
 	defer s.mu.Unlock()
 	return s.addr
 }
+
+// Shutdown 终止全部终端会话（应用退出时由 Wails 关闭钩子调用）。
+func (s *Server) Shutdown() {
+	s.svc.Shutdown()
+}
