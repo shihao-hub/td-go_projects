@@ -2,11 +2,14 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"taskbarguard/internal/core"
@@ -52,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/meta", s.handleMeta)
 	mux.HandleFunc("GET /api/apps", s.handleApps)
+	mux.HandleFunc("GET /api/apps/{name}/icon", s.handleAppIcon)
 	mux.HandleFunc("GET /api/config", s.handleConfig)
 	mux.HandleFunc("POST /api/config", s.handleUpdateConfig)
 	mux.HandleFunc("POST /api/apply", s.handleApply)
@@ -123,6 +127,33 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeData(w, views)
+}
+
+// handleAppIcon 返回指定应用款式的预览图（custom_icons/<style>.png）。
+// 仅支持单个路径段，杜绝路径穿越；找不到 PNG 时回退同款 ICO。
+func (s *Server) handleAppIcon(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	style := r.URL.Query().Get("style")
+	if name == "" || style == "" || strings.ContainsAny(style, `\/`) || style == "." || style == ".." {
+		writeJSONStatus(w, http.StatusBadRequest, failure("invalid_arguments", "缺少或非法的 app/style 参数"))
+		return
+	}
+	app, err := core.FindApp(s.service.Paths.ScriptsDir, name)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !core.Contains(app.Styles, style) {
+		writeJSONStatus(w, http.StatusBadRequest, failure("style_not_found", fmt.Sprintf("未找到应用或款式: %s/%s", name, style)))
+		return
+	}
+	appDir := filepath.Join(s.service.Paths.ScriptsDir, name)
+	// 统一资产布局：预览图取 custom_icons/<style>.png，缺失时回退同款 .ico
+	iconPath := filepath.Join(appDir, "custom_icons", style+".png")
+	if _, err := os.Stat(iconPath); errors.Is(err, os.ErrNotExist) {
+		iconPath = filepath.Join(appDir, "custom_icons", style+".ico")
+	}
+	http.ServeFile(w, r, iconPath)
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {

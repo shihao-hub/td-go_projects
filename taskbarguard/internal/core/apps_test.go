@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,7 +13,12 @@ func TestDiscoverApps(t *testing.T) {
 	if err := os.Mkdir(appDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"patch_vscode_icon.py", "vscode_dark_blue.ico", "vscode_dark_silver.ico"} {
+	for _, name := range []string{"patch_vscode_icon.py", "custom_icons/blue.ico", "custom_icons/silver.ico"} {
+		if strings.Contains(name, "/") {
+			if err := os.MkdirAll(filepath.Join(appDir, filepath.Dir(name)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := os.WriteFile(filepath.Join(appDir, name), []byte{}, 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -59,6 +65,31 @@ func TestFindAppAlias(t *testing.T) {
 			t.Fatalf("expected style underlit_chrome in %#v", app.Styles)
 		}
 	}
+
+	agyDir := filepath.Join(root, "antigravity")
+	if err := os.Mkdir(agyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agyDir, "patch_antigravity_icon.py"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agyIcons := filepath.Join(agyDir, "custom_icons")
+	if err := os.Mkdir(agyIcons, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agyIcons, "underlit_chrome.ico"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, alias := range []string{"antigravity", "agy", "Antigravity.exe", "AGY"} {
+		app, err := FindApp(root, alias)
+		if err != nil {
+			t.Fatalf("alias %q failed: %v", alias, err)
+		}
+		if app.Name != "antigravity" {
+			t.Fatalf("expected antigravity, got %q", app.Name)
+		}
+	}
 }
 
 func TestResolvePathsPrefersExplicitOverrides(t *testing.T) {
@@ -71,5 +102,24 @@ func TestResolvePathsPrefersExplicitOverrides(t *testing.T) {
 	}
 	if paths.Channel != "dev" {
 		t.Fatalf("unexpected channel: %s", paths.Channel)
+	}
+}
+
+func TestResolvePathsParentScriptsDiscovery(t *testing.T) {
+	repoRoot := t.TempDir()
+	binDir := filepath.Join(repoRoot, "bin")
+	scriptsDir := filepath.Join(repoRoot, "scripts")
+	otherCwd := t.TempDir()
+
+	if err := os.Mkdir(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(scriptsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	paths := resolvePathsWith("dev", "", "", binDir, otherCwd)
+	if paths.ScriptsDir != scriptsDir {
+		t.Fatalf("expected parent scripts dir %q, got %q", scriptsDir, paths.ScriptsDir)
 	}
 }

@@ -33,12 +33,14 @@ func DiscoverApps(scriptsDir string) ([]AppInfo, error) {
 	return apps, nil
 }
 
-// NormalizeAppName 把常见别名归一为脚本目录名（wt / terminal / powershell）。
+// NormalizeAppName 把常见别名归一为脚本目录名（wt / terminal / powershell, antigravity / agy）。
 func NormalizeAppName(name string) string {
 	normalized := strings.ToLower(strings.TrimSuffix(name, ".exe"))
 	switch normalized {
 	case "wt", "terminal", "windowsterminal", "windows_terminal", "powershell":
 		return "wt"
+	case "antigravity", "agy":
+		return "antigravity"
 	default:
 		return name
 	}
@@ -78,9 +80,6 @@ func InspectApp(dir, name string) (AppInfo, error) {
 		if strings.HasPrefix(file, "patch_") && strings.HasSuffix(file, ".py") {
 			app.Script = filepath.Join(dir, file)
 		}
-		if strings.HasPrefix(file, "vscode_dark_") && strings.HasSuffix(file, ".ico") {
-			app.Styles = append(app.Styles, strings.TrimSuffix(strings.TrimPrefix(file, "vscode_dark_"), ".ico"))
-		}
 	}
 	customIconDir := filepath.Join(dir, "custom_icons")
 	if iconEntries, readErr := os.ReadDir(customIconDir); readErr == nil {
@@ -113,7 +112,7 @@ type Paths struct {
 	DataDir    string `json:"dataDir"`
 }
 
-// DataDir 返回当前通道的运行时数据目录：
+// DataDir 返回当前运行时的用户配置数据目录：
 // %APPDATA%\language_projects\taskbarguard\<channel>，取不到时回退 ~/.language_projects/...
 func DataDir(channel string) string {
 	if base, err := os.UserConfigDir(); err == nil && base != "" {
@@ -127,12 +126,22 @@ func DataDir(channel string) string {
 
 // ResolvePaths 计算本次运行的脚本目录与配置路径。
 //
-// 显式覆盖优先；否则 scripts 取「可执行文件同级 /scripts」（不存在时回退工作目录），
-// config 取数据目录，并在首次运行时把 exe 同级或工作目录里的旧 config.json 复制过去。
+// 显式覆盖优先；否则 scripts 依次探测：
+// 1. 可执行文件同级 /scripts（如打包分发）
+// 2. 可执行文件父级 /scripts（如产物统一落入 bin/ 时探测项目根目录）
+// 3. 当前工作目录 /scripts（不存在时回退工作目录）
+//
+// config 取数据目录，并在首次运行时把 exe 同级、父级或工作目录里的旧 config.json 复制过去。
 func ResolvePaths(channel, scriptsOverride, configOverride string) Paths {
-	exeDir := executableDir()
-	cwd, _ := os.Getwd()
+	return resolvePathsWith(channel, scriptsOverride, configOverride, executableDir(), currentWorkingDir())
+}
 
+func currentWorkingDir() string {
+	cwd, _ := os.Getwd()
+	return cwd
+}
+
+func resolvePathsWith(channel, scriptsOverride, configOverride, exeDir, cwd string) Paths {
 	paths := Paths{Channel: channel}
 	paths.DataDir = DataDir(channel)
 
@@ -142,8 +151,11 @@ func ResolvePaths(channel, scriptsOverride, configOverride string) Paths {
 		paths.ScriptsDir = DefaultScriptsDir
 		if exeDir != "" {
 			candidate := filepath.Join(exeDir, DefaultScriptsDir)
+			parentCandidate := filepath.Join(filepath.Dir(exeDir), DefaultScriptsDir)
 			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 				paths.ScriptsDir = candidate
+			} else if info, err := os.Stat(parentCandidate); err == nil && info.IsDir() {
+				paths.ScriptsDir = parentCandidate
 			} else if cwd != "" {
 				paths.ScriptsDir = filepath.Join(cwd, DefaultScriptsDir)
 			}
@@ -161,12 +173,19 @@ func ResolvePaths(channel, scriptsOverride, configOverride string) Paths {
 	return paths
 }
 
-// migrateConfig 首次运行时把历史 CWD 配置复制到数据目录（旧文件保留不删）。
+// migrateConfig 首次运行时把历史配置复制到数据目录（旧文件保留不删）。
 func migrateConfig(target, exeDir, cwd string) {
 	if _, err := os.Stat(target); err == nil {
 		return
 	}
-	for _, dir := range []string{exeDir, cwd} {
+	candidates := []string{exeDir}
+	if exeDir != "" {
+		candidates = append(candidates, filepath.Dir(exeDir))
+	}
+	if cwd != "" {
+		candidates = append(candidates, cwd)
+	}
+	for _, dir := range candidates {
 		if dir == "" {
 			continue
 		}

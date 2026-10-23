@@ -1,11 +1,11 @@
 from pathlib import Path
 from PIL import Image
 
-vscode_dir = Path(r"D:\Users\language_projects\.scripts\vscode")
+vscode_dir = Path(__file__).resolve().parent / "custom_icons"
 deepseek_icon = Path(r"D:\Users\language_projects\.scripts\custom_icons\3_dark_monochrome_centered.png")
 
-blue_png = vscode_dir / "vscode_dark_blue.png"
-silver_png = vscode_dir / "vscode_dark_silver.png"
+blue_png = vscode_dir / "blue.png"
+silver_png = vscode_dir / "silver.png"
 
 # Load images
 im_blue = Image.open(blue_png).resize((128, 128), Image.LANCZOS)

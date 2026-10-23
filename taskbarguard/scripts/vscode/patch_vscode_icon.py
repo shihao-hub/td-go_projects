@@ -44,8 +44,10 @@ DEFAULT_EXE_CANDIDATES = [
 RCEDIT_DEFAULT_PATH = Path(r"D:\Users\language_projects_bin\rcedit.exe")
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-DEFAULT_BLUE_ICO = SCRIPT_DIR / "vscode_dark_blue.ico"
-DEFAULT_SILVER_ICO = SCRIPT_DIR / "vscode_dark_silver.ico"
+CUSTOM_ICONS_DIR = SCRIPT_DIR / "custom_icons"
+
+DEFAULT_BLUE_ICO = CUSTOM_ICONS_DIR / "blue.ico"
+DEFAULT_SILVER_ICO = CUSTOM_ICONS_DIR / "silver.ico"
 
 
 def find_target_exe(custom_path: str | None) -> Path:

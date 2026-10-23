@@ -19,7 +19,14 @@
   - [1. 支持款式说明](#1-支持款式说明-1)
   - [2. 各款式手动切换命令](#2-各款式手动切换命令-1)
   - [3. 恢复官方原始状态](#3-恢复官方原始状态-1)
-- [五、执行须知与安全准则](#五执行须知与安全准则)
+- [五、Windows Terminal (wt) 模块](#五windows-terminal-wt-模块)
+  - [1. 支持款式说明](#1-支持款式说明-2)
+  - [2. 各款式手动切换命令](#2-各款式手动切换命令-2)
+- [六、Antigravity 模块 (全新接入 🚀)](#六antigravity-模块-全新接入-)
+  - [1. 支持款式说明](#1-支持款式说明-3)
+  - [2. 各款式手动切换命令](#2-各款式手动切换命令-3)
+  - [3. 恢复官方原始状态](#3-恢复官方原始状态-2)
+- [七、执行须知与安全准则](#七执行须知与安全准则)
 
 ---
 
@@ -34,7 +41,7 @@
  └──────────────────────┘       └───────────────────────┘       └───────────────────────┘
 ```
 
-1. **工序 1：参数化数学建模与物理光泽 (Parametric SVG)**：与 Zed 1:1 对齐的 `988x988` 底板 (`rx=150`)，`#24272D -> #0E0F12` 黑曜石渐变与 `14px` 金属微高光边框；主体提取并引入双向地面反弹光与 `<feDropShadow>` 高斯模糊空间微光。
+1. **工序 1：参数化数学建模与物理光泽 (Parametric SVG)**：与 Zed 1:1 对齐的 `988x988` 底板 (`rx=160`)，`#24272D -> #0E0F12` 黑曜石渐变与 `14px` 金属微高光边框；主体提取并引入双向地面反弹光与 `<feDropShadow>` 高斯模糊空间微光。
 2. **工序 2：Chromium/Edge 无头物理光追渲染 (Skia Antialiasing)**：调用 Edge 无头引擎，利用顶级 Skia 2D 图形引擎实现视网膜级抗锯齿，导出 1024x1024 超清 PNG。
 3. **工序 3：Pillow (PIL) 兰索斯多阶 MIP-MAP 抽样**：采用 `LANCZOS` 兰索斯高质量插值算法自顶向下压缩抽样生成 16~256px 全尺寸帧，封装入单文件 ICO。
 
@@ -50,7 +57,7 @@
 
 | 款式编号 | 款式名称 | 图标文件路径 | 设计与视觉特征说明 |
 | :---: | :--- | :--- | :--- |
-| **款式 8** | **环形底光通透立体款 (Underlit Chrome - 当前首选 ⭐)** | `custom_icons/8_underlit_chrome.ico` | **你当前的最终拍板款**。引入汽车工业级地面反弹光设计（背部天光纯白 ➔ 中腹银灰 ➔ 最底腹部被底光重新打亮回纯白），彻底消除下半身暗沉，上下通透灵动，与 Zed / VS Code 完美呼应！ |
+| **款式 8** | **环形底光通透立体款 (Underlit Chrome - 当前首选 ⭐)** | `custom_icons/8_underlit_chrome.ico` | **你当前的最最终拍板款**。引入汽车工业级地面反弹光设计（背部天光纯白 ➔ 中腹银灰 ➔ 最底腹部被底光重新打亮回纯白），彻底消除下半身暗沉，上下通透灵动，与 Zed / VS Code 完美呼应！ |
 | **款式 7** | **白金亮钛立体款 (Bright Titanium)** | `custom_icons/7_bright_titanium.ico` | 腹部最暗处提亮至 #949EB0，整体亮度提升 35%，背部与腹部过渡柔和。 |
 | **款式 5** | **钛金属立体雕刻款 (Titanium Sculpted)** | `custom_icons/5_titanium_sculpted.ico` | 早期钛金属款（腹部暗灰 #555E6B，背部高亮）。 |
 | **款式 6** | **灵动柔光微浮雕款 (Luminous Relief)** | `custom_icons/6_luminous_relief.ico` | 柔和丝绸白银微光（#FFFFFF -> #B8C2CC），比例内收至 0.90，空间通透悬浮。 |
@@ -95,8 +102,8 @@ uv run scripts/deepseek_harness/patch_deepseek_harness_icon.py --restore
 
 | 款式参数 (`--style`) | 图标文件路径 | 特色说明 |
 | :--- | :--- | :--- |
-| **`blue` (科技蓝微光 · 默认推荐)** | `vscode_dark_blue.ico` | 经典 VS Code 分层蝴蝶缎带 + 科技蓝发光投影，辨识度高且完美融入暗黑底板，视觉平衡最佳 |
-| **`silver` (极客银白款)** | `vscode_dark_silver.ico` | 纯白/银灰金属微光质感，与 Zed、DSH 底光鲸鱼达成 100% 黑白极简统一 |
+| **`blue` (科技蓝微光 · 默认推荐)** | `custom_icons/blue.ico` | 经典 VS Code 分层蝴蝶结带 + 科技蓝发光投影，辨识度高且完美融入暗黑底板，视觉平衡最佳 |
+| **`silver` (极客银白款)** | `custom_icons/silver.ico` | 纯白/银灰金属微光质感，与 Zed、DSH 底光鲸鱼达成 100% 黑白极简统一 |
 
 ---
 
@@ -131,7 +138,7 @@ uv run scripts/vscode/patch_vscode_icon.py --restore
 | 款式参数 (`--style`) | 图标文件路径 | 特色说明 |
 | :--- | :--- | :--- |
 | **`underlit_chrome` (环形底光通透立雕款 · 终极首选 🏆)** | `custom_icons/underlit_chrome.ico` | **与 DeepSeek 8号底光款技术同源**。彻底剔除多层碎色块与晦暗方框，放大并提纯 `IJ _` 核心徽标，引入汽车工业级双向地面反弹底光（顶反光 #FFFFFF ➔ 腹收敛 #9BA5B4 ➔ 底光打亮 #FFFFFF），搭配极简暗晶微倒角衬底，体量饱满大气，与 Zed、DBeaver 达成 100% 现代任务栏呼吸感！ |
-| **`pure_sculpted` (极简微光立体徽标款)** | `custom_icons/pure_sculpted.ico` | 剔除所有背景杂物，仅将极度放大的钛金立雕 `IJ _` 悬浮在黑曜石底板正中央，白光微晕漫反射，视觉焦点最纯粹、最锐利 |
+| **`pure_sculpted` (极简微光立体立徽款)** | `custom_icons/pure_sculpted.ico` | 剔除所有背景杂物，仅将极度放大的钛金立雕 `IJ _` 悬浮在黑曜石底板正中央，白光微晕漫反射，视觉焦点最纯粹、最锐利 |
 | **`titanium_prism` (钛金高对比光刃款)** | `custom_icons/titanium_prism.ico` | 保留 JetBrains 标志性折角光刃几何，但整体尺寸放大 28%，将晦暗色块重塑为高光镜面钛金双面刃，核心卡片黑金分明，摆脱“缩成一团”的憋屈感 |
 | **`silver` (极客银白金属原版)** | `custom_icons/silver.ico` | 原版等比缩放银白款（多层几何背景 + 中心暗色方块） |
 | **`brand` (经典微光彩极款)** | `custom_icons/brand.ico` | 保持 JetBrains 经典标志性彩极光渐变（暖橙 ➔ 玫红 ➔ 电光蓝） |
@@ -205,7 +212,53 @@ go run . run --style underlit_chrome wt
 
 ---
 
-## 六、执行须知与安全准则
+## 六、Antigravity 模块 (全新接入 🚀)
+
+模块路径：`go_projects\taskbarguard\scripts\antigravity\`
+
+### 1. 支持款式说明
+
+所有图标均保存在 `custom_icons/` 目录下（底板尺寸 `988x988`，圆角半径 `rx=160`，与 Zed / DSH / WT 1:1 绝对对齐）：
+
+| 款式参数 (`--style`) | 图标文件路径 | 特色说明 |
+| :--- | :--- | :--- |
+| **`underlit_chrome` (环形底光通透银钛款 · 终极首选 🏆)** | `custom_icons/underlit_chrome.ico` | **与 DeepSeek 8号款完全同源**。将彩虹引力弧重塑为具有汽车级双向地面反弹光的立体铬金属（顶部天光高亮 ➔ 中腰深邃收敛 ➔ 底部反弹强光打亮），彻底告别突兀白底，与左侧 DeepSeek Harness 及右侧 Windows Terminal 达成 100% 孪生级黑曜石极客质感！ |
+| **`dark_rainbow` (暗黑经典彩虹款 · 原汁原味 ⭐)** | `custom_icons/dark_rainbow.ico` | 相同规格的黑曜石金属底板上，保留 Antigravity 原版标志性高保真彩色光谱引力弧，并附带优雅柔和的霓虹外发光微光，兼顾暗黑统一与高辨识度 |
+| **`titanium_prism` (钛金冷光棱镜款)** | `custom_icons/titanium_prism.ico` | 冷灰钛金主色调，微弱边缘棱镜彩光折射，内敛克制，未来极客感十足 |
+| **`pure_dark` (黑曜石纯白微光款)** | `custom_icons/pure_dark.ico` | 纯黑底板搭配纯白高对比立体浮雕引力弧，追求最纯粹的极简主义 |
+| **`pure_floating_rainbow` (纯悬浮无底板彩虹款)** | `custom_icons/pure_floating_rainbow.ico` | 彻底剔除底板，超大尺度通透纯悬浮彩虹引力弧，自带柔和环境投影 |
+
+---
+
+### 2. 各款式手动切换命令
+
+```powershell
+# 【强烈推荐 🏆】应用环形底光通透银钛款（对标 DeepSeek 8号底光款与 Terminal）
+uv run scripts/antigravity/patch_antigravity_icon.py --style underlit_chrome --kill
+
+# 应用暗黑经典彩虹款（保留标志性彩色光谱）
+uv run scripts/antigravity/patch_antigravity_icon.py --style dark_rainbow --kill
+
+# 应用钛金冷光棱镜款
+uv run scripts/antigravity/patch_antigravity_icon.py --style titanium_prism --kill
+
+# 亦可通过 TaskbarGuard CLI 一键调度
+.\bin\taskbarguard-cli-dev.exe run antigravity --style underlit_chrome --kill
+```
+
+---
+
+### 3. 恢复官方原始状态
+
+```powershell
+uv run scripts/antigravity/patch_antigravity_icon.py --restore
+# 或通过 CLI
+.\bin\taskbarguard-cli-dev.exe revert antigravity
+```
+
+---
+
+## 七、执行须知与安全准则
 
 1. **零黑屏安全刷新**：
    坚决不调用 `taskkill explorer.exe`。补丁写入后，脚本仅会触碰任务栏 `.lnk` 快捷方式时间戳 + 调用系统原生 `ie4uinit.exe -show` + 广播系统外壳 API `SHChangeNotify(SHCNE_ASSOCCHANGED)`。

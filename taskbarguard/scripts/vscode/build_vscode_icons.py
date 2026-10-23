@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from PIL import Image
 
-output_dir = Path(r"D:\Users\language_projects\.scripts\vscode")
+output_dir = Path(__file__).resolve().parent / "custom_icons"
 output_dir.mkdir(parents=True, exist_ok=True)
 
 edge = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
@@ -104,8 +104,8 @@ svg_dark_silver = f"""<svg width="1024" height="1024" viewBox="0 0 1024 1024" fi
 </svg>"""
 
 styles = [
-    ("vscode_dark_blue", svg_dark_blue),
-    ("vscode_dark_silver", svg_dark_silver),
+    ("blue", svg_dark_blue),
+    ("silver", svg_dark_silver),
 ]
 
 SIZES = [16, 24, 32, 48, 64, 128, 256]

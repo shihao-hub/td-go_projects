@@ -21,8 +21,15 @@ func writeAppDir(t *testing.T, root, name string, styles ...string) {
 	if err := os.WriteFile(filepath.Join(appDir, "patch_"+name+"_icon.py"), []byte{}, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if len(styles) == 0 {
+		return
+	}
+	iconDir := filepath.Join(appDir, "custom_icons")
+	if err := os.MkdirAll(iconDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	for _, style := range styles {
-		if err := os.WriteFile(filepath.Join(appDir, name+"_dark_"+style+".ico"), []byte{}, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(iconDir, style+".ico"), []byte{}, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -43,7 +50,7 @@ func TestRunUsesMockRunner(t *testing.T) {
 	if _, _, err := service.Run("vscode", RunOptions{Style: "blue"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) != 4 || seen[0] != "run" || seen[2] != "--style" || seen[3] != "blue" {
+	if len(seen) != 4 || seen[0] != "run" || seen[2] != "--custom-icon" || seen[3] != filepath.Join(root, "vscode", "custom_icons", "blue.ico") {
 		t.Fatalf("unexpected args: %#v", seen)
 	}
 }
@@ -103,7 +110,7 @@ func TestRunFallsBackToConfigStyle(t *testing.T) {
 	if _, _, err := service.Run("vscode", RunOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) != 4 || seen[2] != "--style" || seen[3] != "silver" {
+	if len(seen) != 4 || seen[2] != "--custom-icon" || seen[3] != filepath.Join(root, "vscode", "custom_icons", "silver.ico") {
 		t.Fatalf("unexpected args: %#v", seen)
 	}
 }
@@ -189,7 +196,7 @@ func TestApplyPassesKillFlag(t *testing.T) {
 	if len(applied) != 1 || applied[0] != "vscode" {
 		t.Fatalf("unexpected applied: %#v", applied)
 	}
-	if len(seen) != 5 || seen[2] != "--style" || seen[3] != "silver" || seen[4] != "--kill" {
+	if len(seen) != 5 || seen[2] != "--custom-icon" || seen[4] != "--kill" {
 		t.Fatalf("unexpected args: %#v", seen)
 	}
 }
