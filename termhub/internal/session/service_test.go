@@ -3,10 +3,14 @@ package session
 
 import (
 	"context"
+	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/shihao-hub/termhub/internal/pty"
+	"github.com/shihao-hub/termhub/internal/store"
 )
 
 // TestStartSession_InputReachesPTY_OutputViaEvents 验证：
@@ -158,5 +162,204 @@ func TestListSessions_IncludesWorkDir(t *testing.T) {
 	}
 	if got[0].WorkDir != `C:\work` {
 		t.Fatalf("work_dir = %q, want %q", got[0].WorkDir, `C:\work`)
+	}
+}
+
+// TestStopSession_ClosesPTY 关闭 tab 会终止 PTY 并广播退出。
+func TestStopSession_ClosesPTY(t *testing.T) {
+	ff := &FakeFactory{}
+	svc := NewService(ff)
+	id, err := svc.StartSession(context.Background(), pty.Options{})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	_, _, stopped, err := svc.Subscribe(id)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if err := svc.StopSession(id); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StopSession 后未收到退出事件")
+	}
+	if _, err := ff.Terms()[0].Write([]byte("x")); err == nil {
+		t.Fatal("PTY 应已关闭")
+	}
+}
+
+// TestSessionHistoryPersisted 会话命令写入历史并落盘为已退出记录。
+func TestSessionHistoryPersisted(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	ff := &FakeFactory{}
+	svc := NewServiceWithStore(ff, st)
+	id, err := svc.StartSession(context.Background(), pty.Options{WorkDir: `C:\work`, InitialCommand: "dir"})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if got := ff.Opts()[0].CommandLine; !strings.Contains(got, "-NoExit") || !strings.Contains(got, "-File") {
+		t.Fatalf("实盘命令行应带历史钩子: %q", got)
+	}
+	if got := ff.Opts()[0].InitialCommand; got != "dir" {
+		t.Fatalf("InitialCommand = %q", got)
+	}
+
+	path := st.History().SessionPath(id)
+	if err := os.WriteFile(path, []byte("dir\ngit status\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, stopped, _ := svc.Subscribe(id)
+	if err := svc.StopSession(id); err != nil {
+		t.Fatalf("StopSession: %v", err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待会话退出超时")
+	}
+
+	records := st.Sessions()
+	if len(records) != 1 {
+		t.Fatalf("sessions = %+v", records)
+	}
+	if got := records[0].Commands; len(got) != 2 || got[1] != "git status" {
+		t.Fatalf("commands = %v", got)
+	}
+	if got := st.History().Global(); len(got) < 2 || got[len(got)-1] != "git status" {
+		t.Fatalf("global history = %v", got)
+	}
+}
+
+// TestBuildBootstrap 启动脚本包含目录、历史钩子与初始命令。
+func TestBuildBootstrap(t *testing.T) {
+	script := buildBootstrap(`C:\work`, `C:\h.txt`, `C:\cwd.txt`, "git status")
+	for _, want := range []string{"Set-Location", "__termhub_history", "PSConsoleHostReadLine", "git status"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("bootstrap 缺少 %q:\n%s", want, script)
+		}
+	}
+}
+
+func TestStripANSI(t *testing.T) {
+	got := stripANSI("\x1b[31merror\x1b[0m\r\n")
+	if got != "error\r\n" {
+		t.Fatalf("stripANSI = %q", got)
+	}
+}
+
+// TestShutdown_PersistsSessions 应用整体退出前也把运行中会话落盘为已退出记录。
+func TestShutdown_PersistsSessions(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New: %v", err)
+	}
+	ff := &FakeFactory{}
+	svc := NewServiceWithStore(ff, st)
+	id, err := svc.StartSession(context.Background(), pty.Options{WorkDir: `C:\work`})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := os.WriteFile(st.History().SessionPath(id), []byte("dir\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc.Shutdown()
+	records := st.Sessions()
+	if len(records) != 1 {
+		t.Fatalf("sessions = %+v", records)
+	}
+	if got := records[0].Commands; len(got) != 1 || got[0] != "dir" {
+		t.Fatalf("commands = %v", got)
+	}
+}
+
+// TestSnapshot_IncludesCwd 快照读取 prompt 钩子落盘的当前目录。
+func TestSnapshot_IncludesCwd(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ff := &FakeFactory{}
+	svc := NewServiceWithStore(ff, st)
+	id, err := svc.StartSession(context.Background(), pty.Options{WorkDir: `C:\work`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(st.History().SessionCwdPath(id), []byte(`C:\work\sub`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snaps := svc.ListSessions()
+	if len(snaps) != 1 || snaps[0].Cwd != `C:\work\sub` {
+		t.Fatalf("snapshots = %+v", snaps)
+	}
+	svc.Shutdown()
+}
+
+// TestAskAgent_PromptAndConversation 诊断 prompt 含上下文，追问复用 conversation id。
+func TestAskAgent_PromptAndConversation(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendSession(store.SessionRecord{
+		ID: "s-exit", WorkDir: `C:\work`, Status: "exited",
+		Commands: []string{"dir", "git status"}, LastOutput: "error: not found",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewServiceWithStore(&FakeFactory{}, st)
+	var calls [][]string
+	svc.AgentRunner = func(_ context.Context, _ string, args []string) ([]byte, error) {
+		calls = append(calls, append([]string(nil), args...))
+		return []byte(`{"conversation_id":"c-1","response":"建议执行 dir","status":"SUCCESS"}`), nil
+	}
+
+	answer, convo, err := svc.AskAgent(context.Background(), "s-exit", "为什么失败？", "")
+	if err != nil {
+		t.Fatalf("AskAgent: %v", err)
+	}
+	if answer != "建议执行 dir" || convo != "c-1" {
+		t.Fatalf("answer=%q convo=%q", answer, convo)
+	}
+	prompt := calls[0][1]
+	for _, want := range []string{"git status", "error: not found", "为什么失败？", `C:\work`} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt 缺少 %q:\n%s", want, prompt)
+		}
+	}
+	if _, convo, err := svc.AskAgent(context.Background(), "s-exit", "继续", ""); err != nil || convo != "c-1" {
+		t.Fatalf("second AskAgent err=%v convo=%q", err, convo)
+	}
+	second := calls[1]
+	found := false
+	for i := 0; i < len(second)-1; i++ {
+		if second[i] == "--conversation" && second[i+1] == "c-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("追问未复用 conversation id: %v", second)
+	}
+}
+
+// TestAskAgent_Error agent 调用失败时返回明确错误。
+func TestAskAgent_Error(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendSession(store.SessionRecord{ID: "s1", WorkDir: `C:\work`}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewServiceWithStore(&FakeFactory{}, st)
+	svc.AgentRunner = func(context.Context, string, []string) ([]byte, error) {
+		return nil, errors.New("agy not found")
+	}
+	if _, _, err := svc.AskAgent(context.Background(), "s1", "", ""); err == nil {
+		t.Fatal("应返回 agent 调用失败")
 	}
 }

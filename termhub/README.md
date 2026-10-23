@@ -8,7 +8,14 @@ Windows 终端会话与启动项生命周期管理器。终端即用即抛，记
 
 ## 当前进度
 
-- [x] T01 曳光弹：点击「新建终端」拉起内嵌 PowerShell（ConPTY + xterm.js + WS 事件桥全层打通）
+- [x] T01 曳光弹：可嵌入 PowerShell（ConPTY + xterm.js + WS 事件桥）
+- [x] T02 启动项与启动组：配置 CRUD、一键拉起、自动命令
+- [x] T03 命令记忆：每会话命令文件 + PSReadLine 全局历史
+- [x] T04 会话状态面板：状态/时长/cwd/命令/内存
+- [x] T05 关闭即回收：确认弹窗 + Job Object 整树终止
+- [x] T06 会话元数据持久化与已退出回顾
+- [x] T07 AI 诊断：最近命令 + 最后一屏交给本机 agy，支持追问
+- [x] T08 构建流水线、图标与 dev/prod 隔离
 - [x] T09 托盘常驻与关窗重建：关窗销毁 WebView、会话驻留后端、托盘重建后自动重连
 
 ## 形态说明
@@ -23,7 +30,9 @@ Windows 终端会话与启动项生命周期管理器。终端即用即抛，记
 - 桌面壳（`internal/app/gui.go`）：托盘常驻、关窗销毁窗口、托盘/双击重建、dev/prod 单实例隔离
 - 窗口记忆（`internal/app/window_state.go`）：尺寸/位置/最大化落 `window.json`，外接屏拔除后自动居中
 - 会话接缝（`internal/session`）：SessionManager 持有 PTY；窗口重建后前端按会话快照自动重连
-- PTY 抽象（`internal/pty`）：`Term` / `Factory` 接口 + `UserExistsError/conpty` 实现
+- 持久层（`internal/store`）：启动项/启动组、已退出会话元数据、会话命令历史与全局历史
+- PTY 抽象（`internal/pty`）：`Term` / `Factory` 接口 + `UserExistsError/conpty` 实现；Job Object 整树终止
+- AI 诊断（`internal/session` + `agy`）：最近命令 + 最后一屏输出 → `agy -p --output-format json --mode plan --sandbox`，支持 `--conversation` 追问
 - 可观测性（`internal/logx`）：`<dataDir>/termhub.log` 与 stderr 双写，2 MB 轮转，GUI 无控制台也可排障
 - 数据目录：`%APPDATA%\language_projects\termhub\<channel>\`（`TERMHUB_DATA` 可覆盖）
 

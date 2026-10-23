@@ -11,7 +11,11 @@
   <div class="app">
     <aside class="sidebar">
       <div class="brand"><span class="brand-dot"></span>termhub</div>
-      <button class="btn-primary" id="new-terminal" title="选择目录后新建终端">＋ 新建终端</button>
+      <div class="sidebar-actions">
+        <button class="btn-primary" id="new-terminal" title="选择目录后新建终端">＋ 新建终端</button>
+        <button class="btn-ghost" id="open-startups">启动项</button>
+        <button class="btn-ghost" id="open-sessions">会话</button>
+      </div>
       <nav class="session-list" id="session-list" aria-label="终端会话"></nav>
       <div class="sidebar-foot">
         <span class="dot dot-green"></span><span id="channel">dev</span>
@@ -20,7 +24,7 @@
     <main class="main">
       <section class="panes" id="panes">
         <div class="empty-hint" id="empty-hint">
-          点击「新建终端」选择目录，拉起一个内嵌 PowerShell
+          点击「新建终端」选择目录，或从「启动项」一键拉起
         </div>
       </section>
     </main>
@@ -48,6 +52,93 @@
           <button class="btn-primary" id="dir-ok">在此目录新建终端</button>
         </div>
       </footer>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="startup-modal" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <header class="modal-head">
+        <span>启动项与启动组</span>
+        <button class="icon-btn" id="startup-close" title="关闭">×</button>
+      </header>
+      <div class="startup-body">
+        <section class="startup-col">
+          <h3>启动项</h3>
+          <div class="config-list" id="entry-list"></div>
+          <form class="config-form" id="entry-form">
+            <input id="entry-name" placeholder="名称" autocomplete="off">
+            <div class="config-row">
+              <input id="entry-dir" placeholder="初始目录" autocomplete="off">
+              <button type="button" class="btn-ghost" id="entry-pick">浏览</button>
+            </div>
+            <input id="entry-command" placeholder="自动命令（可选）" autocomplete="off">
+            <div class="config-actions">
+              <button type="submit" class="btn-primary">保存启动项</button>
+              <button type="button" class="btn-ghost" id="entry-cancel" hidden>取消编辑</button>
+            </div>
+          </form>
+        </section>
+        <section class="startup-col">
+          <h3>启动组</h3>
+          <div class="config-list" id="group-list"></div>
+          <form class="config-form" id="group-form">
+            <input id="group-name" placeholder="组名称" autocomplete="off">
+            <div class="check-list" id="group-entry-choices"></div>
+            <div class="config-actions">
+              <button type="submit" class="btn-primary">保存启动组</button>
+              <button type="button" class="btn-ghost" id="group-cancel" hidden>取消编辑</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="sessions-modal" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <header class="modal-head">
+        <span>会话状态</span>
+        <div class="head-actions">
+          <button class="btn-ghost" id="sessions-refresh">刷新</button>
+          <button class="icon-btn" id="sessions-close" title="关闭">×</button>
+        </div>
+      </header>
+      <div class="session-cards" id="session-cards"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="commands-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <header class="modal-head">
+        <span id="commands-title">命令清单</span>
+        <button class="icon-btn" id="commands-close" title="关闭">×</button>
+      </header>
+      <div class="commands-toolbar">
+        <input id="commands-filter" placeholder="搜索命令" autocomplete="off">
+        <button class="btn-ghost" id="commands-copy">复制全部</button>
+      </div>
+      <ol class="command-list" id="command-list"></ol>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="agent-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <header class="modal-head">
+        <span>AI 诊断</span>
+        <button class="icon-btn" id="agent-close" title="关闭">×</button>
+      </header>
+      <div class="agent-context" id="agent-context"></div>
+      <div class="agent-body">
+        <textarea id="agent-question" placeholder="想问什么？留空则默认诊断最后一条命令"></textarea>
+        <div class="config-actions">
+          <button class="btn-primary" id="agent-ask">交给 agent</button>
+        </div>
+        <pre class="agent-answer" id="agent-answer"></pre>
+        <div class="agent-followup">
+          <input id="agent-followup" placeholder="继续追问" autocomplete="off">
+          <button class="btn-primary" id="agent-send">发送</button>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -241,8 +241,15 @@ func LaunchGUI(port int) error {
 	})
 	trayMenu.AddSeparator()
 	trayMenu.Add("退出 termhub").OnClick(func(*application.Context) {
-		logger.Info("tray menu: quit")
-		go wailsApp.Quit()
+		logger.Info("tray menu: quit requested")
+		go func() {
+			dialog := wailsApp.Dialog.Question()
+			dialog.SetTitle("退出 termhub")
+			dialog.SetMessage("退出将终止全部终端会话，确定？")
+			dialog.AddButton("退出").OnClick(func() { wailsApp.Quit() })
+			dialog.AddButton("取消").SetAsCancel()
+			dialog.Show()
+		}()
 	})
 	tray.SetMenu(trayMenu)
 	tray.OnClick(func() {

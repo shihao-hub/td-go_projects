@@ -15,6 +15,8 @@ type Term interface {
 	Close() error
 	// Pid 附着进程的 PID（fake 可返回 0）。
 	Pid() int
+	// MemoryBytes 附着进程当前工作集（fake 返回 0）。
+	MemoryBytes() uint64
 }
 
 // Factory 依据启动参数创建一个 Term。
@@ -29,6 +31,8 @@ type Options struct {
 	CommandLine string
 	// WorkDir 初始工作目录；空则由 shell 决定。
 	WorkDir string
+	// InitialCommand 拉起后自动执行的一条命令（启动项使用）。
+	InitialCommand string
 	// Cols/Rows 初始视口尺寸。
 	Cols, Rows int
 	// Env 额外注入的环境变量（如 PSReadLine 历史 HistorySavePath）。

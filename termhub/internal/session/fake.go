@@ -81,6 +81,9 @@ func (f *FakeTerm) Close() error {
 // Pid fake 恒 0。
 func (f *FakeTerm) Pid() int { return 0 }
 
+// MemoryBytes fake 恒 0。
+func (f *FakeTerm) MemoryBytes() uint64 { return 0 }
+
 // FakeFactory 每次 Start 记录参数并按需返回新 fake 或 Start 错误。
 type FakeFactory struct {
 	mu    sync.Mutex
