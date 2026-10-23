@@ -310,6 +310,20 @@ body {
   font-size: 12px;
 }
 
+.style-preview {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  background: #171a1e;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.style-preview[hidden] {
+  display: none;
+}
+
 select {
   flex: 1;
   min-width: 0;

@@ -61,6 +61,20 @@ function optionLabel(style) {
   return style;
 }
 
+// updatePreview 更新卡片内嵌的款式缩略图；自定义图标或未知款式时隐藏。
+function updatePreview(app, style, img) {
+  if (!style || style === "__custom__" || !app.styles.includes(style)) {
+    img.removeAttribute("src");
+    img.hidden = true;
+    return;
+  }
+  img.src = `/api/apps/${encodeURIComponent(app.name)}/icon?style=${encodeURIComponent(style)}`;
+  img.hidden = false;
+  img.onerror = () => {
+    img.hidden = true;
+  };
+}
+
 function renderApps() {
   if (!state.apps.length) {
     els.appGrid.innerHTML = '<div class="empty">脚本目录中没有可调度的应用。</div>';
@@ -121,8 +135,17 @@ function renderApps() {
       select.append(option);
     }
     select.value = app.custom_icon ? "__custom__" : app.style || app.styles[0] || "";
-    select.addEventListener("change", () => updateStyle(app, select));
-    styleRow.append(styleLabel, select);
+    select.addEventListener("change", () => {
+      updatePreview(app, select.value, previewImg);
+      updateStyle(app, select);
+    });
+
+    const previewImg = document.createElement("img");
+    previewImg.className = "style-preview";
+    previewImg.alt = "款式预览";
+    previewImg.loading = "lazy";
+    updatePreview(app, select.value, previewImg);
+    styleRow.append(styleLabel, select, previewImg);
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
