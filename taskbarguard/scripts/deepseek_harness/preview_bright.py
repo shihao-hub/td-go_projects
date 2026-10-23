@@ -2,13 +2,13 @@
 from PIL import Image
 
 dsh_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\deepseek_harness\custom_icons")
-vsc_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\vscode")
+vsc_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\vscode\custom_icons")
 
 # 对比：款式5(原钛金属)、款式7(白金亮钛)、款式8(底光通透)、VS Code银白
 im_5 = Image.open(dsh_dir / "5_titanium_sculpted.png").resize((128, 128), Image.LANCZOS)
 im_7 = Image.open(dsh_dir / "7_bright_titanium.png").resize((128, 128), Image.LANCZOS)
 im_8 = Image.open(dsh_dir / "8_underlit_chrome.png").resize((128, 128), Image.LANCZOS)
-im_vsc = Image.open(vsc_dir / "vscode_dark_silver.png").resize((128, 128), Image.LANCZOS)
+im_vsc = Image.open(vsc_dir / "silver.png").resize((128, 128), Image.LANCZOS)
 
 bg_color = (205, 230, 245, 255)
 strip = Image.new("RGBA", (660, 160), bg_color)

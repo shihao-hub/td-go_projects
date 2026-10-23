@@ -2,7 +2,7 @@
 from PIL import Image
 
 idea_custom_dir = Path(__file__).resolve().parent / "custom_icons"
-vsc_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\vscode")
+vsc_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\vscode\custom_icons")
 dsh_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\deepseek_harness\custom_icons")
 
 # Load images
@@ -12,7 +12,7 @@ im_blue = Image.open(idea_custom_dir / "dark_blue.png").resize((128, 128), Image
 
 # Context reference icons
 im_ds = Image.open(dsh_dir / "8_underlit_chrome.png").resize((128, 128), Image.LANCZOS)
-im_vsc = Image.open(vsc_dir / "vscode_dark_blue.png").resize((128, 128), Image.LANCZOS)
+im_vsc = Image.open(vsc_dir / "blue.png").resize((128, 128), Image.LANCZOS)
 
 # Windows 11 Taskbar simulated sky blue background (same as user's screenshot)
 bg_color = (205, 230, 245, 255)

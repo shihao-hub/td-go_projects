@@ -2,13 +2,13 @@ from pathlib import Path
 from PIL import Image
 
 dsh_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\deepseek_harness\custom_icons")
-vsc_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\vscode")
+vsc_dir = Path(r"D:\Users\language_projects\go_projects\taskbarguard\scripts\vscode\custom_icons")
 
 # 4个图标：旧款款式3、新款5钛金属、新款6丝绸微浮雕、VS Code银白
 old_3 = Image.open(dsh_dir / "3_dark_monochrome_centered.png").resize((128, 128), Image.LANCZOS)
 new_5 = Image.open(dsh_dir / "5_titanium_sculpted.png").resize((128, 128), Image.LANCZOS)
 new_6 = Image.open(dsh_dir / "6_luminous_relief.png").resize((128, 128), Image.LANCZOS)
-vsc = Image.open(vsc_dir / "vscode_dark_silver.png").resize((128, 128), Image.LANCZOS)
+vsc = Image.open(vsc_dir / "silver.png").resize((128, 128), Image.LANCZOS)
 
 # 创建并排预览底图 (天蓝色任务栏背景)
 bg_color = (205, 230, 245, 255)
