@@ -490,20 +490,50 @@ body {
 .agent-followup input { flex: 1; min-width: 0; }
 
 
-/* 左侧已退出会话 */
-.tab-exited .tab-label { color: var(--text-dim); }
-.tab-exited .tab-sub { color: #6e7681; }
-.tab-status-exited { background: var(--text-dim); }
-.session-section {
-  padding: 10px 9px 4px;
-  font-size: 11px;
-  letter-spacing: 0.5px;
+/* 左侧未启动的终端记忆与自动重开勾选 */
+.tab-idle .tab-label { color: var(--text-dim); }
+.tab-idle .tab-sub { color: #6e7681; }
+.tab-idle .tab-status { background: var(--text-dim); }
+.tab-autostart {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  font-size: 10px;
   color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0.72;
   user-select: none;
+  transition: opacity 0.12s ease;
+}
+.tab-autostart:hover { opacity: 1; }
+.tab-autostart input {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.card-autostart {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  width: fit-content;
+  margin-bottom: 2px;
+}
+.card-autostart input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
 }
 .session-card-target {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.22);
 }
-.tab-exited .tab-close { opacity: 0.7; }
-.tab-exited .tab-close:hover { opacity: 1; }

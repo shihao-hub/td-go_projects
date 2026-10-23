@@ -21,7 +21,11 @@ import (
 //go:embed icon.ico
 var iconICO []byte
 
-const windowTitle = "termhub - 终端会话管理器"
+const (
+	windowTitle = "termhub - 终端会话管理器"
+	// quitWatchdog 退出收尾的最长等待；PTY 总预算 1.5s，留足 Wails 清理余量。
+	quitWatchdog = 8 * time.Second
+)
 
 // dataDir 返回 TERMHUB_DATA 覆盖目录，否则按数据隔离约束推导
 // %APPDATA%\language_projects\termhub\<channel>；TERMHUB_DATA 仅在早期联调
@@ -61,16 +65,34 @@ func LaunchGUI(port int) error {
 	defer logx.Close()
 
 	// 自研单实例：互斥体占用即检查交接，唤出既有窗口后本进程退出。
-	only, existingURL := acquireInstance(data, version.Channel())
+	// 互斥体被占但实例不可达时，通常是旧进程卡在退出清理中，宽限轮询等它释放后接手；
+	// 仍不释放则说明旧进程已死锁，经用户确认后结束残留进程再来一次。
+	only, existingURL, busy := acquireInstance(data, version.Channel())
+	if busy {
+		logger.Warn("previous instance unresponsive after grace", "url", existingURL)
+		if !reclaimStaleInstance(data) {
+			logger.Warn("stale instance kept; aborting this launch")
+			notifyInstanceBusy()
+			return nil
+		}
+		logger.Info("stale instance terminated; retrying acquisition")
+		only, existingURL, busy = acquireInstanceWithin(data, version.Channel(), reclaimRetryTimeout)
+		if busy || !only {
+			logger.Warn("reclaim retry failed", "url", existingURL)
+			notifyInstanceBusy()
+			return nil
+		}
+	}
 	if !only {
 		logger.Info("existing instance detected", "url", existingURL)
 		if existingURL != "" && handoffToExisting(existingURL) {
 			logger.Info("handoff done: existing instance prompted, exiting second instance")
 			logx.Close()
-			os.Exit(0)
+			hardExit()
 		}
-		// 互斥体被占但既有实例不可达：登记脏、拒绝第二实例避免蔽障。
+		// 探测与交接之间实例恰好退出：明确告知而不是静默消失。
 		logger.Warn("existing instance unreachable; refusing second instance", "url", existingURL)
+		notifyInstanceBusy()
 		return nil
 	}
 
@@ -263,6 +285,13 @@ func LaunchGUI(port int) error {
 					return
 				}
 				logger.Info("quit confirmed")
+				// 收尾与 Wails 清理都可能被卡住的句柄拖住；到点硬退出，杜绝
+				// 「进程残留、互斥体不释放 → 之后每次启动都只有托盘没有窗口」。
+				go func() {
+					time.Sleep(quitWatchdog)
+					logger.Warn("quit watchdog fired; forcing exit")
+					hardExit()
+				}()
 				// 先隐藏窗口再收尾：收尾期间即使有短暂延迟，也不会留下
 				// 被 Windows 判定为「未响应」的窗口给用户看。
 				winMu.Lock()
@@ -312,9 +341,10 @@ func LaunchGUI(port int) error {
 		server.Shutdown()
 		logger.Info("termhub stopped")
 		logx.Close()
-		// Wails v3 beta 在退出清理阶段可能因托盘/对话框句柄阻塞主 goroutine，
-		// 使 OnShutdown 执行完后进程仍无法退出；这里强制收尾，保证用户始终能退出。
-		os.Exit(0)
+		// 退出清理阶段 Wails/WebView2 的 DLL 卸载会发生死锁：实测 os.Exit 的
+		// ExitProcess 停住不返回，进程残留为单线程僵尸并继续占着单实例互斥体，
+		// 导致双击打不开新实例。hardExit 绕过 DLL 清理直接终结进程。
+		hardExit()
 	})
 
 	err = wailsApp.Run()

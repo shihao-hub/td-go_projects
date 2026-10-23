@@ -6,7 +6,10 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
 export interface TabHandle {
+  // id 该 tab 对应的终端记忆（slot）身份，稳定不变。
   id: string;
+  // sessionId 本次 shell 运行的会话身份；WS 与 resize 都走它。
+  sessionId: string;
   term: Terminal;
   ws: WebSocket;
   dispose(): void;
@@ -17,9 +20,10 @@ const wsMsg = (type: string, extra: object = {}) =>
 
 /** 创建一个终端 tab：发起 WS 连接、绑定输入与尺寸。 */
 export function createTerminalTab(
+  slotId: string,
   sessionId: string,
   container: HTMLElement,
-  onExited: (id: string) => void,
+  onExited: (slotId: string) => void,
 ): TabHandle {
   const term = new Terminal({
     fontFamily: "'Cascadia Mono', Consolas, 'Microsoft YaHei Mono', monospace",
@@ -65,7 +69,8 @@ export function createTerminalTab(
   term.loadAddon(fitAddon);
 
   const handle: TabHandle = {
-    id: sessionId,
+    id: slotId,
+    sessionId,
     term,
     ws,
     dispose() {
@@ -77,8 +82,8 @@ export function createTerminalTab(
   ws.onmessage = (ev) => {
     term.write(new Uint8Array(ev.data as ArrayBuffer));
   };
-  ws.onclose = () => onExited(sessionId);
-  ws.onerror = () => onExited(sessionId);
+  ws.onclose = () => onExited(slotId);
+  ws.onerror = () => onExited(slotId);
 
   // 尺寸变化（tab 激活/窗口缩放）触发 fit + 上行 resize。
   const fitAndResize = () => {

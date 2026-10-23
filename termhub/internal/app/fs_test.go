@@ -13,7 +13,7 @@ import (
 
 func listDirs(t *testing.T, path string) (*httptest.ResponseRecorder, APIResponse) {
 	t.Helper()
-	srv := NewServer("")
+	srv := NewServer("", nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/fs/list?path="+url.QueryEscape(path), nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)

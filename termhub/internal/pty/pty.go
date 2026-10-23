@@ -37,8 +37,13 @@ type Options struct {
 	Cols, Rows int
 	// Env 额外注入的环境变量（如 PSReadLine 历史 HistorySavePath）。
 	Env []string
-	// Source 会话来源标识：manual / 启动项 id（T02 起使用）。
+	// Source 会话来源标识：manual / 启动项 id / autostart（T02 起使用）。
 	Source string
+	// SlotID 所属终端记忆条目；一次 shell 运行只绑定一个 slot。
+	SlotID string
+	// PriorScreen 上一次会话的最近一屏（raw 字节）；重开时前置回放，
+	// 让新 shell 先呈现上次输出再接实时流。可为空。
+	PriorScreen []byte
 }
 
 // CloseWaiter 关闭并等待进程退出返回退出码的语义。

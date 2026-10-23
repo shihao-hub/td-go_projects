@@ -1,4 +1,5 @@
-// main.ts：termhub 工作台——目录选择、会话 tab、启动项、状态面板与 AI 诊断。
+// main.ts：termhub 工作台——左侧终端记忆列表（持久化）、未启动/运行中双态、
+// 带「自动重开」勾选；启动项、会话状态与 AI 诊断面板。
 import { createTerminalTab, type TabHandle } from "./term";
 import { pickDirectory } from "./picker";
 
@@ -6,14 +7,23 @@ interface SessionInfo {
   id: string;
   status: "running" | "exited";
   started_at: string;
-  exited_at?: string;
   exit_code?: number;
   work_dir?: string;
   cwd?: string;
   source?: string;
   memory_bytes?: number;
   commands?: string[];
-  last_output?: string;
+}
+
+interface TerminalInfo {
+  id: string;
+  work_dir: string;
+  source?: string;
+  auto_start: boolean;
+  created_at: string;
+  last_session_id?: string;
+  last_commands: string[];
+  session: SessionInfo | null;
 }
 
 interface Entry {
@@ -39,10 +49,11 @@ interface AgentReply {
   conversation_id: string;
 }
 
+// tabs 以终端记忆（slot）为身份：一条记忆最多一个运行中的 shell tab。
 const tabs = new Map<string, TabHandle>();
-let liveSessions: SessionInfo[] = [];
-let exitedSessions: SessionInfo[] = [];
-let exitedSignature = "";
+let terminals: TerminalInfo[] = [];
+let terminalSignature = "";
+let activeSlotId: string | null = null;
 let config: Config = { entries: [], groups: [] };
 let editingEntryId: string | null = null;
 let editingGroupId: string | null = null;
@@ -95,15 +106,199 @@ function formatUptime(startedAt: string): string {
   return `${rest}s`;
 }
 
+function findSlot(id: string): TerminalInfo | undefined {
+  return terminals.find((slot) => slot.id === id);
+}
+
+/* ---------------- 终端记忆列表轮换 ---------------- */
+
+/** 与后端终端记忆对齐：刷新本地状态、渲染列表、增删 tab。 */
+async function refreshTerminals(): Promise<void> {
+  try {
+    terminals = await api<TerminalInfo[]>("GET", "/api/v1/terminals");
+    renderTerminalList();
+    syncTabs();
+    if (!sessionsModal.hidden) renderSessionCards();
+  } catch {
+    // 后端尚未就绪时保持现状，等待下一次刷新。
+  }
+}
+
+function renderTerminalList(): void {
+  const signature = terminals
+    .map((slot) => {
+      const session = slot.session?.id ?? "";
+      const cwd = slot.session?.cwd ?? "";
+      return `${slot.id}:${session}:${slot.auto_start ? 1 : 0}:${cwd}`;
+    })
+    .join("|");
+  if (signature === terminalSignature) return;
+  terminalSignature = signature;
+
+  sessionList.replaceChildren();
+  for (const slot of terminals) {
+    sessionList.append(buildSlotElement(slot));
+  }
+}
+
+function buildSlotElement(slot: TerminalInfo): HTMLElement {
+  const running = !!slot.session;
+  const label = dirBase(slot.session?.cwd || slot.work_dir) || "PowerShell";
+  const tabEl = document.createElement("div");
+  tabEl.className = "tab" + (running ? "" : " tab-idle") + (slot.id === activeSlotId ? " active" : "");
+  tabEl.dataset.slot = slot.id;
+  tabEl.title = running
+    ? `${slot.session?.cwd || slot.work_dir}\n运行中 · ${formatUptime(slot.session!.started_at)}`
+    : `${slot.work_dir}\n未启动 · 点击拉起 PowerShell`;
+  tabEl.innerHTML =
+    `<span class="tab-status"></span>` +
+    `<span class="tab-body"><span class="tab-label"></span><span class="tab-sub"></span></span>` +
+    `<label class="tab-autostart" title="下次启动 termhub 时自动拉起该终端"><input type="checkbox">重开</label>` +
+    `<span class="tab-close" title="删除终端">×</span>`;
+  (tabEl.querySelector(".tab-label") as HTMLElement).textContent = label;
+  (tabEl.querySelector(".tab-sub") as HTMLElement).textContent = running
+    ? slot.session?.cwd || slot.work_dir
+    : `未启动 · ${slot.work_dir}`;
+
+  (tabEl.querySelector<HTMLInputElement>(".tab-autostart input") as HTMLInputElement).checked =
+    slot.auto_start;
+  (tabEl.querySelector(".tab-autostart input") as HTMLInputElement).addEventListener("change", (ev) => {
+    ev.stopPropagation();
+    void toggleAutoStart(slot, (ev.target as HTMLInputElement).checked);
+  });
+  (tabEl.querySelector(".tab-autostart") as HTMLElement).addEventListener("click", (ev) => {
+    // label 内文字区域点击不激活终端。
+    ev.stopPropagation();
+  });
+
+  tabEl.addEventListener("click", () => {
+    if (running) {
+      if (!tabs.has(slot.id)) syncTabs(); // WS 就绪前有短暂空洞，触发一次对齐。
+      activateTab(slot.id);
+    } else {
+      void startTerminal(slot);
+    }
+  });
+  (tabEl.querySelector(".tab-close") as HTMLElement).addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    void deleteTerminal(slot);
+  });
+  return tabEl;
+}
+
+/** tab 增量对齐：运行中的记忆建 tab，结束/被删的记忆撤 tab。 */
+function syncTabs(): void {
+  const byId = new Map(terminals.map((slot) => [slot.id, slot] as const));
+  for (const slotId of [...tabs.keys()]) {
+    const slot = byId.get(slotId);
+    if (!slot || !slot.session) {
+      tabs.get(slotId)?.dispose();
+      removeTab(slotId);
+    }
+  }
+  for (const slot of terminals) {
+    if (slot.session && !tabs.has(slot.id)) openTab(slot, false);
+  }
+  if (activeSlotId == null || !tabs.has(activeSlotId)) {
+    const first = terminals.find((slot) => slot.session && tabs.has(slot.id));
+    if (first) activateTab(first.id);
+  }
+  emptyHint.hidden = tabs.size > 0;
+  if (!emptyHint.hidden) {
+    emptyHint.textContent =
+      terminals.length > 0 ? "点击左侧未启动的终端即可拉起 PowerShell" : "点击「新建终端」选择目录，或从「启动项」一键拉起";
+  }
+}
+
+function openTab(slot: TerminalInfo, activate = true): void {
+  const session = slot.session;
+  if (!session) return;
+  if (tabs.has(slot.id)) {
+    if (activate) activateTab(slot.id);
+    return;
+  }
+
+  // 列表 DOM 一律由 renderTerminalList 统一生成；这里只建立连接与画布。
+  const paneEl = document.createElement("div");
+  paneEl.className = "pane";
+  paneEl.dataset.slot = slot.id;
+  panes.append(paneEl);
+
+  const handle = createTerminalTab(slot.id, session.id, paneEl, (exitedSlotId) => {
+    // shell 自行退出转回未启动；同一 slot 已被新连接接管（订阅替换）时，
+    // 迟到的旧连接关闭不再撤 tab，只刷新一次对齐。
+    if (tabs.get(exitedSlotId) === handle) {
+      removeTab(exitedSlotId);
+    }
+    void refreshTerminals();
+  });
+  tabs.set(slot.id, handle);
+
+  if (activate) activateTab(slot.id);
+  else emptyHint.hidden = true;
+}
+
+function activateTab(slotId: string): void {
+  activeSlotId = slotId;
+  for (const el of sessionList.children) {
+    const tab = el as HTMLElement;
+    if (tab.classList.contains("tab")) tab.classList.toggle("active", tab.dataset.slot === slotId);
+  }
+  for (const el of panes.children) {
+    const pane = el as HTMLElement;
+    pane.classList.toggle("hidden", pane.dataset.slot !== slotId);
+  }
+  emptyHint.hidden = tabs.has(slotId);
+  tabs.get(slotId)?.term.focus();
+}
+
+function removeTab(slotId: string): void {
+  const wasActive = activeSlotId === slotId;
+  tabs.delete(slotId);
+  panes.querySelector(`[data-slot="${slotId}"]`)?.remove();
+  if (wasActive || (activeSlotId != null && !tabs.has(activeSlotId))) {
+    const fallback = terminals.find((slot) => slot.session && tabs.has(slot.id));
+    activeSlotId = null;
+    if (fallback) activateTab(fallback.id);
+    else emptyHint.hidden = true;
+  }
+  // 列表 DOM 由 renderTerminalList 管理，此处只撤 pane 与连接。
+  renderTerminalList();
+}
+
+/* ---------------- 终端动作 ---------------- */
+
 async function newTerminal(): Promise<void> {
   const workDir = await pickDirectory();
   if (!workDir) return;
 
   newButton.disabled = true;
   try {
-    const data = await api<{ id: string }>("POST", "/api/v1/sessions", { work_dir: workDir });
-    openTab(data.id, workDir);
-    void refreshAllSessions();
+    const data = await api<{ slot_id: string; session_id: string }>("POST", "/api/v1/terminals", {
+      work_dir: workDir,
+      source: "manual",
+    });
+    const slot: TerminalInfo = {
+      id: data.slot_id,
+      work_dir: workDir,
+      source: "manual",
+      auto_start: false,
+      created_at: new Date().toISOString(),
+      last_commands: [],
+      session: {
+        id: data.session_id,
+        status: "running",
+        started_at: new Date().toISOString(),
+        exit_code: 0,
+        work_dir: workDir,
+        cwd: workDir,
+        commands: [],
+      },
+    };
+    terminals.push(slot);
+    renderTerminalList();
+    openTab(slot, true);
+    void refreshTerminals();
   } catch (err) {
     alert(`拉起终端失败: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
@@ -111,174 +306,59 @@ async function newTerminal(): Promise<void> {
   }
 }
 
-/** 打开并激活一个 tab；已有会话复用。 */
-function openTab(id: string, workDir: string, activate = true): void {
-  if (tabs.has(id)) {
-    if (activate) activateTab(id);
-    return;
-  }
-
-  const tabEl = document.createElement("div");
-  tabEl.className = "tab";
-  tabEl.dataset.id = id;
-  tabEl.title = workDir;
-  tabEl.innerHTML = `<span class="tab-status"></span><span class="tab-body"><span class="tab-label"></span><span class="tab-sub"></span></span><span class="tab-close" title="关闭">×</span>`;
-  (tabEl.querySelector(".tab-label") as HTMLElement).textContent = dirBase(workDir) || "PowerShell";
-  (tabEl.querySelector(".tab-sub") as HTMLElement).textContent = workDir || id;
-  tabEl.addEventListener("click", () => activateTab(id));
-
-  const paneEl = document.createElement("div");
-  paneEl.className = "pane";
-  paneEl.dataset.id = id;
-
-  sessionList.appendChild(tabEl);
-  panes.appendChild(paneEl);
-
-  const handle = createTerminalTab(id, paneEl, (exitedId) => {
-    removeTab(exitedId);
-    void refreshAllSessions();
-  });
-  tabs.set(id, handle);
-
-  (tabEl.querySelector(".tab-close") as HTMLElement).addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    void closeTab(id);
-  });
-
-  if (activate) activateTab(id);
-  else emptyHint.hidden = true;
-}
-
-function activateTab(id: string): void {
-  for (const el of sessionList.children) {
-    (el as HTMLElement).classList.toggle("active", (el as HTMLElement).dataset.id === id);
-  }
-  for (const el of panes.children) {
-    (el as HTMLElement).classList.toggle("hidden", (el as HTMLElement).dataset.id !== id);
-  }
-  emptyHint.hidden = tabs.has(id);
-  const handle = tabs.get(id);
-  if (handle) handle.term.focus();
-}
-
-async function closeTab(id: string): Promise<void> {
-  if (!confirm("关闭该终端将终止其 shell 及全部子进程，确定？")) return;
+/** 启动一条未启动的终端记忆：纯净 PowerShell，同目录，不执行任何命令。 */
+async function startTerminal(slot: TerminalInfo): Promise<void> {
   try {
-    await api("DELETE", `/api/v1/sessions/${id}`);
+    const data = await api<{ slot_id: string; session_id: string }>(
+      "POST",
+      `/api/v1/terminals/${slot.id}/start`,
+      {},
+    );
+    slot.session = {
+      id: data.session_id,
+      status: "running",
+      started_at: new Date().toISOString(),
+      exit_code: 0,
+      work_dir: slot.work_dir,
+      cwd: slot.work_dir,
+      commands: [],
+    };
+    renderTerminalList();
+    openTab(slot, true);
+    void refreshTerminals();
   } catch (err) {
-    alert(`关闭失败: ${err instanceof Error ? err.message : String(err)}`);
-    return;
-  }
-  const handle = tabs.get(id);
-  if (handle) handle.dispose();
-  removeTab(id);
-  void refreshAllSessions();
-}
-
-function removeTab(id: string): void {
-  const tabEl = sessionList.querySelector(`.tab:not(.tab-exited)[data-id="${id}"]`);
-  const wasActive = tabEl?.classList.contains("active") ?? false;
-  tabs.delete(id);
-  tabEl?.remove();
-  panes.querySelector(`[data-id="${id}"]`)?.remove();
-
-  const next = tabs.keys().next();
-  if (next.done) {
-    emptyHint.hidden = false;
-  } else if (wasActive) {
-    activateTab(next.value);
+    alert(`启动失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
-/** 与后端运行中会话对齐：补齐缺失 tab，移除已结束会话。 */
-async function refreshLiveTabs(): Promise<void> {
+/** 删除终端记忆：运行中的先终止 shell；落盘记忆与最近一次运行随删除清理。 */
+async function deleteTerminal(slot: TerminalInfo): Promise<void> {
+  const running = !!slot.session;
+  const message = running
+    ? "关闭该终端将终止其 shell 及全部子进程，确定？"
+    : "删除这条终端记录？";
+  if (!confirm(message)) return;
   try {
-    const live = await api<SessionInfo[]>("GET", "/api/v1/sessions");
-    liveSessions = live;
-    const ids = new Set(live.map((s) => s.id));
-    for (const session of live) {
-      openTab(session.id, session.cwd || session.work_dir || "", false);
+    await api("DELETE", `/api/v1/terminals/${slot.id}`);
+    if (running) {
+      tabs.get(slot.id)?.dispose();
+      removeTab(slot.id);
     }
-    for (const id of [...tabs.keys()]) {
-      if (!ids.has(id)) removeTab(id);
-    }
-    if (!sessionList.querySelector(".tab.active") && live.length > 0) {
-      activateTab(live[0].id);
-    }
-    if (live.length === 0 && tabs.size === 0) emptyHint.hidden = false;
-  } catch {
-    // 后端尚未就绪时保持空工作台。
-  }
-}
-
-async function refreshAllSessions(): Promise<void> {
-  try {
-    const [live, history] = await Promise.all([
-      api<SessionInfo[]>("GET", "/api/v1/sessions"),
-      api<SessionInfo[]>("GET", "/api/v1/sessions/history"),
-    ]);
-    liveSessions = live;
-    exitedSessions = history;
-    renderExitedSidebar();
-    if (!sessionsModal.hidden) renderSessionCards();
-  } catch {
-    // 面板轮询失败时静默，等待下一次刷新。
-  }
-}
-
-/** 已退出会话也进入左侧列表，重启后用户仍能看到并删除。 */
-function renderExitedSidebar(): void {
-  const signature = exitedSessions
-    .map((session) => `${session.id}:${(session.commands ?? []).length}:${session.exited_at ?? ""}`)
-    .join("|");
-  if (signature === exitedSignature) return;
-  exitedSignature = signature;
-
-  sessionList.querySelectorAll(".tab-exited, .session-section").forEach((el) => el.remove());
-  if (exitedSessions.length === 0) return;
-
-  const header = document.createElement("div");
-  header.className = "session-section";
-  header.textContent = "已退出";
-  sessionList.append(header);
-
-  for (const session of exitedSessions) {
-    const tabEl = document.createElement("div");
-    tabEl.className = "tab tab-exited";
-    tabEl.dataset.id = session.id;
-    tabEl.title = `${session.cwd || session.work_dir || ""}
-已退出${session.exit_code !== undefined ? ` · code ${session.exit_code}` : ""}${session.exited_at ? ` · ${new Date(session.exited_at).toLocaleString()}` : ""}`;
-    tabEl.innerHTML = `<span class="tab-status tab-status-exited"></span><span class="tab-body"><span class="tab-label"></span><span class="tab-sub"></span></span><span class="tab-close" title="删除记录">×</span>`;
-    (tabEl.querySelector(".tab-label") as HTMLElement).textContent =
-      dirBase(session.cwd || session.work_dir || "") || session.id;
-    (tabEl.querySelector(".tab-sub") as HTMLElement).textContent =
-      `已退出 · ${(session.commands ?? []).length} 条命令`;
-    tabEl.addEventListener("click", () => void openSessionsFor(session.id));
-    (tabEl.querySelector(".tab-close") as HTMLElement).addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      void deleteExitedSession(session.id);
-    });
-    sessionList.append(tabEl);
-  }
-}
-
-async function openSessionsFor(id: string): Promise<void> {
-  sessionsModal.hidden = false;
-  await refreshAllSessions();
-  const card = byId("session-cards").querySelector<HTMLElement>(`[data-session-id="${id}"]`);
-  if (!card) return;
-  card.scrollIntoView({ block: "nearest" });
-  card.classList.add("session-card-target");
-  setTimeout(() => card.classList.remove("session-card-target"), 1500);
-}
-
-async function deleteExitedSession(id: string): Promise<void> {
-  if (!confirm("删除这条已退出会话记录？")) return;
-  try {
-    await api("DELETE", `/api/v1/sessions/history/${id}`);
-    await refreshAllSessions();
+    await refreshTerminals();
   } catch (err) {
     alert(`删除失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function toggleAutoStart(slot: TerminalInfo, checked: boolean): Promise<void> {
+  slot.auto_start = checked;
+  renderTerminalList();
+  try {
+    await api("PUT", `/api/v1/terminals/${slot.id}`, { auto_start: checked });
+  } catch (err) {
+    slot.auto_start = !checked;
+    renderTerminalList();
+    alert(`更新失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -286,135 +366,115 @@ async function deleteExitedSession(id: string): Promise<void> {
 
 function openSessions(): void {
   sessionsModal.hidden = false;
-  void refreshAllSessions();
+  void refreshTerminals();
 }
 
 function renderSessionCards(): void {
   const container = byId<HTMLDivElement>("session-cards");
   container.replaceChildren();
-  const all = [...liveSessions, ...exitedSessions];
-  if (all.length === 0) {
+  if (terminals.length === 0) {
     const empty = document.createElement("div");
     empty.className = "dir-empty";
-    empty.textContent = "还没有会话";
+    empty.textContent = "还没有终端";
     container.append(empty);
     return;
   }
 
-  for (const session of all) {
-    const running = session.status === "running";
-    const card = document.createElement("div");
-    card.className = "session-card";
-    card.dataset.sessionId = session.id;
-
-    const head = document.createElement("div");
-    head.className = "session-card-head";
-    const dot = document.createElement("span");
-    dot.className = `status-dot ${running ? "status-running" : "status-exited"}`;
-    const name = document.createElement("span");
-    name.className = "session-card-name";
-    name.textContent = dirBase(session.cwd || session.work_dir || "") || session.id;
-    head.append(dot, name);
-
-    const meta = document.createElement("div");
-    meta.className = "session-meta";
-    const lines = [
-      running ? `运行中 · ${formatUptime(session.started_at)}` : `已退出 · code ${session.exit_code ?? 0}`,
-      `目录: ${session.cwd || session.work_dir || "-"}`,
-      running ? `内存: ${formatBytes(session.memory_bytes)}` : `退出: ${session.exited_at ? new Date(session.exited_at).toLocaleString() : "-"}`,
-    ];
-    if (session.source) lines.push(`来源: ${session.source}`);
-    meta.textContent = lines.join("\n");
-
-    const cmdBox = document.createElement("div");
-    cmdBox.className = "session-commands";
-    const commands = session.commands ?? [];
-    cmdBox.textContent = commands.length > 0
-      ? commands.slice(-3).map((cmd) => `$ ${cmd}`).join("\n")
-      : "（暂无命令记录）";
-
-    const actions = document.createElement("div");
-    actions.className = "session-card-actions";
-    if (running) {
-      actions.append(
-        miniButton("聚焦", () => {
-          if (!tabs.has(session.id)) openTab(session.id, session.cwd || session.work_dir || "");
-          else activateTab(session.id);
-          sessionsModal.hidden = true;
-        }),
-      );
-    }
-    actions.append(
-      miniButton("命令", () => openCommands(session)),
-      miniButton("诊断", () => openAgent(session)),
-    );
-    if (running) {
-      actions.append(miniButton("关闭", () => void terminateFromPanel(session.id), "danger"));
-    } else {
-      actions.append(
-        miniButton("重开", () => void reopenSession(session)),
-        miniButton("删除", () => void deleteExitedSession(session.id), "danger"),
-      );
-    }
-
-    if (running) {
-      card.style.cursor = "pointer";
-      card.addEventListener("click", (ev) => {
-        if ((ev.target as HTMLElement).closest("button")) return;
-        if (!tabs.has(session.id)) openTab(session.id, session.cwd || session.work_dir || "");
-        else activateTab(session.id);
-        sessionsModal.hidden = true;
-      });
-    }
-
-    card.append(head, meta, cmdBox, actions);
-    container.append(card);
+  for (const slot of terminals) {
+    container.append(buildSessionCard(slot));
   }
+}
+
+function buildSessionCard(slot: TerminalInfo): HTMLElement {
+  const running = !!slot.session;
+  const card = document.createElement("div");
+  card.className = "session-card";
+  card.dataset.slot = slot.id;
+
+  const head = document.createElement("div");
+  head.className = "session-card-head";
+  const dot = document.createElement("span");
+  dot.className = `status-dot ${running ? "status-running" : "status-exited"}`;
+  const name = document.createElement("span");
+  name.className = "session-card-name";
+  name.textContent = dirBase(slot.session?.cwd || slot.work_dir) || slot.id;
+  head.append(dot, name);
+
+  const meta = document.createElement("div");
+  meta.className = "session-meta";
+  const lines: string[] = [];
+  if (running) {
+    lines.push(
+      `运行中 · ${formatUptime(slot.session!.started_at)}`,
+      `目录: ${slot.session?.cwd || slot.work_dir}`,
+      `内存: ${formatBytes(slot.session?.memory_bytes)}`,
+    );
+  } else {
+    lines.push(`未启动`, `目录: ${slot.work_dir}`);
+  }
+  if (slot.source) lines.push(`来源: ${slot.source}`);
+  meta.textContent = lines.join("\n");
+
+  const actions = document.createElement("div");
+  actions.className = "session-card-actions";
+  if (running) {
+    actions.append(
+      miniButton("聚焦", () => {
+        if (!tabs.has(slot.id)) openTab(slot, false);
+        activateTab(slot.id);
+        sessionsModal.hidden = true;
+      }),
+    );
+  } else {
+    actions.append(miniButton("启动", () => void startTerminal(slot)));
+  }
+  actions.append(
+    miniButton("命令", () => openCommands(slot)),
+    miniButton("诊断", () => openAgent(slot)),
+    miniButton("删除", () => void deleteTerminal(slot), "danger"),
+  );
+
+  if (!running) {
+    const autoWrap = document.createElement("label");
+    autoWrap.className = "card-autostart";
+    autoWrap.textContent = "下次启动自动重开";
+    const autoBox = document.createElement("input");
+    autoBox.type = "checkbox";
+    autoBox.checked = slot.auto_start;
+    autoBox.addEventListener("change", () => void toggleAutoStart(slot, autoBox.checked));
+    autoWrap.prepend(autoBox);
+    card.append(autoWrap);
+  }
+
+  card.append(head, meta, actions);
+  return card;
 }
 
 function miniButton(text: string, onClick: () => void, extra = ""): HTMLButtonElement {
   const button = document.createElement("button");
   button.className = `mini-btn ${extra}`.trim();
   button.textContent = text;
-  button.addEventListener("click", onClick);
+  button.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    onClick();
+  });
   return button;
 }
 
-async function terminateFromPanel(id: string): Promise<void> {
-  if (!confirm("关闭该终端将终止其 shell 及全部子进程，确定？")) return;
-  try {
-    await api("DELETE", `/api/v1/sessions/${id}`);
-  } catch (err) {
-    alert(`关闭失败: ${err instanceof Error ? err.message : String(err)}`);
-    return;
-  }
-  const handle = tabs.get(id);
-  if (handle) handle.dispose();
-  removeTab(id);
-  await refreshAllSessions();
-  await refreshLiveTabs();
+/* ---------------- 命令清单与诊断数据源 ---------------- */
+
+function slotCommands(slot: TerminalInfo): string[] {
+  const live = slot.session?.commands ?? [];
+  return live.length > 0 ? live : slot.last_commands;
 }
 
-async function reopenSession(session: SessionInfo): Promise<void> {
-  const workDir = session.cwd || session.work_dir || "";
-  try {
-    const data = await api<{ id: string }>("POST", "/api/v1/sessions", {
-      work_dir: workDir,
-      source: "reopen",
-    });
-    openTab(data.id, workDir);
-    sessionsModal.hidden = true;
-    await refreshAllSessions();
-  } catch (err) {
-    alert(`重开失败: ${err instanceof Error ? err.message : String(err)}`);
-  }
+function slotContextID(slot: TerminalInfo): string | null {
+  return slot.session?.id ?? slot.last_session_id ?? null;
 }
 
-/* ---------------- 命令清单 ---------------- */
-
-function openCommands(session: SessionInfo): void {
-  byId("commands-title").textContent = `命令清单 · ${dirBase(session.cwd || session.work_dir || "") || session.id}`;
-  currentCommands = session.commands ?? [];
+function openCommands(slot: TerminalInfo): void {
+  byId("commands-title").textContent = `命令清单 · ${dirBase(slot.session?.cwd || slot.work_dir) || slot.id}`;
+  currentCommands = slotCommands(slot);
   byId<HTMLInputElement>("commands-filter").value = "";
   renderCommandList("");
   commandsModal.hidden = false;
@@ -456,21 +516,29 @@ async function copyCommands(): Promise<void> {
 
 /* ---------------- AI 诊断 ---------------- */
 
-function openAgent(session: SessionInfo): void {
-  agentSessionId = session.id;
+function openAgent(slot: TerminalInfo): void {
+  const contextID = slotContextID(slot);
+  if (!contextID) {
+    alert("该终端还没有可分析的运行记录");
+    return;
+  }
+  agentSessionId = contextID;
   agentConversationId = "";
   byId("agent-answer").textContent = "";
   byId<HTMLTextAreaElement>("agent-question").value = "";
   byId<HTMLInputElement>("agent-followup").value = "";
-  const context = byId("agent-context");
-  const commands = (session.commands ?? []).slice(-5);
-  context.textContent = [
-    `目录: ${session.cwd || session.work_dir || "-"}`,
-    `会话: ${session.id} (${session.status})`,
+  const commands = slotCommands(slot).slice(-5);
+  byId("agent-context").textContent = [
+    `目录: ${slot.session?.cwd || slot.work_dir || "-"}`,
+    `终端: ${slot.id} (${runningLabel(slot)})`,
     commands.length ? `最近命令:\n${commands.map((cmd) => `$ ${cmd}`).join("\n")}` : "最近命令:（无）",
   ].join("\n");
   agentModal.hidden = false;
   byId<HTMLTextAreaElement>("agent-question").focus();
+}
+
+function runningLabel(slot: TerminalInfo): string {
+  return slot.session ? "运行中" : "未启动";
 }
 
 async function askAgent(question: string): Promise<void> {
@@ -646,12 +714,14 @@ function resetGroupForm(): void {
   renderGroupChoices();
 }
 
+/* ---------------- 启动项/组拉起（统一进终端记忆） ---------------- */
+
 async function startEntry(id: string): Promise<void> {
   try {
-    await api("POST", `/api/v1/config/entries/${id}/start`);
+    await api<{ slot_id: string; session_id: string }>(`POST`, `/api/v1/config/entries/${id}/start`);
     startupModal.hidden = true;
-    await refreshLiveTabs();
-    await refreshAllSessions();
+    await refreshTerminals();
+    void activateLatestIfNeeded();
   } catch (err) {
     alert(`启动失败: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -659,18 +729,28 @@ async function startEntry(id: string): Promise<void> {
 
 async function startGroup(id: string): Promise<void> {
   try {
-    const result = await api<{ ids: string[]; errors: string[] }>(
-      "POST",
-      `/api/v1/config/groups/${id}/start`,
-    );
+    const result = await api<{ errors: string[] }>("POST", `/api/v1/config/groups/${id}/start`);
     startupModal.hidden = true;
-    await refreshLiveTabs();
-    await refreshAllSessions();
+    await refreshTerminals();
+    void activateLatestIfNeeded();
     if (result.errors.length > 0) alert(`部分启动失败:\n${result.errors.join("\n")}`);
   } catch (err) {
     alert(`启动失败: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
+
+/** 组拉起可能没有选中窗口，把最后一个新建终端置为激活。 */
+function activateLatestIfNeeded(): void {
+  let latest = "";
+  for (const slot of terminals) {
+    if (slot.session && slot.created_at > latest) latest = slot.created_at;
+  }
+  if (!latest) return;
+  const target = terminals.find((slot) => slot.created_at === latest);
+  if (target && tabs.has(target.id)) activateTab(target.id);
+}
+
+/* ---------------- 启动项 CRUD ---------------- */
 
 async function deleteEntry(id: string): Promise<void> {
   if (!confirm("删除该启动项？")) return;
@@ -711,7 +791,7 @@ byId("startup-close").addEventListener("click", () => {
 byId("sessions-close").addEventListener("click", () => {
   sessionsModal.hidden = true;
 });
-byId("sessions-refresh").addEventListener("click", () => void refreshAllSessions());
+byId("sessions-refresh").addEventListener("click", () => void refreshTerminals());
 byId("commands-close").addEventListener("click", () => {
   commandsModal.hidden = true;
 });
@@ -804,8 +884,7 @@ byId<HTMLInputElement>("agent-followup").addEventListener("keydown", (ev) => {
   }
 });
 
-void refreshLiveTabs();
-void refreshAllSessions();
+void refreshTerminals();
 setInterval(() => {
-  if (!sessionsModal.hidden) void refreshAllSessions();
+  if (!sessionsModal.hidden) void refreshTerminals();
 }, 2000);

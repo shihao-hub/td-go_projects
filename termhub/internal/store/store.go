@@ -15,6 +15,7 @@ import (
 const (
 	configFileName    = "entries.json"
 	sessionsFileName  = "sessions.json"
+	terminalsFileName = "terminals.json"
 	historyDirName    = "history"
 	historyFileName   = "global.txt"
 	maxSessionRecords = 100
@@ -41,7 +42,7 @@ type Config struct {
 	Groups  []Group `json:"groups"`
 }
 
-// SessionRecord 已退出会话的持久化元数据。
+// SessionRecord 已退出会话的持久化元数据（内部诊断/命令数据源，不进 UI）。
 type SessionRecord struct {
 	ID         string    `json:"id"`
 	Source     string    `json:"source"`
@@ -55,13 +56,28 @@ type SessionRecord struct {
 	LastOutput string    `json:"last_output,omitempty"`
 }
 
-// Store 聚合配置、会话记录与历史文件；所有写操作串行化。
+// TerminalSlot 一条终端记忆：用户开过的终端与其自动重开偏好。
+// 列表随用户增删；重启后原样恢复，不再引入「已退出留存」概念。
+type TerminalSlot struct {
+	ID      string `json:"id"`
+	WorkDir string `json:"work_dir"`
+	// Source 首次创建时的来源：manual / entry:<id> / group:<id> / restore:<id>。
+	Source string `json:"source,omitempty"`
+	// AutoStart 勾选后，termhub 下次启动自动以相同目录拉起一个纯净 shell。
+	AutoStart bool      `json:"auto_start"`
+	CreatedAt time.Time `json:"created_at"`
+	// LastSessionID 最近一次 shell 运行（供诊断/命令清单读取上下文）。
+	LastSessionID string `json:"last_session_id,omitempty"`
+}
+
+// Store 聚合配置、终端记忆、会话记录与历史文件；所有写操作串行化。
 type Store struct {
 	dir string
 
-	mu       sync.Mutex
-	config   Config
-	sessions []SessionRecord
+	mu        sync.Mutex
+	config    Config
+	sessions  []SessionRecord
+	terminals []TerminalSlot
 
 	history *History
 }
@@ -74,11 +90,18 @@ func New(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	// 清理上次写入中断残留的临时文件，避免与数据文件同名冲突。
+	for _, name := range []string{configFileName, sessionsFileName, terminalsFileName} {
+		_ = os.Remove(filepath.Join(dir, name+".tmp"))
+	}
 	s := &Store{dir: dir, history: newHistory(dir)}
 	if err := s.loadConfig(); err != nil {
 		return nil, err
 	}
 	if err := s.loadSessions(); err != nil {
+		return nil, err
+	}
+	if err := s.loadTerminals(); err != nil {
 		return nil, err
 	}
 	if err := s.history.init(); err != nil {
@@ -140,6 +163,37 @@ func (s *Store) loadSessions() error {
 	}
 	s.sessions = doc.Sessions
 	return nil
+}
+
+func (s *Store) loadTerminals() error {
+	path := filepath.Join(s.dir, terminalsFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			s.terminals = []TerminalSlot{}
+			return nil
+		}
+		return err
+	}
+	var doc struct {
+		Terminals []TerminalSlot `json:"terminals"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		s.terminals = []TerminalSlot{}
+		return nil
+	}
+	if doc.Terminals == nil {
+		doc.Terminals = []TerminalSlot{}
+	}
+	s.terminals = doc.Terminals
+	return nil
+}
+
+func (s *Store) saveTerminalsLocked() error {
+	doc := struct {
+		Terminals []TerminalSlot `json:"terminals"`
+	}{Terminals: s.terminals}
+	return writeJSON(filepath.Join(s.dir, terminalsFileName), doc)
 }
 
 // Config 返回配置副本。
@@ -250,6 +304,88 @@ func (s *Store) Session(id string) (SessionRecord, bool) {
 	return SessionRecord{}, false
 }
 
+// Terminals 返回全部终端记忆（按创建时间升序，保持用户开终端的先后顺序）。
+func (s *Store) Terminals() []TerminalSlot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]TerminalSlot, len(s.terminals))
+	copy(out, s.terminals)
+	return out
+}
+
+// TerminalByID 按 ID 查找终端记忆。
+func (s *Store) TerminalByID(id string) (TerminalSlot, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, slot := range s.terminals {
+		if slot.ID == id {
+			return cloneTerminal(slot), true
+		}
+	}
+	return TerminalSlot{}, false
+}
+
+// AppendTerminal 新建一条终端记忆（生成稳定 ID）并落盘，返回新条目。
+func (s *Store) AppendTerminal(workDir, source string) (TerminalSlot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	slot := TerminalSlot{
+		ID:        NewID("t"),
+		WorkDir:   workDir,
+		Source:    source,
+		CreatedAt: time.Now(),
+	}
+	s.terminals = append(s.terminals, slot)
+	if err := s.saveTerminalsLocked(); err != nil {
+		return TerminalSlot{}, err
+	}
+	return cloneTerminal(slot), nil
+}
+
+// DeleteTerminal 删除一条终端记忆；不存在时报错。
+func (s *Store) DeleteTerminal(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]TerminalSlot, 0, len(s.terminals))
+	found := false
+	for _, slot := range s.terminals {
+		if slot.ID == id {
+			found = true
+			continue
+		}
+		kept = append(kept, slot)
+	}
+	if !found {
+		return fmt.Errorf("终端记录不存在: %s", id)
+	}
+	s.terminals = kept
+	return s.saveTerminalsLocked()
+}
+
+// UpdateTerminalAutoStart 更新自动重开勾选；不存在时报错。
+func (s *Store) UpdateTerminalAutoStart(id string, on bool) error {
+	return s.updateTerminal(id, func(slot *TerminalSlot) { slot.AutoStart = on })
+}
+
+// UpdateTerminalLastSession 绑定最近一次 shell 运行；不存在时报错。
+func (s *Store) UpdateTerminalLastSession(id, sessionID string) error {
+	return s.updateTerminal(id, func(slot *TerminalSlot) { slot.LastSessionID = sessionID })
+}
+
+func (s *Store) updateTerminal(id string, mutate func(*TerminalSlot)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.terminals {
+		if s.terminals[i].ID == id {
+			mutate(&s.terminals[i])
+			return s.saveTerminalsLocked()
+		}
+	}
+	return fmt.Errorf("终端记录不存在: %s", id)
+}
+
+func cloneTerminal(slot TerminalSlot) TerminalSlot { return slot }
+
 func cloneConfig(cfg Config) Config {
 	out := Config{Entries: make([]Entry, len(cfg.Entries)), Groups: make([]Group, len(cfg.Groups))}
 	copy(out.Entries, cfg.Entries)
@@ -277,7 +413,29 @@ func writeJSON(path string, v any) error {
 	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := renameWithRetry(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// renameWithRetry 重命名并短退避重试；
+// Windows 上目标被瞬时句柄占用（杀软扫描/外部读取工具等）时 rename 返回 Access denied，
+// 通常几百毫秒内解锁，重试可吸收这类瞬时锁。全失败返回最后一次错误。
+func renameWithRetry(src, dst string) error {
+	backoff := []time.Duration{0, 20 * time.Millisecond, 80 * time.Millisecond, 200 * time.Millisecond}
+	var err error
+	for _, delay := range backoff {
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+		err = os.Rename(src, dst)
+		if err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 // NewID 生成带前缀的唯一 ID。
@@ -313,6 +471,9 @@ func (h *History) init() error {
 	return nil
 }
 
+// GlobalPath 全局命令历史文件路径。
+func (h *History) GlobalPath() string { return h.globalPath }
+
 // SessionPath 会话命令文件路径。
 func (h *History) SessionPath(id string) string {
 	return filepath.Join(h.sessions, id+".txt")
@@ -326,6 +487,36 @@ func (h *History) BootstrapPath(id string) string {
 // SessionCwdPath 会话当前工作目录文件路径。
 func (h *History) SessionCwdPath(id string) string {
 	return filepath.Join(h.sessions, id+".cwd")
+}
+
+// ScreenPath 会话最近一屏（raw 终端字节）文件路径。
+func (h *History) ScreenPath(id string) string {
+	return filepath.Join(h.sessions, id+".screen")
+}
+
+// WriteSessionScreen 保全会话最近一屏（raw bytes），供终端重开时回放。
+func (h *History) WriteSessionScreen(id string, data []byte) error {
+	if err := os.MkdirAll(h.sessions, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(h.ScreenPath(id), data, 0o644)
+}
+
+// ReadSessionScreen 读取会话最近一屏；缺失返回空。
+func (h *History) ReadSessionScreen(id string) []byte {
+	data, err := os.ReadFile(h.ScreenPath(id))
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// Cleanup 清理一个会话遗留的命令/脚本/目录/屏幕文件（用户删除终端记忆时调用）。
+// 文件不存在时静默跳过。
+func (h *History) Cleanup(id string) {
+	for _, suffix := range []string{".txt", ".ps1", ".cwd", ".screen"} {
+		_ = os.Remove(filepath.Join(h.sessions, id+suffix))
+	}
 }
 
 // Prepare 创建空的会话历史文件（无 BOM）。

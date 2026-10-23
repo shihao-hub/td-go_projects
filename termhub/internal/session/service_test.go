@@ -235,10 +235,10 @@ func TestSessionHistoryPersisted(t *testing.T) {
 	}
 }
 
-// TestBuildBootstrap 启动脚本包含目录、历史钩子与初始命令。
+// TestBuildBootstrap 启动脚本包含目录、历史钩子、全局历史与初始命令。
 func TestBuildBootstrap(t *testing.T) {
-	script := buildBootstrap(`C:\work`, `C:\h.txt`, `C:\cwd.txt`, "git status")
-	for _, want := range []string{"Set-Location", "__termhub_history", "PSConsoleHostReadLine", "git status"} {
+	script := buildBootstrap(`C:\work`, `C:\h.txt`, `C:\cwd.txt`, `C:\global.txt`, "git status")
+	for _, want := range []string{"Set-Location", "__termhub_history", "PSConsoleHostReadLine", "HistorySavePath", "git status"} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("bootstrap 缺少 %q:\n%s", want, script)
 		}

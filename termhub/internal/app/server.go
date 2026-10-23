@@ -2,12 +2,15 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -34,32 +37,53 @@ func writeJSON(w http.ResponseWriter, status int, resp APIResponse) {
 type Server struct {
 	svc   *session.Service
 	store *store.Store
+	log   *slog.Logger
+
+	// OnShow 由桌面壳注入：用户双击 exe 唤出已驻留实例的窗口。
+	OnShow func()
 
 	mu   sync.Mutex
 	addr string
 }
 
-// NewServer 依据数据目录构造服务。
-func NewServer(dataDir string) *Server {
+// NewServer 依据数据目录构造服务；已勾选自动重开的终端记忆在此静默拉起。
+func NewServer(dataDir string, log *slog.Logger) *Server {
+	factory := pty.Factory(pty.ConPtyFactory{})
+	return newServerWithFactory(dataDir, factory, log)
+}
+
+// newServerWithFactory 测试接缝：注入 fake PTY 工厂验证终端编排。
+func newServerWithFactory(dataDir string, factory pty.Factory, log *slog.Logger) *Server {
 	var st *store.Store
 	if dataDir != "" {
 		if created, err := store.New(dataDir); err == nil {
 			st = created
+		} else if log != nil {
+			log.Warn("store init failed", "err", err.Error())
 		}
 	}
-	svc := session.NewServiceWithStore(pty.ConPtyFactory{}, st)
-	return &Server{svc: svc, store: st}
+	return newServerWithStore(st, factory, log)
+}
+
+// newServerWithStore 测试接缝：直接装配既有存储。
+func newServerWithStore(st *store.Store, factory pty.Factory, log *slog.Logger) *Server {
+	svc := session.NewServiceWithStore(factory, st)
+	s := &Server{svc: svc, store: st, log: log}
+	if st != nil {
+		s.restoreAutoStart()
+	}
+	return s
 }
 
 // Handler 装配全部路由。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/", web.Handler())
-	mux.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
-	mux.HandleFunc("POST /api/v1/sessions", s.handleStartSession)
-	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleStopSession)
-	mux.HandleFunc("GET /api/v1/sessions/history", s.handleSessionHistory)
-	mux.HandleFunc("DELETE /api/v1/sessions/history/{id}", s.handleDeleteSessionHistory)
+	mux.HandleFunc("GET /api/v1/terminals", s.handleListTerminals)
+	mux.HandleFunc("POST /api/v1/terminals", s.handleCreateTerminal)
+	mux.HandleFunc("POST /api/v1/terminals/{id}/start", s.handleStartTerminal)
+	mux.HandleFunc("PUT /api/v1/terminals/{id}", s.handleUpdateTerminal)
+	mux.HandleFunc("DELETE /api/v1/terminals/{id}", s.handleDeleteTerminal)
 	mux.HandleFunc("POST /api/v1/sessions/{id}/agent", s.handleAgent)
 	mux.HandleFunc("GET /api/v1/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/v1/config", s.handlePutConfig)
@@ -68,72 +92,258 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/history/global", s.handleGlobalHistory)
 	mux.HandleFunc("GET /api/v1/fs/list", s.handleListDirs)
 	mux.HandleFunc("GET /api/v1/ws/{id}", s.handleWS)
+	mux.HandleFunc("GET /api/v1/alive", s.handleAlive)
+	mux.HandleFunc("POST /api/v1/ui/show", s.handleShow)
 	return mux
 }
 
-// handleListSessions GET /api/v1/sessions
-func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: s.svc.ListSessions()})
+// handleAlive GET /api/v1/alive：自研单实例的存活探测端点。
+func (s *Server) handleAlive(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, APIResponse{OK: true})
 }
 
-// startRequest POST /api/v1/sessions 请求体。
-type startRequest struct {
-	WorkDir        string `json:"work_dir"`
-	InitialCommand string `json:"initial_command"`
-	Source         string `json:"source"`
+// handleShow POST /api/v1/ui/show：第二实例触发已驻留实例唤出主窗口。
+func (s *Server) handleShow(w http.ResponseWriter, _ *http.Request) {
+	if s.OnShow != nil {
+		go s.OnShow()
+	}
+	writeJSON(w, http.StatusOK, APIResponse{OK: true})
 }
 
-// handleStartSession POST /api/v1/sessions
-func (s *Server) handleStartSession(w http.ResponseWriter, r *http.Request) {
-	var req startRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
-	}
-	if req.WorkDir != "" {
-		info, err := os.Stat(req.WorkDir)
-		if err != nil || !info.IsDir() {
-			writeJSON(w, http.StatusBadRequest, APIResponse{OK: false, Error: "工作目录不存在: " + req.WorkDir})
-			return
-		}
-	}
-	opts := pty.Options{WorkDir: req.WorkDir, InitialCommand: req.InitialCommand, Source: req.Source}
-	id, err := s.svc.StartSession(r.Context(), opts)
+// terminalView 终端记忆与其运行时状态合并视图。
+type terminalView struct {
+	ID            string    `json:"id"`
+	WorkDir       string    `json:"work_dir"`
+	Source        string    `json:"source,omitempty"`
+	AutoStart     bool      `json:"auto_start"`
+	CreatedAt     time.Time `json:"created_at"`
+	LastSessionID string    `json:"last_session_id,omitempty"`
+	// LastCommands 最近一次（已结束）shell 运行的命令记录。
+	LastCommands []string `json:"last_commands"`
+	// Session 当前运行中的 shell 快照；未启动为 nil。
+	Session *session.Snapshot `json:"session"`
+}
+
+// handleListTerminals GET /api/v1/terminals：按创建顺序返回终端记忆。
+func (s *Server) handleListTerminals(w http.ResponseWriter, _ *http.Request) {
+	views, err := s.buildTerminalViews()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: map[string]string{"id": id}})
+	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: views})
 }
 
-// handleStopSession DELETE /api/v1/sessions/{id}
-func (s *Server) handleStopSession(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.StopSession(r.PathValue("id")); err != nil {
-		writeJSON(w, http.StatusNotFound, APIResponse{OK: false, Error: err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, APIResponse{OK: true})
-}
-
-// handleSessionHistory GET /api/v1/sessions/history
-func (s *Server) handleSessionHistory(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) buildTerminalViews() ([]terminalView, error) {
 	if s.store == nil {
-		writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: []any{}})
-		return
+		return nil, fmt.Errorf("存储未初始化")
 	}
-	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: s.svc.History()})
+	liveBySlot := make(map[string]session.Snapshot)
+	for _, snap := range s.svc.ListSessions() {
+		if snap.SlotID != "" {
+			liveBySlot[snap.SlotID] = snap
+		}
+	}
+	views := make([]terminalView, 0)
+	for _, slot := range s.store.Terminals() {
+		view := terminalView{
+			ID:            slot.ID,
+			WorkDir:       slot.WorkDir,
+			Source:        slot.Source,
+			AutoStart:     slot.AutoStart,
+			CreatedAt:     slot.CreatedAt,
+			LastSessionID: slot.LastSessionID,
+			LastCommands:  []string{},
+		}
+		if slot.LastSessionID != "" {
+			if live, ok := liveBySlot[slot.LastSessionID]; ok {
+				liveView := live
+				view.Session = &liveView
+			} else if rec, ok := s.store.Session(slot.LastSessionID); ok {
+				view.LastCommands = rec.Commands
+			}
+		}
+		// 兜底：slot 有正在运行的会话但 LastSessionID 绑定异常时仍显示运行态。
+		if view.Session == nil {
+			if live, ok := liveBySlot[slot.ID]; ok {
+				liveView := live
+				view.Session = &liveView
+			}
+		}
+		views = append(views, view)
+	}
+	return views, nil
 }
 
-// handleDeleteSessionHistory DELETE /api/v1/sessions/history/{id}
-func (s *Server) handleDeleteSessionHistory(w http.ResponseWriter, r *http.Request) {
+// handleCreateTerminal POST /api/v1/terminals：新建终端记忆并拉起 shell。
+func (s *Server) handleCreateTerminal(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: "存储未初始化"})
 		return
 	}
-	if err := s.store.DeleteSession(r.PathValue("id")); err != nil {
+	var req struct {
+		WorkDir        string `json:"work_dir"`
+		InitialCommand string `json:"initial_command"`
+		Source         string `json:"source"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if info, err := os.Stat(req.WorkDir); err != nil || !info.IsDir() {
+		writeJSON(w, http.StatusBadRequest, APIResponse{OK: false, Error: "工作目录不存在: " + req.WorkDir})
+		return
+	}
+	slot, sessionID, err := s.createAndStartSlot(req.WorkDir, req.Source, req.InitialCommand)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: map[string]string{
+		"slot_id":    slot.ID,
+		"session_id": sessionID,
+	}})
+}
+
+// handleStartTerminal POST /api/v1/terminals/{id}/start：把未启动的终端记忆拉起一个纯净 shell。
+func (s *Server) handleStartTerminal(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: "存储未初始化"})
+		return
+	}
+	slot, ok := s.store.TerminalByID(r.PathValue("id"))
+	if !ok {
+		writeJSON(w, http.StatusNotFound, APIResponse{OK: false, Error: "终端记录不存在"})
+		return
+	}
+	if live, ok := s.liveSessionBySlot(slot.ID); ok {
+		writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: map[string]string{
+			"slot_id":    slot.ID,
+			"session_id": live.ID,
+		}})
+		return
+	}
+	sessionID, err := s.startSessionForSlot(slot, "")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: map[string]string{
+		"slot_id":    slot.ID,
+		"session_id": sessionID,
+	}})
+}
+
+// handleUpdateTerminal PUT /api/v1/terminals/{id}：更新自动重开勾选。
+func (s *Server) handleUpdateTerminal(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: "存储未初始化"})
+		return
+	}
+	var req struct {
+		AutoStart bool `json:"auto_start"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := s.store.UpdateTerminalAutoStart(r.PathValue("id"), req.AutoStart); err != nil {
 		writeJSON(w, http.StatusNotFound, APIResponse{OK: false, Error: err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, APIResponse{OK: true})
+}
+
+// handleDeleteTerminal DELETE /api/v1/terminals/{id}：
+// 用户侧「删除终端」——终止运行中的 shell（若有），移除记忆与最近一次运行的历史文件。
+func (s *Server) handleDeleteTerminal(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: "存储未初始化"})
+		return
+	}
+	slot, ok := s.store.TerminalByID(r.PathValue("id"))
+	if !ok {
+		writeJSON(w, http.StatusNotFound, APIResponse{OK: false, Error: "终端记录不存在"})
+		return
+	}
+	if live, found := s.liveSessionBySlot(slot.ID); found {
+		_ = s.svc.StopSession(live.ID)
+	}
+	if err := s.store.DeleteTerminal(slot.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: err.Error()})
+		return
+	}
+	if slot.LastSessionID != "" {
+		s.store.History().Cleanup(slot.LastSessionID)
+		_ = s.store.DeleteSession(slot.LastSessionID)
+	}
+	writeJSON(w, http.StatusOK, APIResponse{OK: true})
+}
+
+// createAndStartSlot 新建终端记忆并拉起 shell；所有启动入口的统一编排。
+// 启动失败撤销新建的记忆，避免留下空槽。
+func (s *Server) createAndStartSlot(workDir, source, initialCommand string) (store.TerminalSlot, string, error) {
+	slot, err := s.store.AppendTerminal(workDir, source)
+	if err != nil {
+		return store.TerminalSlot{}, "", err
+	}
+	sessionID, err := s.startSessionForSlot(slot, initialCommand)
+	if err != nil {
+		_ = s.store.DeleteTerminal(slot.ID)
+		return store.TerminalSlot{}, "", err
+	}
+	return slot, sessionID, nil
+}
+
+// startSessionForSlot 为既有终端记忆拉起一个 shell（不带命令即纯净 PowerShell）。
+// 若该记忆最近一次运行已结束，则把其最近一屏带入新会话作为前置回放。
+func (s *Server) startSessionForSlot(slot store.TerminalSlot, initialCommand string) (string, error) {
+	var priorScreen []byte
+	if slot.LastSessionID != "" && s.store != nil {
+		priorScreen = s.store.History().ReadSessionScreen(slot.LastSessionID)
+	}
+	sessionID, err := s.svc.StartSession(context.Background(), pty.Options{
+		WorkDir:        slot.WorkDir,
+		InitialCommand: initialCommand,
+		Source:         slot.Source,
+		SlotID:         slot.ID,
+		PriorScreen:    priorScreen,
+	})
+	if err != nil {
+		return "", err
+	}
+	if s.store != nil {
+		_ = s.store.UpdateTerminalLastSession(slot.ID, sessionID)
+	}
+	return sessionID, nil
+}
+
+// liveSessionBySlot 查找该终端记忆当前运行中的会话。
+func (s *Server) liveSessionBySlot(slotID string) (*session.Snapshot, bool) {
+	for _, snap := range s.svc.ListSessions() {
+		if snap.SlotID == slotID {
+			live := snap
+			return &live, true
+		}
+	}
+	return nil, false
+}
+
+// restoreAutoStart 启动导流：勾选自动重开的终端记忆逐一拉起纯净 shell。
+// 拉起就是干净的 PowerShell，不注入任何初始命令。
+func (s *Server) restoreAutoStart() {
+	restored := 0
+	for _, slot := range s.store.Terminals() {
+		if !slot.AutoStart {
+			continue
+		}
+		if _, err := s.startSessionForSlot(slot, ""); err != nil {
+			if s.log != nil {
+				s.log.Warn("autostart restore failed", "slot", slot.ID, "err", err.Error())
+			}
+			continue
+		}
+		restored++
+	}
+	if restored > 0 && s.log != nil {
+		s.log.Info("autostart restored terminals", "count", restored)
+	}
 }
 
 // agentRequest POST /api/v1/sessions/{id}/agent
@@ -196,6 +406,7 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStartEntry POST /api/v1/config/entries/{id}/start
+// 启动项作为终端记忆落入左侧列表再拉起 shell，与手动新建走同一模型。
 func (s *Server) handleStartEntry(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: "存储未初始化"})
@@ -206,19 +417,18 @@ func (s *Server) handleStartEntry(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, APIResponse{OK: false, Error: "启动项不存在"})
 		return
 	}
-	id, err := s.svc.StartSession(r.Context(), pty.Options{
-		WorkDir:        entry.WorkDir,
-		InitialCommand: entry.Command,
-		Source:         "entry:" + entry.ID,
-	})
+	slot, sessionID, err := s.createAndStartSlot(entry.WorkDir, "entry:"+entry.ID, entry.Command)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: map[string]string{"id": id}})
+	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: map[string]string{
+		"slot_id": slot.ID, "session_id": sessionID,
+	}})
 }
 
 // handleStartGroup POST /api/v1/config/groups/{id}/start
+// 组内每个启动项都落成一条终端记忆再拉起，与统一终端模型一致。
 func (s *Server) handleStartGroup(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
 		writeJSON(w, http.StatusInternalServerError, APIResponse{OK: false, Error: "存储未初始化"})
@@ -230,6 +440,7 @@ func (s *Server) handleStartGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ids := make([]string, 0, len(group.EntryIDs))
+	slots := make([]string, 0, len(group.EntryIDs))
 	errs := make([]string, 0)
 	for _, entryID := range group.EntryIDs {
 		entry, found := s.store.Entry(entryID)
@@ -237,20 +448,18 @@ func (s *Server) handleStartGroup(w http.ResponseWriter, r *http.Request) {
 			errs = append(errs, "启动项不存在: "+entryID)
 			continue
 		}
-		id, err := s.svc.StartSession(r.Context(), pty.Options{
-			WorkDir:        entry.WorkDir,
-			InitialCommand: entry.Command,
-			Source:         "group:" + group.ID,
-		})
+		slot, sessionID, err := s.createAndStartSlot(entry.WorkDir, "group:"+group.ID, entry.Command)
 		if err != nil {
 			errs = append(errs, entry.Name+": "+err.Error())
 			continue
 		}
-		ids = append(ids, id)
+		slots = append(slots, slot.ID)
+		ids = append(ids, sessionID)
 	}
 	writeJSON(w, http.StatusOK, APIResponse{OK: true, Data: map[string]any{
-		"ids":    ids,
-		"errors": errs,
+		"slot_ids": slots,
+		"ids":      ids,
+		"errors":   errs,
 	}})
 }
 
