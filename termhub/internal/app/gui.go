@@ -49,6 +49,7 @@ func webviewDataPath() string {
 
 // LaunchGUI 启动本地服务与 Wails 桌面壳。
 func LaunchGUI(port int) error {
+	version.SetRelease(version.BuildMode == "release")
 	server := NewServer(dataDir())
 	httpServer, url, err := server.Start(port)
 	if err != nil {

@@ -1,0 +1,34 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": "__ICON__"
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": "__MANIFEST__"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "__FIXED_VERSION__",
+          "product_version": "__FIXED_VERSION__"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "shihao-hub",
+            "FileDescription": "__DESCRIPTION__",
+            "FileVersion": "__VERSION__",
+            "InternalName": "termhub",
+            "LegalCopyright": "© 2026 shihao-hub",
+            "OriginalFilename": "__ORIGINAL_NAME__",
+            "ProductName": "termhub",
+            "ProductVersion": "__VERSION__"
+          }
+        }
+      }
+    }
+  }
+}
