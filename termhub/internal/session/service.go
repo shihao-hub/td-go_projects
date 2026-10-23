@@ -25,6 +25,9 @@ const (
 	StatusExited  Status = "exited"
 )
 
+// shutdownGrace 退出时等待会话收尾的总预算；会话并发关闭，不再按数量串行叠加。
+const shutdownGrace = 1500 * time.Millisecond
+
 // Session 一个终端会话的全部运行时状态。
 type Session struct {
 	ID        string
@@ -32,18 +35,22 @@ type Session struct {
 	StartedAt time.Time
 	ExitedAt  time.Time
 	ExitCode  int
-	// Source 会话来源：manual / entry:<id> / group:<id>。
+	// Source 会话来源：manual / entry:<id> / group:<id> / autostart。
 	Source string
+	// SlotID 所属终端记忆条目（terminals.json 的稳定身份）。
+	SlotID string
 	// WorkDir 会话初始工作目录。
 	WorkDir string
 
-	mu      sync.Mutex
-	pt      pty.Term
-	cols    int
-	rows    int
-	buffer  []byte
-	subs    map[chan []byte]struct{}
-	stopped chan struct{}
+	mu     sync.Mutex
+	pt     pty.Term
+	cols   int
+	rows   int
+	buffer []byte
+	// priorScreen 上一会话的最近一屏，订阅回放时置于实时缓冲之前。
+	priorScreen []byte
+	subs        map[chan []byte]struct{}
+	stopped     chan struct{}
 }
 
 // Service 终端会话管理器（测试接缝）。
@@ -108,16 +115,18 @@ func (s *Service) StartSession(ctx context.Context, opts pty.Options) (string, e
 
 	s.mu.Lock()
 	sess := &Session{
-		ID:        id,
-		Status:    StatusRunning,
-		StartedAt: time.Now(),
-		Source:    opts.Source,
-		WorkDir:   opts.WorkDir,
-		pt:        t,
-		cols:      cols,
-		rows:      rows,
-		subs:      make(map[chan []byte]struct{}),
-		stopped:   make(chan struct{}),
+		ID:          id,
+		Status:      StatusRunning,
+		StartedAt:   time.Now(),
+		Source:      opts.Source,
+		SlotID:      opts.SlotID,
+		WorkDir:     opts.WorkDir,
+		pt:          t,
+		cols:        cols,
+		rows:        rows,
+		priorScreen: append([]byte(nil), opts.PriorScreen...),
+		subs:        make(map[chan []byte]struct{}),
+		stopped:     make(chan struct{}),
 	}
 	s.sessions[id] = sess
 	s.mu.Unlock()
@@ -139,15 +148,15 @@ func (s *Service) prepareCommandLine(id string, opts pty.Options) (string, error
 		return "", fmt.Errorf("准备会话历史失败: %w", err)
 	}
 	bootstrap := history.BootstrapPath(id)
-	script := buildBootstrap(opts.WorkDir, history.SessionPath(id), history.SessionCwdPath(id), opts.InitialCommand)
+	script := buildBootstrap(opts.WorkDir, history.SessionPath(id), history.SessionCwdPath(id), history.GlobalPath(), opts.InitialCommand)
 	if err := os.WriteFile(bootstrap, []byte(script), 0o644); err != nil {
 		return "", fmt.Errorf("写会话启动脚本失败: %w", err)
 	}
 	return fmt.Sprintf(`powershell.exe -NoLogo -NoExit -File "%s"`, bootstrap), nil
 }
 
-// buildBootstrap 生成注入 prompt 钩子与初始命令的启动脚本。
-func buildBootstrap(workDir, historyPath, cwdPath, initialCommand string) string {
+// buildBootstrap 生成注入 prompt 钩子、全局历史与初始命令的启动脚本。
+func buildBootstrap(workDir, historyPath, cwdPath, globalPath, initialCommand string) string {
 	var b strings.Builder
 	b.WriteString("# termhub 会话启动脚本（自动生成）\n")
 	if workDir != "" {
@@ -155,6 +164,7 @@ func buildBootstrap(workDir, historyPath, cwdPath, initialCommand string) string
 	}
 	fmt.Fprintf(&b, "$global:__termhub_history = '%s'\n", psQuote(historyPath))
 	fmt.Fprintf(&b, "$global:__termhub_cwd = '%s'\n", psQuote(cwdPath))
+	fmt.Fprintf(&b, "$global:__termhub_global = '%s'\n", psQuote(globalPath))
 	b.WriteString(`$global:__termhub_enc = New-Object System.Text.UTF8Encoding($false)
 function global:__termhub_log([string]$text) {
   if (-not $text) { return }
@@ -162,6 +172,8 @@ function global:__termhub_log([string]$text) {
   [System.IO.File]::AppendAllText($global:__termhub_history, $flat + "` + "`" + `r` + "`" + `n", $global:__termhub_enc)
 }
 Import-Module PSReadLine -ErrorAction SilentlyContinue
+# ↑↓直接翻 termhub 全局历史（含此前各次会话），会话退出已自动合并。
+try { Set-PSReadLineOption -HistorySavePath $global:__termhub_global -ErrorAction Stop } catch { }
 $global:__termhub_readline = $function:PSConsoleHostReadLine
 if ($global:__termhub_readline) {
   function global:PSConsoleHostReadLine {
@@ -238,12 +250,15 @@ func (s *Service) finish(sess *Session, code int) {
 	sess.ExitedAt = time.Now()
 	sess.ExitCode = code
 	sess.pt = nil
+	rawScreen := append([]byte(nil), sess.buffer...)
 	lastOutput := stripANSI(string(sess.buffer))
 	sess.mu.Unlock()
 
 	commands := []string(nil)
 	if s.Store != nil {
 		history := s.Store.History()
+		// 保全会话最近一屏（raw 字节），供终端重开时前置回放。
+		_ = history.WriteSessionScreen(sess.ID, rawScreen)
 		commands = history.ReadSession(sess.ID)
 		if len(commands) > 0 {
 			_ = history.AppendGlobal(commands)
@@ -286,6 +301,8 @@ func (s *Service) StopSession(id string) error {
 }
 
 // Subscribe 订阅某会话的输出流；返回最近缓冲（回放）、实时订阅通道与退路通知。
+// 一个会话只有一个前台终端 tab：重复订阅会接管既有通道（旧连接收到关闭信号），
+// 避免「输入被双 WS 转发」造成的回车双份回显。
 func (s *Service) Subscribe(id string) ([]byte, <-chan []byte, <-chan struct{}, error) {
 	s.mu.Lock()
 	sess, ok := s.sessions[id]
@@ -296,8 +313,14 @@ func (s *Service) Subscribe(id string) ([]byte, <-chan []byte, <-chan struct{}, 
 
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
-	backlog := append([]byte(nil), sess.buffer...)
+	backlog := make([]byte, 0, len(sess.priorScreen)+len(sess.buffer))
+	backlog = append(backlog, sess.priorScreen...)
+	backlog = append(backlog, sess.buffer...)
 	ch := make(chan []byte, 64)
+	for oldCh := range sess.subs {
+		delete(sess.subs, oldCh)
+		close(oldCh) // 旧写泵收到通道关闭即断开 WS，前端随后重连到唯一通道。
+	}
 	sess.subs[ch] = struct{}{}
 	return backlog, ch, sess.stopped, nil
 }
@@ -360,6 +383,7 @@ type Snapshot struct {
 	WorkDir     string      `json:"work_dir"`
 	Cwd         string      `json:"cwd"`
 	Source      string      `json:"source"`
+	SlotID      string      `json:"slot_id,omitempty"`
 	MemoryBytes uint64      `json:"memory_bytes"`
 	Commands    []string    `json:"commands"`
 	Opts        pty.Options `json:"-"`
@@ -395,6 +419,7 @@ func (s *Service) ListSessions() []Snapshot {
 			WorkDir:     sess.WorkDir,
 			Cwd:         s.sessionCwd(sess),
 			Source:      sess.Source,
+			SlotID:      sess.SlotID,
 			MemoryBytes: memory,
 			Commands:    commands,
 		})
@@ -575,10 +600,15 @@ func (s *Service) Shutdown() {
 			_ = pt.Close()
 		}
 	}
+	// 所有 PTY 已先行关闭，各会话的 finish() 并行收尾；这里共享一个总预算，
+	// 避免 N 个会话按每会话 2s 串行叠加把退出拖成假死。
+	deadline := time.NewTimer(shutdownGrace)
+	defer deadline.Stop()
 	for _, sess := range sessions {
 		select {
 		case <-sess.stopped:
-		case <-time.After(2 * time.Second):
+		case <-deadline.C:
+			return
 		}
 	}
 }

@@ -60,7 +60,22 @@ func LaunchGUI(port int) error {
 	logger := logx.Init(data)
 	defer logx.Close()
 
-	server := NewServer(data)
+	// 自研单实例：互斥体占用即检查交接，唤出既有窗口后本进程退出。
+	only, existingURL := acquireInstance(data, version.Channel())
+	if !only {
+		logger.Info("existing instance detected", "url", existingURL)
+		if existingURL != "" && handoffToExisting(existingURL) {
+			logger.Info("handoff done: existing instance prompted, exiting second instance")
+			logx.Close()
+			os.Exit(0)
+		}
+		// 互斥体被占但既有实例不可达：登记脏、拒绝第二实例避免蔽障。
+		logger.Warn("existing instance unreachable; refusing second instance", "url", existingURL)
+		return nil
+	}
+
+	server := NewServer(data, logger)
+	logger.Info("assemble: session orchestration ready")
 	httpServer, url, err := server.Start(port)
 	if err != nil {
 		return err
@@ -70,6 +85,9 @@ func LaunchGUI(port int) error {
 		"channel", version.Channel(),
 		"url", url,
 	)
+	if err := writeInstanceFile(data, url); err != nil {
+		logger.Warn("write instance.json failed", "err", err.Error())
+	}
 	statePath := windowStatePath(data)
 
 	var (
@@ -79,6 +97,7 @@ func LaunchGUI(port int) error {
 		show     func()
 	)
 
+	logger.Info("assemble: creating wails app")
 	wailsApp := application.New(application.Options{
 		Name:        "termhub",
 		Description: "termhub - Windows 终端会话与启动项生命周期管理器",
@@ -96,16 +115,7 @@ func LaunchGUI(port int) error {
 				"--disable-features=NetworkServiceOutOfProcess",
 			},
 		},
-		// dev / prod 各自持锁，互不挤掉常驻实例。
-		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID: "com.shihao-hub.termhub." + version.Channel(),
-			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
-				logger.Info("second instance launch, showing window")
-				if show != nil {
-					go show()
-				}
-			},
-		},
+		// dev / prod 各自持锁，互不挤掉常驻实例（见 acquireInstance）。
 	})
 
 	// buildWindow 按记忆几何创建窗口，并挂接保存与屏外兜底逻辑。
@@ -230,10 +240,12 @@ func LaunchGUI(port int) error {
 		logger.Info("main window shown", "id", w.ID())
 	}
 
+	logger.Info("assemble: creating system tray")
 	tray := wailsApp.SystemTray.New()
 	tray.SetIcon(iconICO)
 	tray.SetTooltip(windowTitle)
 
+	var quitting atomic.Bool
 	trayMenu := wailsApp.NewMenu()
 	trayMenu.Add("显示主窗口").OnClick(func(*application.Context) {
 		logger.Info("tray menu: show")
@@ -246,7 +258,30 @@ func LaunchGUI(port int) error {
 			dialog := wailsApp.Dialog.Question()
 			dialog.SetTitle("退出 termhub")
 			dialog.SetMessage("退出将终止全部终端会话，确定？")
-			dialog.AddButton("退出").OnClick(func() { wailsApp.Quit() })
+			dialog.AddButton("退出").OnClick(func() {
+				if !quitting.CompareAndSwap(false, true) {
+					return
+				}
+				logger.Info("quit confirmed")
+				// 先隐藏窗口再收尾：收尾期间即使有短暂延迟，也不会留下
+				// 被 Windows 判定为「未响应」的窗口给用户看。
+				winMu.Lock()
+				w := win
+				winMu.Unlock()
+				if w != nil {
+					if _, exists := wailsApp.Window.GetByID(w.ID()); exists {
+						w.Hide()
+					}
+				}
+				// 会话收尾（杀进程树、合并历史、落盘）耗时不可预测，必须离开
+				// UI 主线程执行；否则 Wails 退出清理期间消息循环被占住，窗口
+				// 会被 Windows 标记「未响应」。
+				go func() {
+					server.Shutdown()
+					logger.Info("all sessions stopped")
+					wailsApp.Quit()
+				}()
+			})
 			dialog.AddButton("取消").SetAsCancel()
 			dialog.Show()
 		}()
@@ -262,12 +297,24 @@ func LaunchGUI(port int) error {
 	})
 	logger.Info("system tray ready")
 
+	// 既有实例唤出路径：第二实例经 HTTP 触发主窗口重建。
+	server.OnShow = func() {
+		logger.Info("second-instance handoff: show")
+		go show()
+	}
+
 	show()
 
 	// 真正退出时先终止所有会话，避免遗留 shell 子进程。
 	wailsApp.OnShutdown(func() {
+		// 托盘正常退出路径已在后台完成收尾，这里只剩幂等兜底；仍占 UI 线程，
+		// 所以要确保它足够快（Service.Shutdown 共享总超时，不随会话数叠加）。
 		server.Shutdown()
 		logger.Info("termhub stopped")
+		logx.Close()
+		// Wails v3 beta 在退出清理阶段可能因托盘/对话框句柄阻塞主 goroutine，
+		// 使 OnShutdown 执行完后进程仍无法退出；这里强制收尾，保证用户始终能退出。
+		os.Exit(0)
 	})
 
 	err = wailsApp.Run()
