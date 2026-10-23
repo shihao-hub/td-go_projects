@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 
 	"github.com/coder/websocket"
@@ -49,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/", web.Handler())
 	mux.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
 	mux.HandleFunc("POST /api/v1/sessions", s.handleStartSession)
+	mux.HandleFunc("GET /api/v1/fs/list", s.handleListDirs)
 	mux.HandleFunc("GET /api/v1/ws/{id}", s.handleWS)
 	return mux
 }
@@ -69,6 +71,13 @@ func (s *Server) handleStartSession(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
+	if req.WorkDir != "" {
+		info, err := os.Stat(req.WorkDir)
+		if err != nil || !info.IsDir() {
+			writeJSON(w, http.StatusBadRequest, APIResponse{OK: false, Error: "工作目录不存在: " + req.WorkDir})
+			return
+		}
+	}
 	opts := pty.Options{WorkDir: req.WorkDir}
 	id, err := s.svc.StartSession(r.Context(), opts)
 	if err != nil {
@@ -80,10 +89,10 @@ func (s *Server) handleStartSession(w http.ResponseWriter, r *http.Request) {
 
 // wsClientMsg WS 上行消息：键盘输入或 resize。
 type wsClientMsg struct {
-	Type  string `json:"type"` // input / resize
-	Data  string `json:"data,omitempty"`
-	Cols  int    `json:"cols,omitempty"`
-	Rows  int    `json:"rows,omitempty"`
+	Type string `json:"type"` // input / resize
+	Data string `json:"data,omitempty"`
+	Cols int    `json:"cols,omitempty"`
+	Rows int    `json:"rows,omitempty"`
 }
 
 // handleWS GET /api/v1/ws/{id}：终端输出下行 + 输入上行的事件桥。

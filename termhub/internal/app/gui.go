@@ -79,7 +79,10 @@ func LaunchGUI(port int) error {
 		MinWidth:         720,
 		MinHeight:        480,
 		URL:              url + "/index.html",
-		BackgroundColour: application.NewRGB(244, 246, 244),
+		BackgroundColour: application.NewRGB(13, 17, 23),
+		Windows: application.WindowsWindow{
+			Theme: application.Dark,
+		},
 	})
 	_ = win
 

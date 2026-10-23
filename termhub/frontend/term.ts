@@ -22,14 +22,31 @@ export function createTerminalTab(
   onExited: (id: string) => void,
 ): TabHandle {
   const term = new Terminal({
-    fontFamily: "Consolas, 'Microsoft YaHei Mono', monospace",
+    fontFamily: "'Cascadia Mono', Consolas, 'Microsoft YaHei Mono', monospace",
     fontSize: 14,
     cursorBlink: true,
     theme: {
-      background: "#f7f8f6", // 浅色亮堂底，禁暗色终端风
-      foreground: "#1f2d24",
-      cursor: "#2f9e44",
-      selectionBackground: "#dcefe2",
+      background: "#0d1117",
+      foreground: "#d7dde5",
+      cursor: "#3fb950",
+      cursorAccent: "#0d1117",
+      selectionBackground: "rgba(63, 185, 80, 0.28)",
+      black: "#1b222c",
+      red: "#f85149",
+      green: "#3fb950",
+      yellow: "#d29922",
+      blue: "#58a6ff",
+      magenta: "#bc8cff",
+      cyan: "#39c5cf",
+      white: "#b1bac4",
+      brightBlack: "#6e7681",
+      brightRed: "#ff7b72",
+      brightGreen: "#56d364",
+      brightYellow: "#e3b341",
+      brightBlue: "#79c0ff",
+      brightMagenta: "#d2a8ff",
+      brightCyan: "#56d4dd",
+      brightWhite: "#f0f6fc",
     },
   });
   // xterm v6 的 element 在 open() 之前不存在，必须用 open(container) 挂载。

@@ -10,21 +10,47 @@
 <body>
   <div class="app">
     <aside class="sidebar">
-      <div class="brand">termhub</div>
-      <button class="btn-primary" id="new-terminal">＋ 新建终端</button>
+      <div class="brand"><span class="brand-dot"></span>termhub</div>
+      <button class="btn-primary" id="new-terminal" title="选择目录后新建终端">＋ 新建终端</button>
+      <nav class="session-list" id="session-list" aria-label="终端会话"></nav>
       <div class="sidebar-foot">
         <span class="dot dot-green"></span><span id="channel">dev</span>
       </div>
     </aside>
     <main class="main">
-      <header class="tabbar" id="tabbar"></header>
       <section class="panes" id="panes">
         <div class="empty-hint" id="empty-hint">
-          点击「新建终端」拉起一个内嵌 PowerShell
+          点击「新建终端」选择目录，拉起一个内嵌 PowerShell
         </div>
       </section>
     </main>
   </div>
+
+  <div class="modal-backdrop" id="dir-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dir-modal-title">
+      <header class="modal-head">
+        <span id="dir-modal-title">选择终端初始目录</span>
+        <button class="icon-btn" id="dir-close" title="关闭" aria-label="关闭">×</button>
+      </header>
+      <div class="dir-toolbar">
+        <button class="btn-ghost" id="dir-up" title="上一级">↑ 上一级</button>
+        <button class="btn-ghost" id="dir-home" title="主目录">主目录</button>
+        <button class="btn-ghost" id="dir-drives" title="列出所有驱动器">此电脑</button>
+        <input class="dir-path" id="dir-path" spellcheck="false" autocomplete="off"
+               placeholder="输入路径后回车跳转" />
+        <button class="btn-ghost" id="dir-go" title="跳转到输入的路径">跳转</button>
+      </div>
+      <ul class="dir-list" id="dir-list"></ul>
+      <footer class="modal-foot">
+        <span class="dir-current" id="dir-current"></span>
+        <div class="modal-actions">
+          <button class="btn-ghost" id="dir-cancel">取消</button>
+          <button class="btn-primary" id="dir-ok">在此目录新建终端</button>
+        </div>
+      </footer>
+    </div>
+  </div>
+
   <script src="/app.js"></script>
 </body>
 </html>
