@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>termhub</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/xterm.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">termhub</div>
+      <button class="btn-primary" id="new-terminal">＋ 新建终端</button>
+      <div class="sidebar-foot">
+        <span class="dot dot-green"></span><span id="channel">dev</span>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="tabbar" id="tabbar"></header>
+      <section class="panes" id="panes">
+        <div class="empty-hint" id="empty-hint">
+          点击「新建终端」拉起一个内嵌 PowerShell
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

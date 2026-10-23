@@ -1,0 +1,102 @@
+/* termhub 浅色亮堂 + 绿主色 + 圆角卡片 */
+:root {
+  --bg: #f4f6f4;
+  --card: #ffffff;
+  --primary: #2f9e44;
+  --primary-hover: #2b8a3e;
+  --text: #1f2d24;
+  --text-dim: #6b7a70;
+  --border: #e2e8e2;
+  --radius: 12px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.app { display: flex; height: 100vh; }
+
+/* 侧栏 */
+.sidebar {
+  width: 200px;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.brand { font-size: 18px; font-weight: 700; color: var(--primary); }
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.btn-primary:hover { background: var(--primary-hover); }
+.sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot-green { background: var(--primary); }
+.dot-red { background: #e03131; }
+
+/* 主区 */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.tabbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px 8px 0 0;
+  background: var(--bg);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.tab.active { background: var(--card); font-weight: 600; color: var(--primary); }
+.tab-close { color: var(--text-dim); cursor: pointer; padding: 0 2px; }
+.tab-close:hover { color: #e03131; }
+
+.panes { flex: 1; position: relative; min-height: 0; }
+.pane {
+  position: absolute;
+  inset: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  padding: 6px;
+}
+.pane.hidden { display: none; }
+.pane .xterm { height: 100%; }
+.empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 14px;
+}
