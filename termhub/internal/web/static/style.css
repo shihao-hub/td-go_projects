@@ -91,6 +91,7 @@ body {
 }
 .pane.hidden { display: none; }
 .pane .xterm { height: 100%; }
+.empty-hint[hidden] { display: none; }  /* hidden 属性需压过 display:flex */
 .empty-hint {
   position: absolute;
   inset: 0;

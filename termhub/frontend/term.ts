@@ -32,7 +32,8 @@ export function createTerminalTab(
       selectionBackground: "#dcefe2",
     },
   });
-  container.appendChild(term.element!);
+  // xterm v6 的 element 在 open() 之前不存在，必须用 open(container) 挂载。
+  term.open(container);
   term.onData((data) => {
     if (handle.ws.readyState === WebSocket.OPEN) {
       handle.ws.send(wsMsg("input", { data }));
