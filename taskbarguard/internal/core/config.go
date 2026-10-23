@@ -29,6 +29,7 @@ func DefaultConfig() Config {
 		"deepseek_harness": {Enabled: true, Style: "8_underlit_chrome"},
 		"idea":             {Enabled: false, Style: "underlit_chrome"},
 		"wt":               {Enabled: true, Style: "pure_dark"},
+		"antigravity":      {Enabled: true, Style: "underlit_chrome"},
 	}}
 }
 

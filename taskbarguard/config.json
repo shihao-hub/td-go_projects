@@ -1,5 +1,9 @@
 {
   "apps": {
+    "antigravity": {
+      "enabled": true,
+      "style": "bright_titanium"
+    },
     "deepseek_harness": {
       "enabled": true,
       "style": "8_underlit_chrome"
