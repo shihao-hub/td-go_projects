@@ -852,8 +852,6 @@ function removeModalTag(tag) {
     renderTagPool();
   }
 }
-  }
-}
 
 function openSessionModal(sessionID) {
   const item = state.allSessions.find((s) => s.id === sessionID);
