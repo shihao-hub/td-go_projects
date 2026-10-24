@@ -45,6 +45,9 @@ type Session struct {
 	ActiveBranchID string    `json:"active_branch_id,omitempty"`
 	Branches       []Branch  `json:"branches,omitempty"`
 	Messages       []Message `json:"messages,omitempty"`
+	Pinned         bool      `json:"pinned,omitempty"`
+	Tags           []string  `json:"tags,omitempty"`
+	DueDate        string    `json:"due_date,omitempty"`
 }
 
 // SessionSummary 是会话选择列表使用的只读快照。
@@ -58,6 +61,9 @@ type SessionSummary struct {
 	LastAssistant string
 	MessageCount  int
 	Branches      []string
+	Pinned        bool
+	Tags          []string
+	DueDate       string
 }
 
 // Normalize 规范化 Session 结构，将 schema v2 自动迁移到 v3，并验证分支树结构。
@@ -215,7 +221,45 @@ func LoadByID(dataDir string, id string) (*Store, *Session, error) {
 	return store, &sess, nil
 }
 
-// ListSessions 枚举 sessions 目录中的完整会话，并按最近更新时间降序返回摘要。
+// UpdateSessionMeta 更新指定 session ID 的持久化会话元数据（置顶、标签、截止时间等）。
+func UpdateSessionMeta(dataDir string, id string, mutate func(s *Session) error) (*Session, error) {
+	store, sess, err := LoadByID(dataDir, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := mutate(sess); err != nil {
+		return nil, err
+	}
+	sess.UpdatedAt = time.Now()
+	if err := store.Save(*sess); err != nil {
+		return nil, err
+	}
+	return sess, nil
+}
+
+// DeleteSession 从 sessions 目录删除指定 session ID 的持久化文件。
+func DeleteSession(dataDir string, id string) error {
+	if !IsValidSessionID(id) {
+		return fmt.Errorf("非法 session ID: 必须为 8 位小写十六进制字符")
+	}
+	sessionsDir := filepath.Join(dataDir, "sessions")
+	pattern := filepath.Join(sessionsDir, "*-"+id+".json")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return fmt.Errorf("查找会话文件失败: %w", err)
+	}
+	if len(matches) == 0 {
+		return fmt.Errorf("未找到 session ID 为 %s 的会话", id)
+	}
+	for _, match := range matches {
+		if err := os.Remove(match); err != nil {
+			return fmt.Errorf("删除会话文件失败: %w", err)
+		}
+	}
+	return nil
+}
+
+// ListSessions 枚举 sessions 目录中的完整会话，并按置顶优先与最近更新时间降序返回摘要。
 func ListSessions(dataDir string) ([]SessionSummary, error) {
 	sessionsDir := filepath.Join(dataDir, "sessions")
 	entries, err := os.ReadDir(sessionsDir)
@@ -260,10 +304,16 @@ func ListSessions(dataDir string) ([]SessionSummary, error) {
 			LastAssistant: lastMessageText(history, "assistant"),
 			MessageCount:  len(history),
 			Branches:      branchIDs(sess.Branches),
+			Pinned:        sess.Pinned,
+			Tags:          sess.Tags,
+			DueDate:       sess.DueDate,
 		})
 	}
 
 	sort.SliceStable(summaries, func(i, j int) bool {
+		if summaries[i].Pinned != summaries[j].Pinned {
+			return summaries[i].Pinned
+		}
 		if !summaries[i].UpdatedAt.Equal(summaries[j].UpdatedAt) {
 			return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
 		}

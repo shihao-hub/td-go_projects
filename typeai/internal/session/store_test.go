@@ -73,3 +73,101 @@ func TestSaveRewritesCompleteSessionToSamePath(t *testing.T) {
 		t.Errorf("temporary files remain: %#v", entries)
 	}
 }
+
+func TestListSessionsPinnedSortingAndMeta(t *testing.T) {
+	dir := t.TempDir()
+	t1 := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 9, 25, 11, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
+
+	store1, _ := New(dir, t1)
+	store2, _ := New(dir, t2)
+	store3, _ := New(dir, t3)
+
+	sess1 := Session{
+		SchemaVersion: SchemaVersion,
+		ID:            store1.ID(),
+		Model:         "model-1",
+		CreatedAt:     t1,
+		UpdatedAt:     t1,
+		Pinned:        true,
+		Tags:          []string{"待办"},
+		DueDate:       "2026-10-31",
+		Messages: []Message{
+			{Role: "user", Content: "sess1 question", CreatedAt: t1},
+			{Role: "assistant", Content: "sess1 answer", CreatedAt: t1},
+		},
+	}
+	sess2 := Session{
+		SchemaVersion: SchemaVersion,
+		ID:            store2.ID(),
+		Model:         "model-2",
+		CreatedAt:     t2,
+		UpdatedAt:     t2,
+		Pinned:        false,
+		Tags:          []string{"归档"},
+		Messages: []Message{
+			{Role: "user", Content: "sess2 question", CreatedAt: t2},
+			{Role: "assistant", Content: "sess2 answer", CreatedAt: t2},
+		},
+	}
+	sess3 := Session{
+		SchemaVersion: SchemaVersion,
+		ID:            store3.ID(),
+		Model:         "model-3",
+		CreatedAt:     t3,
+		UpdatedAt:     t3,
+		Pinned:        false,
+		Messages: []Message{
+			{Role: "user", Content: "sess3 question", CreatedAt: t3},
+			{Role: "assistant", Content: "sess3 answer", CreatedAt: t3},
+		},
+	}
+
+	_ = store1.Save(sess1)
+	_ = store2.Save(sess2)
+	_ = store3.Save(sess3)
+
+	summaries, err := ListSessions(dir)
+	if err != nil {
+		t.Fatalf("ListSessions error: %v", err)
+	}
+	if len(summaries) != 3 {
+		t.Fatalf("expected 3 summaries, got %d", len(summaries))
+	}
+
+	// sess1 is pinned, so it MUST be first even though its UpdatedAt is earliest
+	if summaries[0].ID != store1.ID() {
+		t.Errorf("expected first summary to be pinned session %s, got %s", store1.ID(), summaries[0].ID)
+	}
+	if !summaries[0].Pinned || len(summaries[0].Tags) != 1 || summaries[0].Tags[0] != "待办" || summaries[0].DueDate != "2026-10-31" {
+		t.Errorf("summaries[0] meta mismatch: %+v", summaries[0])
+	}
+
+	// Between non-pinned sessions, sess3 has later UpdatedAt than sess2, so sess3 is second
+	if summaries[1].ID != store3.ID() {
+		t.Errorf("expected second summary to be sess3 (%s), got %s", store3.ID(), summaries[1].ID)
+	}
+	if summaries[2].ID != store2.ID() {
+		t.Errorf("expected third summary to be sess2 (%s), got %s", store2.ID(), summaries[2].ID)
+	}
+
+	// Test UpdateSessionMeta
+	updated, err := UpdateSessionMeta(dir, store2.ID(), func(s *Session) error {
+		s.Pinned = true
+		s.DueDate = "2026-11-01"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateSessionMeta error: %v", err)
+	}
+	if !updated.Pinned || updated.DueDate != "2026-11-01" {
+		t.Errorf("updated session mismatch: %+v", updated)
+	}
+
+	// After updating sess2 to pinned, both sess1 and sess2 are pinned; sess2 has later UpdatedAt so sess2 is first!
+	summariesAfter, _ := ListSessions(dir)
+	if summariesAfter[0].ID != store2.ID() {
+		t.Errorf("expected sess2 to be first now, got %s", summariesAfter[0].ID)
+	}
+}

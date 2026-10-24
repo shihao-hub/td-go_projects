@@ -75,6 +75,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("POST /api/sessions/new", s.handleNewSession)
 	mux.HandleFunc("POST /api/sessions/resume", s.handleResume)
+	mux.HandleFunc("POST /api/sessions/meta", s.handleSessionMeta)
+	mux.HandleFunc("POST /api/sessions/delete", s.handleDeleteSession)
 	mux.HandleFunc("POST /api/images", s.handleUploadImage)
 	mux.HandleFunc("GET /api/image", s.handleImage)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
@@ -122,6 +124,9 @@ type sessionView struct {
 	RootBranchID   string       `json:"root_branch_id"`
 	ActiveBranchID string       `json:"active_branch_id"`
 	Branches       []branchView `json:"branches"`
+	Pinned         bool         `json:"pinned"`
+	Tags           []string     `json:"tags"`
+	DueDate        string       `json:"due_date"`
 }
 
 type stateResponse struct {
@@ -138,10 +143,7 @@ func (s *Server) snapshot() (*service.Chat, config.Config, bool) {
 	return s.chat, s.cfg, s.stream
 }
 
-func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
-	chat, cfg, streaming := s.snapshot()
-	sess := chat.Session()
-
+func (s *Server) toSessionView(sess session.Session) sessionView {
 	branches := make([]branchView, 0, len(sess.Branches))
 	for _, branch := range sess.Branches {
 		resolved, err := session.ResolveMessages(branch.ID, sess.Branches)
@@ -157,20 +159,31 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 			Messages:         toMessageViews(resolved),
 		})
 	}
+	tags := sess.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	return sessionView{
+		ID:             sess.ID,
+		Model:          sess.Model,
+		CreatedAt:      sess.CreatedAt,
+		UpdatedAt:      sess.UpdatedAt,
+		RootBranchID:   sess.RootBranchID,
+		ActiveBranchID: sess.ActiveBranchID,
+		Branches:       branches,
+		Pinned:         sess.Pinned,
+		Tags:           tags,
+		DueDate:        sess.DueDate,
+	}
+}
 
+func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
+	chat, cfg, streaming := s.snapshot()
 	writeJSON(w, http.StatusOK, stateResponse{
-		Version: s.version,
-		Channel: s.channel,
-		Config:  toConfigView(cfg, s.dataDir),
-		Session: sessionView{
-			ID:             sess.ID,
-			Model:          sess.Model,
-			CreatedAt:      sess.CreatedAt,
-			UpdatedAt:      sess.UpdatedAt,
-			RootBranchID:   sess.RootBranchID,
-			ActiveBranchID: sess.ActiveBranchID,
-			Branches:       branches,
-		},
+		Version:   s.version,
+		Channel:   s.channel,
+		Config:    toConfigView(cfg, s.dataDir),
+		Session:   s.toSessionView(chat.Session()),
 		Streaming: streaming,
 	})
 }
@@ -262,31 +275,7 @@ func (s *Server) finishStream() {
 
 func (s *Server) sessionSnapshot() sessionView {
 	chat, _, _ := s.snapshot()
-	sess := chat.Session()
-	branches := make([]branchView, 0, len(sess.Branches))
-	for _, branch := range sess.Branches {
-		resolved, err := session.ResolveMessages(branch.ID, sess.Branches)
-		if err != nil {
-			resolved = branch.Messages
-		}
-		branches = append(branches, branchView{
-			ID:               branch.ID,
-			ParentID:         branch.ParentID,
-			ForkMessageIndex: branch.ForkMessageIndex,
-			CreatedAt:        branch.CreatedAt,
-			OwnCount:         len(branch.Messages),
-			Messages:         toMessageViews(resolved),
-		})
-	}
-	return sessionView{
-		ID:             sess.ID,
-		Model:          sess.Model,
-		CreatedAt:      sess.CreatedAt,
-		UpdatedAt:      sess.UpdatedAt,
-		RootBranchID:   sess.RootBranchID,
-		ActiveBranchID: sess.ActiveBranchID,
-		Branches:       branches,
-	}
+	return s.toSessionView(chat.Session())
 }
 
 func (s *Server) handleCancel(w http.ResponseWriter, r *http.Request) {
@@ -381,6 +370,9 @@ type sessionSummaryView struct {
 	LastAssistant string    `json:"last_assistant"`
 	MessageCount  int       `json:"message_count"`
 	Branches      []string  `json:"branches"`
+	Pinned        bool      `json:"pinned"`
+	Tags          []string  `json:"tags"`
+	DueDate       string    `json:"due_date"`
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
@@ -392,6 +384,10 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]sessionSummaryView, 0, len(summaries))
 	for _, summary := range summaries {
+		tags := summary.Tags
+		if tags == nil {
+			tags = []string{}
+		}
 		views = append(views, sessionSummaryView{
 			ID:            summary.ID,
 			Model:         summary.Model,
@@ -401,9 +397,83 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			LastAssistant: summary.LastAssistant,
 			MessageCount:  summary.MessageCount,
 			Branches:      summary.Branches,
+			Pinned:        summary.Pinned,
+			Tags:          tags,
+			DueDate:       summary.DueDate,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": views})
+}
+
+type sessionMetaRequest struct {
+	ID      string    `json:"id"`
+	Pinned  *bool     `json:"pinned,omitempty"`
+	Tags    *[]string `json:"tags,omitempty"`
+	DueDate *string   `json:"due_date,omitempty"`
+}
+
+func (s *Server) handleSessionMeta(w http.ResponseWriter, r *http.Request) {
+	var req sessionMetaRequest
+	if !decodeJSON(w, r, maxChatBodyBytes, &req) {
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeJSONError(w, http.StatusBadRequest, "bad_args", "会话 ID 不能为空")
+		return
+	}
+	chat, _, _ := s.snapshot()
+	sess, err := chat.UpdateSessionMeta(req.ID, req.Pinned, req.Tags, req.DueDate)
+	if err != nil {
+		writeOperationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session": s.toSessionView(*sess),
+	})
+}
+
+type sessionDeleteRequest struct {
+	ID string `json:"id"`
+}
+
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	var req sessionDeleteRequest
+	if !decodeJSON(w, r, maxChatBodyBytes, &req) {
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeJSONError(w, http.StatusBadRequest, "bad_args", "会话 ID 不能为空")
+		return
+	}
+
+	s.mu.Lock()
+	if s.stream {
+		s.mu.Unlock()
+		writeJSONError(w, http.StatusConflict, "busy", "回答生成中，无法删除会话")
+		return
+	}
+	currentID := s.chat.Session().ID
+	cfg := s.cfg
+	dataDir := s.dataDir
+	chat := s.chat
+	s.mu.Unlock()
+
+	if err := chat.DeleteSession(req.ID); err != nil {
+		writeOperationError(w, err)
+		return
+	}
+
+	if req.ID == currentID {
+		newChat, err := service.NewChat(cfg, dataDir, time.Now())
+		if err == nil {
+			s.mu.Lock()
+			s.chat = newChat
+			s.mu.Unlock()
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": req.ID, "session": s.sessionSnapshot()})
 }
 
 func (s *Server) handleNewSession(w http.ResponseWriter, r *http.Request) {

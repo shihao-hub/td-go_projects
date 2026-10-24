@@ -324,6 +324,82 @@ func (c *Chat) AllSessionSummaries() ([]session.SessionSummary, error) {
 	return session.ListSessions(c.dataDir)
 }
 
+// UpdateSessionMeta 更新指定会话的置顶、标签与截止时间等元数据。
+// 若 sessionID 为当前会话，同步更新内存中状态；若当前会话已落盘，则保存到磁盘。
+// 若 sessionID 为其他历史会话，直接更新其落盘文件。
+func (c *Chat) UpdateSessionMeta(sessionID string, pinned *bool, tags *[]string, dueDate *string) (*session.Session, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, coded("bad_args", "会话 ID 不能为空")
+	}
+
+	cleanTags := func(in []string) []string {
+		seen := make(map[string]bool)
+		res := make([]string, 0, len(in))
+		for _, t := range in {
+			t = strings.TrimSpace(t)
+			if t == "" || seen[t] {
+				continue
+			}
+			seen[t] = true
+			res = append(res, t)
+		}
+		return res
+	}
+
+	if sessionID == c.session.ID {
+		if pinned != nil {
+			c.session.Pinned = *pinned
+		}
+		if tags != nil {
+			c.session.Tags = cleanTags(*tags)
+		}
+		if dueDate != nil {
+			c.session.DueDate = strings.TrimSpace(*dueDate)
+		}
+		c.session.UpdatedAt = time.Now()
+		if c.hasSaved {
+			if err := c.store.Save(c.session); err != nil {
+				return nil, coded("internal", err.Error())
+			}
+		}
+		res := c.session
+		return &res, nil
+	}
+
+	sess, err := session.UpdateSessionMeta(c.dataDir, sessionID, func(s *session.Session) error {
+		if pinned != nil {
+			s.Pinned = *pinned
+		}
+		if tags != nil {
+			s.Tags = cleanTags(*tags)
+		}
+		if dueDate != nil {
+			s.DueDate = strings.TrimSpace(*dueDate)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, coded("internal", err.Error())
+	}
+	return sess, nil
+}
+
+// DeleteSession 从磁盘删除指定 session ID 的历史会话文件。
+func (c *Chat) DeleteSession(sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return coded("bad_args", "会话 ID 不能为空")
+	}
+	if err := session.DeleteSession(c.dataDir, sessionID); err != nil {
+		return coded("internal", err.Error())
+	}
+	return nil
+}
+
 // Resume 根据 session ID 恢复会话，替换 Store 和 session 状态。
 func (c *Chat) Resume(sessionID string) (*session.Session, error) {
 	c.mu.Lock()

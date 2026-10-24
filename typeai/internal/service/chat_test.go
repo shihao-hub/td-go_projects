@@ -193,3 +193,69 @@ func TestResumeAlignsModelWithClient(t *testing.T) {
 		t.Fatalf("AllSessionSummaries len = %d, want 1", len(all))
 	}
 }
+
+func TestChatUpdateSessionMetaAndDelete(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	chat, err := NewChat(config.Config{
+		BaseURL: "http://localhost",
+		APIKey:  "k",
+		Model:   "m",
+	}, dir, now)
+	if err != nil {
+		t.Fatalf("NewChat() error = %v", err)
+	}
+
+	pinned := true
+	tags := []string{"待办", " 工作 "}
+	dueDate := "2026-10-31"
+
+	// Update current in-memory session meta
+	updated, err := chat.UpdateSessionMeta(chat.Session().ID, &pinned, &tags, &dueDate)
+	if err != nil {
+		t.Fatalf("UpdateSessionMeta() error = %v", err)
+	}
+	if !updated.Pinned || len(updated.Tags) != 2 || updated.Tags[1] != "工作" || updated.DueDate != "2026-10-31" {
+		t.Errorf("updated meta mismatch: %+v", updated)
+	}
+
+	// Create a disk session
+	store2, _ := session.New(dir, now.Add(-time.Hour))
+	sess2 := session.Session{
+		SchemaVersion: session.SchemaVersion,
+		ID:            store2.ID(),
+		Model:         "m2",
+		CreatedAt:     now.Add(-time.Hour),
+		UpdatedAt:     now.Add(-time.Hour),
+		Branches: []session.Branch{
+			{
+				ID:        session.DefaultRootBranchID,
+				CreatedAt: now.Add(-time.Hour),
+				Messages: []session.Message{
+					{Role: "user", Content: "q", CreatedAt: now.Add(-time.Hour)},
+					{Role: "assistant", Content: "a", CreatedAt: now.Add(-time.Hour)},
+				},
+			},
+		},
+	}
+	_ = store2.Save(sess2)
+
+	// Update sess2 via chat.UpdateSessionMeta
+	tags2 := []string{"归档"}
+	updated2, err := chat.UpdateSessionMeta(store2.ID(), &pinned, &tags2, nil)
+	if err != nil {
+		t.Fatalf("UpdateSessionMeta for disk session error: %v", err)
+	}
+	if !updated2.Pinned || len(updated2.Tags) != 1 || updated2.Tags[0] != "归档" {
+		t.Errorf("updated2 mismatch: %+v", updated2)
+	}
+
+	// Delete sess2
+	if err := chat.DeleteSession(store2.ID()); err != nil {
+		t.Fatalf("DeleteSession error: %v", err)
+	}
+	all, _ := chat.AllSessionSummaries()
+	if len(all) != 0 {
+		t.Errorf("expected 0 disk sessions after deletion, got %d", len(all))
+	}
+}

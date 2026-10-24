@@ -118,18 +118,37 @@ func resumePickerItem(summary session.SessionSummary, selected bool) string {
 		lastAssistant = "(未回复)"
 	}
 
+	pinMark := ""
+	if summary.Pinned {
+		pinMark = "[📌] "
+	}
+
 	header := fmt.Sprintf(
-		"%s  %s  %s  %d msgs",
+		"%s%s  %s  %s  %d msgs",
+		pinMark,
 		updatedAt,
 		summary.ID,
 		truncateRunes(summary.Model, max(12, width/3)),
 		summary.MessageCount,
 	)
+	lines := []string{header}
+	if len(summary.Tags) > 0 || summary.DueDate != "" {
+		parts := make([]string, 0, 2)
+		if len(summary.Tags) > 0 {
+			parts = append(parts, "tags: "+strings.Join(summary.Tags, ", "))
+		}
+		if summary.DueDate != "" {
+			parts = append(parts, "due: "+summary.DueDate)
+		}
+		lines = append(lines, truncateRunes(strings.Join(parts, " | "), width))
+	}
 	branchLine := "branch: " + strings.Join(summary.Branches, ", ")
 	branchLine = truncateRunes(branchLine, width)
 	firstLine := "You: " + truncateRunes(firstUser, width)
 	assistantLine := "AI:  " + truncateRunes(lastAssistant, width)
-	body := lipgloss.JoinVertical(lipgloss.Left, header, branchLine, firstLine, assistantLine)
+	lines = append(lines, branchLine, firstLine, assistantLine)
+
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	if selected {
 		return resumePickerSelectedStyle.Render(body)
 	}

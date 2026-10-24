@@ -13,7 +13,13 @@
         <div class="brand">typeai</div>
         <button class="icon-btn" id="new-session" title="新建会话">＋</button>
       </div>
-      <div class="sidebar-sub">会话</div>
+      <div class="sidebar-sub-row">
+        <span class="sidebar-sub">会话</span>
+        <div class="sidebar-view-toggle">
+          <button type="button" class="view-mode-btn active" id="view-mode-tree" title="分类树状视图">树状</button>
+          <button type="button" class="view-mode-btn" id="view-mode-list" title="时间平铺视图">平铺</button>
+        </div>
+      </div>
       <div class="session-list" id="session-list"></div>
       <div class="sidebar-foot">
         <button class="text-btn" id="open-settings">连接设置</button>
@@ -46,6 +52,37 @@
       </footer>
     </main>
   </div>
+
+  <div class="context-menu" id="session-context-menu" hidden></div>
+
+  <dialog id="session-modal">
+    <form method="dialog" class="settings-form" id="session-modal-form">
+      <h2 id="session-modal-title">编辑会话属性</h2>
+      <label class="checkbox-row">
+        <input type="checkbox" id="sess-pinned">
+        <span>📌 置顶此会话</span>
+      </label>
+      <label>
+        标签分类（多个用逗号隔开）
+        <div class="quick-tags">
+          <button type="button" class="tag-chip" data-tag="待办">+ 待办</button>
+          <button type="button" class="tag-chip" data-tag="归档">+ 归档</button>
+        </div>
+        <input id="sess-tags" placeholder="例如：待办, 工作">
+      </label>
+      <label>
+        截止时间 (Due Date)
+        <div class="date-row">
+          <input type="date" id="sess-due-date">
+          <button type="button" class="mini-btn" id="sess-clear-due">清除</button>
+        </div>
+      </label>
+      <div class="settings-actions">
+        <button type="button" class="text-btn" id="session-modal-cancel">取消</button>
+        <button type="submit" class="send-btn" id="session-modal-save">保存</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="settings">
     <form method="dialog" class="settings-form" id="settings-form">
