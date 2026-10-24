@@ -19,7 +19,7 @@
 
 ## 任务分解
 
-- [ ] Task 1: 样式体系升级与 CSS 变量色板配置
+- [x] Task 1: 样式体系升级与 CSS 变量色板配置
   - 文件：`internal/web/static/style.css`、`internal/web/static/index.html`
   - 实现：
     - 注入 8 色动态标签色板（`--tag-0` ~ `--tag-7`）与提亮后的语义对比度 Token（`--text`、`--muted`、`--faint`、`--panel-3`、`--accent-line`）；
@@ -28,7 +28,7 @@
     - 在 HTML 侧边栏结构中加入搜索框容器（`.search-wrap`、`#session-search`、`<kbd>Ctrl K</kbd>`）。
   - 验证：CSS 语法规范，无未定义变量引用；页面骨架符合设计稿。
 
-- [ ] Task 2: 标签稳定 Hash 取色与卡片徽标去冗余逻辑
+- [x] Task 2: 标签稳定 Hash 取色与卡片徽标去冗余逻辑
   - 文件：`internal/web/static/app.js`
   - 实现：
     - 实现 `getTagColor(tag)`：待办固定 `--tag-0`，归档固定 `--faint`，其它动态标签通过稳定哈希循环映射至 `--tag-1` ~ `--tag-7`；
@@ -37,7 +37,7 @@
     - 升级会话属性弹窗（`openSessionModal`）：标题展示短 ID，选中的 Pill 与标签池 Chip 注入 `--tag-c` 动态色与色点。
   - 验证：`node -c internal/web/static/app.js` 语法无误；在不同分组下徽标不再重复。
 
-- [ ] Task 3: 相对时间阶梯与 Ctrl+K 侧栏会话搜索
+- [x] Task 3: 相对时间阶梯与 Ctrl+K 侧栏会话搜索
   - 文件：`internal/web/static/app.js`
   - 实现：
     - 实现 `formatRelativeTime(dateStr)`，按“刚刚 / 今天 HH:mm / 昨天 / 周几 / MM-DD / YYYY-MM-DD”格式化，卡片 meta 保留原生完整时间作为 `title`；
@@ -45,14 +45,14 @@
     - 在 `renderSessions()` 中加入基于 `state.searchQuery` 的即时过滤，匹配标题、标签、首句提问；搜索态下动态展示匹配的分组与条目。
   - 验证：快捷键响应灵敏，搜索输入实时过滤列表。
 
-- [ ] Task 4: 对话流空状态与 Tab 运行态指示升级
+- [x] Task 4: 对话流空状态与 Tab 运行态指示升级
   - 文件：`internal/web/static/app.js`、`internal/web/static/style.css`
   - 实现：
     - 升级 `renderTranscript()` 空状态为设计稿的轻量品牌方块（logo `t`）+ 快捷键使用说明；
     - 运行态 Tab 使用呼吸脉冲圆点代替纯文本 `*`。
   - 验证：无消息时空状态显示正常，快捷键点击可交互。
 
-- [ ] Task 5: 综合回归与双通道产物构建
+- [x] Task 5: 综合回归与双通道产物构建
   - 文件：`internal/web/static/*`
   - 实现：
     - 执行 `go test -v ./...` 确保所有后端与集成测试通过；
@@ -61,4 +61,4 @@
 
 ---
 **版本：** v1.0.0  
-**状态：** 规划中 (In Progress)
+**状态：** 已实施 (Completed)
