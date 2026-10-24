@@ -82,6 +82,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/image", s.handleImage)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	mux.HandleFunc("PUT /api/config", s.handlePutConfig)
+	mux.HandleFunc("GET /api/preferences", s.handleGetPreferences)
+	mux.HandleFunc("POST /api/preferences", s.handlePostPreferences)
 	mux.Handle("/", web.Handler())
 	return mux
 }
@@ -132,11 +134,12 @@ type sessionView struct {
 }
 
 type stateResponse struct {
-	Version   string      `json:"version"`
-	Channel   string      `json:"channel"`
-	Config    configView  `json:"config"`
-	Session   sessionView `json:"session"`
-	Streaming bool        `json:"streaming"`
+	Version     string        `json:"version"`
+	Channel     string        `json:"channel"`
+	Config      configView    `json:"config"`
+	Session     sessionView   `json:"session"`
+	Streaming   bool          `json:"streaming"`
+	Preferences UIPreferences `json:"preferences"`
 }
 
 func (s *Server) snapshot() (*service.Chat, config.Config, bool) {
@@ -183,11 +186,12 @@ func (s *Server) toSessionView(sess session.Session) sessionView {
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	chat, cfg, streaming := s.snapshot()
 	writeJSON(w, http.StatusOK, stateResponse{
-		Version:   s.version,
-		Channel:   s.channel,
-		Config:    toConfigView(cfg, s.dataDir),
-		Session:   s.toSessionView(chat.Session()),
-		Streaming: streaming,
+		Version:     s.version,
+		Channel:     s.channel,
+		Config:      toConfigView(cfg, s.dataDir),
+		Session:     s.toSessionView(chat.Session()),
+		Streaming:   streaming,
+		Preferences: s.loadPreferences(),
 	})
 }
 

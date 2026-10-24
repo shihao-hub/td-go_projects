@@ -108,11 +108,46 @@ async function readSSE(res, onEvent) {
   }
 }
 
+function updateViewModeUI() {
+  if (state.sessionViewMode === "list") {
+    els.viewModeList.classList.add("active");
+    els.viewModeTree.classList.remove("active");
+  } else {
+    els.viewModeTree.classList.add("active");
+    els.viewModeList.classList.remove("active");
+  }
+}
+
+async function syncPreferences() {
+  try {
+    await api("/api/preferences", {
+      method: "POST",
+      body: {
+        view_mode: state.sessionViewMode,
+        collapsed_groups: Array.from(state.collapsedGroups),
+      },
+    });
+  } catch (_) {
+    /* 忽略静默偏好同步失败 */
+  }
+}
+
 /* ---------------- state ---------------- */
 
 async function loadState() {
   const data = await api("/api/state");
   state.data = data;
+  if (data && data.preferences) {
+    if (data.preferences.view_mode) {
+      state.sessionViewMode = data.preferences.view_mode;
+      try { localStorage.setItem("typeai_view_mode", state.sessionViewMode); } catch (_) {}
+    }
+    if (Array.isArray(data.preferences.collapsed_groups)) {
+      state.collapsedGroups = new Set(data.preferences.collapsed_groups);
+      try { localStorage.setItem("typeai_collapsed_groups", JSON.stringify(data.preferences.collapsed_groups)); } catch (_) {}
+    }
+    updateViewModeUI();
+  }
   const branches = data.session.branches || [];
   if (!state.activeBranch || !branches.some((b) => b.id === state.activeBranch)) {
     state.activeBranch = data.session.active_branch_id || (branches[0] && branches[0].id) || "";
@@ -607,7 +642,10 @@ function renderSessions() {
         state.collapsedGroups.add(groupId);
         group.classList.add("collapsed");
       }
-      localStorage.setItem("typeai_collapsed_groups", JSON.stringify(Array.from(state.collapsedGroups)));
+      try {
+        localStorage.setItem("typeai_collapsed_groups", JSON.stringify(Array.from(state.collapsedGroups)));
+      } catch (_) {}
+      syncPreferences();
     });
 
     const itemsContainer = document.createElement("div");
@@ -1439,17 +1477,17 @@ els.settingsForm.addEventListener("submit", saveSettings);
 // View mode switch
 els.viewModeTree.addEventListener("click", () => {
   state.sessionViewMode = "tree";
-  localStorage.setItem("typeai_view_mode", "tree");
-  els.viewModeTree.classList.add("active");
-  els.viewModeList.classList.remove("active");
+  try { localStorage.setItem("typeai_view_mode", "tree"); } catch (_) {}
+  updateViewModeUI();
   renderSessions();
+  syncPreferences();
 });
 els.viewModeList.addEventListener("click", () => {
   state.sessionViewMode = "list";
-  localStorage.setItem("typeai_view_mode", "list");
-  els.viewModeList.classList.add("active");
-  els.viewModeTree.classList.remove("active");
+  try { localStorage.setItem("typeai_view_mode", "list"); } catch (_) {}
+  updateViewModeUI();
   renderSessions();
+  syncPreferences();
 });
 
 // Session modal events
@@ -1547,13 +1585,7 @@ document.addEventListener("drop", (event) => {
 /* ---------------- boot ---------------- */
 
 (async function boot() {
-  if (state.sessionViewMode === "list") {
-    els.viewModeList.classList.add("active");
-    els.viewModeTree.classList.remove("active");
-  } else {
-    els.viewModeTree.classList.add("active");
-    els.viewModeList.classList.remove("active");
-  }
+  updateViewModeUI();
 
   try {
     await loadState();

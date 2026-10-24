@@ -262,3 +262,76 @@ func TestSessionRenameAPI(t *testing.T) {
 		t.Errorf("list item title = %q, want 历史会话新标题", listResp.Items[0].Title)
 	}
 }
+
+func TestUIPreferences(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{
+		BaseURL: "http://localhost",
+		Model:   "test-model",
+	}
+	now := time.Now()
+	chat, err := service.NewChat(cfg, dir, now)
+	if err != nil {
+		t.Fatalf("NewChat() error = %v", err)
+	}
+
+	server := NewServer(Options{
+		Chat:    chat,
+		Config:  cfg,
+		DataDir: dir,
+		Version: "v0.1.0-test",
+		Channel: "test",
+	})
+	handler := server.Handler()
+
+	// 1. Initial state preferences default to view_mode=tree
+	req := httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /api/state status = %d", w.Code)
+	}
+	var stateResp stateResponse
+	if err := json.NewDecoder(w.Body).Decode(&stateResp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if stateResp.Preferences.ViewMode != "tree" {
+		t.Errorf("default view_mode = %q, want tree", stateResp.Preferences.ViewMode)
+	}
+
+	// 2. POST /api/preferences to update view_mode and collapsed_groups
+	postBody, _ := json.Marshal(UIPreferences{
+		ViewMode:        "list",
+		CollapsedGroups: []string{"tag_todo", "tag_archive"},
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/preferences", bytes.NewReader(postBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/preferences status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var updatedPrefs UIPreferences
+	if err := json.NewDecoder(w.Body).Decode(&updatedPrefs); err != nil {
+		t.Fatalf("decode updatedPrefs error: %v", err)
+	}
+	if updatedPrefs.ViewMode != "list" {
+		t.Errorf("updated view_mode = %q, want list", updatedPrefs.ViewMode)
+	}
+	if len(updatedPrefs.CollapsedGroups) != 2 {
+		t.Errorf("updated collapsed_groups count = %d, want 2", len(updatedPrefs.CollapsedGroups))
+	}
+
+	// 3. GET /api/state again and verify it persisted from disk
+	req = httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var stateResp2 stateResponse
+	_ = json.NewDecoder(w.Body).Decode(&stateResp2)
+	if stateResp2.Preferences.ViewMode != "list" {
+		t.Errorf("persisted view_mode = %q, want list", stateResp2.Preferences.ViewMode)
+	}
+	if len(stateResp2.Preferences.CollapsedGroups) != 2 {
+		t.Errorf("persisted collapsed_groups count = %d, want 2", len(stateResp2.Preferences.CollapsedGroups))
+	}
+}
