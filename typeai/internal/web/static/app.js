@@ -403,6 +403,18 @@ async function loadSessions() {
   }
 }
 
+function formatDueDate(due) {
+  if (!due) return "";
+  const m = due.match(/^(\d{4})-(\d{2}-\d{2})$/);
+  if (m) {
+    const year = m[1];
+    const monthDay = m[2];
+    const curYear = String(new Date().getFullYear());
+    return year === curYear ? `${monthDay} 截止` : `${due} 截止`;
+  }
+  return `${due} 截止`;
+}
+
 function renderSessionCard(item, currentSessionID) {
   const card = document.createElement("div");
   card.className = "session-item";
@@ -426,8 +438,8 @@ function renderSessionCard(item, currentSessionID) {
 
   const pinBtn = document.createElement("button");
   pinBtn.type = "button";
-  pinBtn.className = "session-action-btn" + (item.pinned ? " active" : "");
-  pinBtn.textContent = "📌";
+  pinBtn.className = "session-action-btn pin-btn" + (item.pinned ? " active" : "");
+  pinBtn.textContent = "⚲";
   pinBtn.title = item.pinned ? "取消置顶" : "置顶会话";
   pinBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -452,27 +464,20 @@ function renderSessionCard(item, currentSessionID) {
   const badges = document.createElement("div");
   badges.className = "session-badges";
 
-  if (item.pinned) {
-    const pinBadge = document.createElement("span");
-    pinBadge.className = "badge badge-pin";
-    pinBadge.textContent = "📌 置顶";
-    badges.append(pinBadge);
-  }
-
   const tags = item.tags || [];
   for (const tag of tags) {
     const tagBadge = document.createElement("span");
     tagBadge.className = "badge badge-tag";
     if (tag === "待办") tagBadge.classList.add("tag-todo");
     else if (tag === "归档") tagBadge.classList.add("tag-archive");
-    tagBadge.textContent = `🏷️ ${tag}`;
+    tagBadge.textContent = tag;
     badges.append(tagBadge);
   }
 
   if (item.due_date) {
     const dueBadge = document.createElement("span");
     dueBadge.className = "badge badge-due";
-    dueBadge.textContent = `📅 截止 ${item.due_date}`;
+    dueBadge.textContent = formatDueDate(item.due_date);
     badges.append(dueBadge);
   }
 
@@ -538,7 +543,7 @@ function renderSessions() {
 
   const uncategorized = items.filter((item) => !item.tags || item.tags.length === 0);
 
-  const renderGroup = (groupId, icon, title, groupItems) => {
+  const renderGroup = (groupId, title, groupItems) => {
     if (!groupItems.length) return;
     const group = document.createElement("div");
     group.className = "tree-group";
@@ -551,11 +556,7 @@ function renderSessions() {
 
     const arrow = document.createElement("span");
     arrow.className = "tree-arrow";
-    arrow.textContent = "▼";
-
-    const iconEl = document.createElement("span");
-    iconEl.className = "tree-icon";
-    iconEl.textContent = icon;
+    arrow.textContent = "▾";
 
     const titleEl = document.createElement("span");
     titleEl.className = "tree-title";
@@ -565,7 +566,7 @@ function renderSessions() {
     countEl.className = "tree-count";
     countEl.textContent = groupItems.length;
 
-    header.append(arrow, iconEl, titleEl, countEl);
+    header.append(arrow, titleEl, countEl);
     header.addEventListener("click", () => {
       if (state.collapsedGroups.has(groupId)) {
         state.collapsedGroups.delete(groupId);
@@ -587,15 +588,15 @@ function renderSessions() {
     els.sessionList.append(group);
   };
 
-  renderGroup("pinned", "📌", "置顶", pinnedItems);
-  renderGroup("tag_todo", "🏷️", "待办", todoItems);
-  renderGroup("tag_archive", "📦", "归档", archiveItems);
+  renderGroup("pinned", "置顶", pinnedItems);
+  renderGroup("tag_todo", "待办", todoItems);
+  renderGroup("tag_archive", "归档", archiveItems);
 
   for (const [tag, tagItems] of Array.from(otherTagMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
-    renderGroup("tag_" + tag, "🏷️", tag, tagItems);
+    renderGroup("tag_" + tag, tag, tagItems);
   }
 
-  renderGroup("uncategorized", "📁", "未分类", uncategorized);
+  renderGroup("uncategorized", "未分类", uncategorized);
 }
 
 /* ---------------- context menu & meta ---------------- */
@@ -614,17 +615,17 @@ function showContextMenu(x, y, item) {
 
   const actions = [
     {
-      icon: "📌",
+      icon: "⚲",
       label: item.pinned ? "取消置顶" : "置顶会话",
       onClick: () => togglePin(item.id),
     },
     {
-      icon: "🏷️",
+      icon: "◇",
       label: hasTodo ? "移除「待办」" : "设为「待办」",
       onClick: () => toggleTag(item.id, "待办"),
     },
     {
-      icon: "📦",
+      icon: "⌸",
       label: hasArchive ? "移除「归档」" : "设为「归档」",
       onClick: () => toggleTag(item.id, "归档"),
     },
@@ -635,7 +636,7 @@ function showContextMenu(x, y, item) {
     },
     { divider: true },
     {
-      icon: "🗑️",
+      icon: "✕",
       label: "删除会话…",
       danger: true,
       onClick: () => deleteSession(item.id),
