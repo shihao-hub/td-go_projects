@@ -64,16 +64,22 @@
       </label>
       <label class="checkbox-row">
         <input type="checkbox" id="sess-pinned">
-        <span>📌 置顶此会话</span>
+        <span>置顶此会话</span>
       </label>
-      <label>
-        标签分类（多个用逗号隔开）
-        <div class="quick-tags">
-          <button type="button" class="tag-chip" data-tag="待办">+ 待办</button>
-          <button type="button" class="tag-chip" data-tag="归档">+ 归档</button>
+      <div class="form-field">
+        <span class="field-label">标签分类</span>
+        <div class="tag-pills-box" id="tag-pills-box">
+          <div class="tag-pills-list" id="tag-pills-list"></div>
+          <input type="text" id="tag-pill-input" class="tag-pill-input" placeholder="+ 添加新标签 (Enter 创建)..." autocomplete="off">
         </div>
-        <input id="sess-tags" placeholder="例如：待办, 工作">
-      </label>
+        <div class="tag-pool-section">
+          <div class="tag-pool-header">
+            <span class="tag-pool-title">全库标签池</span>
+            <span class="tag-pool-tip">点击快速添加 / 取消</span>
+          </div>
+          <div class="tag-pool-chips" id="tag-pool-chips"></div>
+        </div>
+      </div>
       <label>
         截止时间 (Due Date)
         <div class="date-row">

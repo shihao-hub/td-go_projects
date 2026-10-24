@@ -277,7 +277,7 @@ def main() -> int:
             print(f"❌ go build 失败（exit {r.returncode}）: {out_exe.name}", file=sys.stderr)
             return r.returncode
 
-    # 4. 产物名守卫：dev 必须带 -dev 后缀，release 不得带
+    # 4. 产物名守卫与 Windows 完整性保障
     for out_exe, _gui in targets:
         if release and "dev" in out_exe.stem:
             print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
@@ -285,6 +285,15 @@ def main() -> int:
         if not release and not out_exe.stem.endswith("-dev"):
             print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
             return 3
+
+        if sys.platform == "win32":
+            # 保证产物具备标准 Medium 完整性级别（防止继承外部沙箱/容器目录的 Low Mandatory Level 导致 DLL 初始化失败）
+            subprocess.run(["icacls", str(out_exe), "/setintegritylevel", "Medium"], capture_output=True)
+            # 解除 Windows 附件管理器 Zone.Identifier 锁定
+            try:
+                Path(f"{out_exe}:Zone.Identifier").unlink(missing_ok=True)
+            except OSError:
+                pass
 
     for out_exe, gui in targets:
         size_mb = out_exe.stat().st_size / (1024 * 1024)

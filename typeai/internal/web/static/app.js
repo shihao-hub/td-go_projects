@@ -15,6 +15,7 @@ const state = {
   sessionViewMode: localStorage.getItem("typeai_view_mode") || "tree",
   collapsedGroups: new Set(JSON.parse(localStorage.getItem("typeai_collapsed_groups") || "[]")),
   editingSessionID: null,
+  modalTags: [],
 };
 
 const els = {
@@ -40,7 +41,10 @@ const els = {
   sessionModalTitle: $("session-modal-title"),
   sessTitle: $("sess-title"),
   sessPinned: $("sess-pinned"),
-  sessTags: $("sess-tags"),
+  tagPillsBox: $("tag-pills-box"),
+  tagPillsList: $("tag-pills-list"),
+  tagPillInput: $("tag-pill-input"),
+  tagPoolChips: $("tag-pool-chips"),
   sessDueDate: $("sess-due-date"),
   sessClearDue: $("sess-clear-due"),
   sessionModalCancel: $("session-modal-cancel"),
@@ -405,6 +409,18 @@ async function loadSessions() {
   }
 }
 
+function formatDueDate(due) {
+  if (!due) return "";
+  const m = due.match(/^(\d{4})-(\d{2}-\d{2})$/);
+  if (m) {
+    const year = m[1];
+    const monthDay = m[2];
+    const curYear = String(new Date().getFullYear());
+    return year === curYear ? `${monthDay} 截止` : `${due} 截止`;
+  }
+  return `${due} 截止`;
+}
+
 function renderSessionCard(item, currentSessionID) {
   const card = document.createElement("div");
   card.className = "session-item";
@@ -430,7 +446,7 @@ function renderSessionCard(item, currentSessionID) {
   const renameBtn = document.createElement("button");
   renameBtn.type = "button";
   renameBtn.className = "session-action-btn";
-  renameBtn.textContent = "✏️";
+  renameBtn.textContent = "✎";
   renameBtn.title = "重命名会话（双击卡片亦可重命名）";
   renameBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -439,8 +455,8 @@ function renderSessionCard(item, currentSessionID) {
 
   const pinBtn = document.createElement("button");
   pinBtn.type = "button";
-  pinBtn.className = "session-action-btn" + (item.pinned ? " active" : "");
-  pinBtn.textContent = "📌";
+  pinBtn.className = "session-action-btn pin-btn" + (item.pinned ? " active" : "");
+  pinBtn.textContent = "⚲";
   pinBtn.title = item.pinned ? "取消置顶" : "置顶会话";
   pinBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -450,7 +466,7 @@ function renderSessionCard(item, currentSessionID) {
   const editBtn = document.createElement("button");
   editBtn.type = "button";
   editBtn.className = "session-action-btn";
-  editBtn.textContent = "⚙️";
+  editBtn.textContent = "⚙";
   editBtn.title = "编辑会话属性（标签、截止时间等）";
   editBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -465,27 +481,20 @@ function renderSessionCard(item, currentSessionID) {
   const badges = document.createElement("div");
   badges.className = "session-badges";
 
-  if (item.pinned) {
-    const pinBadge = document.createElement("span");
-    pinBadge.className = "badge badge-pin";
-    pinBadge.textContent = "📌 置顶";
-    badges.append(pinBadge);
-  }
-
   const tags = item.tags || [];
   for (const tag of tags) {
     const tagBadge = document.createElement("span");
     tagBadge.className = "badge badge-tag";
     if (tag === "待办") tagBadge.classList.add("tag-todo");
     else if (tag === "归档") tagBadge.classList.add("tag-archive");
-    tagBadge.textContent = `🏷️ ${tag}`;
+    tagBadge.textContent = tag;
     badges.append(tagBadge);
   }
 
   if (item.due_date) {
     const dueBadge = document.createElement("span");
     dueBadge.className = "badge badge-due";
-    dueBadge.textContent = `📅 截止 ${item.due_date}`;
+    dueBadge.textContent = formatDueDate(item.due_date);
     badges.append(dueBadge);
   }
 
@@ -534,17 +543,26 @@ function renderSessions() {
 
   const currentSessionID = state.data && state.data.session ? state.data.session.id : "";
 
+  // 辅助函数：组内排序，置顶排在最前，同优先级按更新时间倒序
+  const sortGroupItems = (list) => {
+    return [...list].sort((a, b) => {
+      if (!!b.pinned !== !!a.pinned) {
+        return b.pinned ? 1 : -1;
+      }
+      return new Date(b.updated_at) - new Date(a.updated_at);
+    });
+  };
+
   if (state.sessionViewMode === "list") {
-    for (const item of items) {
+    for (const item of sortGroupItems(items)) {
       els.sessionList.append(renderSessionCard(item, currentSessionID));
     }
     return;
   }
 
-  // Tree View mode
-  const pinnedItems = items.filter((item) => item.pinned);
-  const todoItems = items.filter((item) => (item.tags || []).includes("待办"));
-  const archiveItems = items.filter((item) => (item.tags || []).includes("归档"));
+  // Tree View mode - 方案 B：置顶作为组内属性沉淀在各分组头部，消除重复的顶部置顶大组
+  const todoItems = sortGroupItems(items.filter((item) => (item.tags || []).includes("待办")));
+  const archiveItems = sortGroupItems(items.filter((item) => (item.tags || []).includes("归档")));
 
   const otherTagMap = new Map();
   for (const item of items) {
@@ -555,9 +573,9 @@ function renderSessions() {
     }
   }
 
-  const uncategorized = items.filter((item) => !item.tags || item.tags.length === 0);
+  const uncategorized = sortGroupItems(items.filter((item) => !item.tags || item.tags.length === 0));
 
-  const renderGroup = (groupId, icon, title, groupItems) => {
+  const renderGroup = (groupId, title, groupItems) => {
     if (!groupItems.length) return;
     const group = document.createElement("div");
     group.className = "tree-group";
@@ -570,11 +588,7 @@ function renderSessions() {
 
     const arrow = document.createElement("span");
     arrow.className = "tree-arrow";
-    arrow.textContent = "▼";
-
-    const iconEl = document.createElement("span");
-    iconEl.className = "tree-icon";
-    iconEl.textContent = icon;
+    arrow.textContent = "▾";
 
     const titleEl = document.createElement("span");
     titleEl.className = "tree-title";
@@ -584,7 +598,7 @@ function renderSessions() {
     countEl.className = "tree-count";
     countEl.textContent = groupItems.length;
 
-    header.append(arrow, iconEl, titleEl, countEl);
+    header.append(arrow, titleEl, countEl);
     header.addEventListener("click", () => {
       if (state.collapsedGroups.has(groupId)) {
         state.collapsedGroups.delete(groupId);
@@ -606,15 +620,14 @@ function renderSessions() {
     els.sessionList.append(group);
   };
 
-  renderGroup("pinned", "📌", "置顶", pinnedItems);
-  renderGroup("tag_todo", "🏷️", "待办", todoItems);
-  renderGroup("tag_archive", "📦", "归档", archiveItems);
+  renderGroup("tag_todo", "待办", todoItems);
+  renderGroup("tag_archive", "归档", archiveItems);
 
   for (const [tag, tagItems] of Array.from(otherTagMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
-    renderGroup("tag_" + tag, "🏷️", tag, tagItems);
+    renderGroup("tag_" + tag, tag, sortGroupItems(tagItems));
   }
 
-  renderGroup("uncategorized", "📁", "未分类", uncategorized);
+  renderGroup("uncategorized", "未分类", uncategorized);
 }
 
 /* ---------------- context menu & meta ---------------- */
@@ -633,22 +646,22 @@ function showContextMenu(x, y, item) {
 
   const actions = [
     {
-      icon: "✏️",
+      icon: "✎",
       label: "重命名会话…",
       onClick: () => renameSession(item.id, item.title || item.first_user || ""),
     },
     {
-      icon: "📌",
+      icon: "⚲",
       label: item.pinned ? "取消置顶" : "置顶会话",
       onClick: () => togglePin(item.id),
     },
     {
-      icon: "🏷️",
+      icon: "◇",
       label: hasTodo ? "移除「待办」" : "设为「待办」",
       onClick: () => toggleTag(item.id, "待办"),
     },
     {
-      icon: "📦",
+      icon: "⌸",
       label: hasArchive ? "移除「归档」" : "设为「归档」",
       onClick: () => toggleTag(item.id, "归档"),
     },
@@ -659,7 +672,7 @@ function showContextMenu(x, y, item) {
     },
     { divider: true },
     {
-      icon: "🗑️",
+      icon: "✕",
       label: "删除会话…",
       danger: true,
       onClick: () => deleteSession(item.id),
@@ -751,6 +764,97 @@ async function renameSession(id, currentTitle) {
   }
 }
 
+/* ---------------- tag pills & pool ---------------- */
+
+function getAllExistingTags() {
+  const set = new Set(["待办", "归档"]);
+  for (const s of state.allSessions || []) {
+    for (const t of s.tags || []) {
+      if (t && t.trim()) set.add(t.trim());
+    }
+  }
+  return Array.from(set);
+}
+
+function renderTagPills() {
+  if (!els.tagPillsList) return;
+  els.tagPillsList.innerHTML = "";
+  for (const tag of state.modalTags) {
+    const pill = document.createElement("span");
+    pill.className = "tag-pill";
+    if (tag === "待办") pill.classList.add("tag-todo");
+    else if (tag === "归档") pill.classList.add("tag-archive");
+
+    const label = document.createElement("span");
+    label.textContent = tag;
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "tag-pill-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = `移除「${tag}」`;
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeModalTag(tag);
+    });
+
+    pill.append(label, removeBtn);
+    els.tagPillsList.append(pill);
+  }
+}
+
+function renderTagPool() {
+  if (!els.tagPoolChips) return;
+  els.tagPoolChips.innerHTML = "";
+  const allTags = getAllExistingTags();
+  for (const tag of allTags) {
+    const isSelected = state.modalTags.includes(tag);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "pool-chip" + (isSelected ? " active" : "");
+    if (tag === "待办") chip.classList.add("chip-todo");
+    else if (tag === "归档") chip.classList.add("chip-archive");
+    chip.textContent = (isSelected ? "✓ " : "+ ") + tag;
+    chip.title = isSelected ? `点击取消「${tag}」` : `点击添加「${tag}」`;
+    chip.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (isSelected) {
+        removeModalTag(tag);
+      } else {
+        addModalTag(tag);
+      }
+    });
+    els.tagPoolChips.append(chip);
+  }
+}
+
+function addModalTag(rawTag) {
+  if (!rawTag) return;
+  const parts = rawTag.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+  let changed = false;
+  for (const part of parts) {
+    if (!state.modalTags.includes(part)) {
+      state.modalTags.push(part);
+      changed = true;
+    }
+  }
+  if (changed) {
+    renderTagPills();
+    renderTagPool();
+  }
+}
+
+function removeModalTag(tag) {
+  const next = state.modalTags.filter((t) => t !== tag);
+  if (next.length !== state.modalTags.length) {
+    state.modalTags = next;
+    renderTagPills();
+    renderTagPool();
+  }
+}
+  }
+}
+
 function openSessionModal(sessionID) {
   const item = state.allSessions.find((s) => s.id === sessionID);
   if (!item) return;
@@ -758,7 +862,12 @@ function openSessionModal(sessionID) {
   els.sessionModalTitle.textContent = `编辑会话 [${sessionID}]`;
   els.sessTitle.value = item.title || "";
   els.sessPinned.checked = !!item.pinned;
-  els.sessTags.value = (item.tags || []).join(", ");
+  state.modalTags = (item.tags || []).slice();
+  renderTagPills();
+  renderTagPool();
+  if (els.tagPillInput) {
+    els.tagPillInput.value = "";
+  }
   els.sessDueDate.value = item.due_date || "";
   els.sessionModal.showModal();
 }
@@ -768,9 +877,14 @@ async function saveSessionModal(event) {
   const sessionID = state.editingSessionID;
   if (!sessionID) return;
 
+  if (els.tagPillInput && els.tagPillInput.value.trim()) {
+    addModalTag(els.tagPillInput.value.trim());
+    els.tagPillInput.value = "";
+  }
+
   const title = els.sessTitle.value.trim();
   const pinned = els.sessPinned.checked;
-  const rawTags = els.sessTags.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+  const rawTags = state.modalTags.slice();
   const dueDate = els.sessDueDate.value.trim();
 
   try {
@@ -1346,19 +1460,35 @@ els.sessionModalCancel.addEventListener("click", () => els.sessionModal.close())
 els.sessClearDue.addEventListener("click", () => {
   els.sessDueDate.value = "";
 });
-document.querySelectorAll(".tag-chip").forEach((chip) => {
-  chip.addEventListener("click", () => {
-    const tag = chip.dataset.tag;
-    const current = els.sessTags.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
-    if (!current.includes(tag)) {
-      current.push(tag);
-      els.sessTags.value = current.join(", ");
-    } else {
-      const filtered = current.filter((t) => t !== tag);
-      els.sessTags.value = filtered.join(", ");
+if (els.tagPillsBox && els.tagPillInput) {
+  els.tagPillsBox.addEventListener("click", () => {
+    els.tagPillInput.focus();
+  });
+
+  els.tagPillInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === "," || e.key === "，") {
+      e.preventDefault();
+      const val = els.tagPillInput.value.trim();
+      if (val) {
+        addModalTag(val);
+        els.tagPillInput.value = "";
+      }
+    } else if (e.key === "Backspace" && els.tagPillInput.value === "") {
+      if (state.modalTags.length > 0) {
+        const last = state.modalTags[state.modalTags.length - 1];
+        removeModalTag(last);
+      }
     }
   });
-});
+
+  els.tagPillInput.addEventListener("blur", () => {
+    const val = els.tagPillInput.value.trim();
+    if (val) {
+      addModalTag(val);
+      els.tagPillInput.value = "";
+    }
+  });
+}
 
 // Close context menu on external click
 document.addEventListener("click", (e) => {
