@@ -15,6 +15,7 @@ const state = {
   sessionViewMode: localStorage.getItem("typeai_view_mode") || "tree",
   collapsedGroups: new Set(JSON.parse(localStorage.getItem("typeai_collapsed_groups") || "[]")),
   editingSessionID: null,
+  modalTags: [],
 };
 
 const els = {
@@ -39,7 +40,10 @@ const els = {
   sessionModalForm: $("session-modal-form"),
   sessionModalTitle: $("session-modal-title"),
   sessPinned: $("sess-pinned"),
-  sessTags: $("sess-tags"),
+  tagPillsBox: $("tag-pills-box"),
+  tagPillsList: $("tag-pills-list"),
+  tagPillInput: $("tag-pill-input"),
+  tagPoolChips: $("tag-pool-chips"),
   sessDueDate: $("sess-due-date"),
   sessClearDue: $("sess-clear-due"),
   sessionModalCancel: $("session-modal-cancel"),
@@ -520,17 +524,26 @@ function renderSessions() {
 
   const currentSessionID = state.data && state.data.session ? state.data.session.id : "";
 
+  // 辅助函数：组内排序，置顶排在最前，同优先级按更新时间倒序
+  const sortGroupItems = (list) => {
+    return [...list].sort((a, b) => {
+      if (!!b.pinned !== !!a.pinned) {
+        return b.pinned ? 1 : -1;
+      }
+      return new Date(b.updated_at) - new Date(a.updated_at);
+    });
+  };
+
   if (state.sessionViewMode === "list") {
-    for (const item of items) {
+    for (const item of sortGroupItems(items)) {
       els.sessionList.append(renderSessionCard(item, currentSessionID));
     }
     return;
   }
 
-  // Tree View mode
-  const pinnedItems = items.filter((item) => item.pinned);
-  const todoItems = items.filter((item) => (item.tags || []).includes("待办"));
-  const archiveItems = items.filter((item) => (item.tags || []).includes("归档"));
+  // Tree View mode - 方案 B：置顶作为组内属性沉淀在各分组头部，消除重复的顶部置顶大组
+  const todoItems = sortGroupItems(items.filter((item) => (item.tags || []).includes("待办")));
+  const archiveItems = sortGroupItems(items.filter((item) => (item.tags || []).includes("归档")));
 
   const otherTagMap = new Map();
   for (const item of items) {
@@ -541,7 +554,7 @@ function renderSessions() {
     }
   }
 
-  const uncategorized = items.filter((item) => !item.tags || item.tags.length === 0);
+  const uncategorized = sortGroupItems(items.filter((item) => !item.tags || item.tags.length === 0));
 
   const renderGroup = (groupId, title, groupItems) => {
     if (!groupItems.length) return;
@@ -588,12 +601,11 @@ function renderSessions() {
     els.sessionList.append(group);
   };
 
-  renderGroup("pinned", "置顶", pinnedItems);
   renderGroup("tag_todo", "待办", todoItems);
   renderGroup("tag_archive", "归档", archiveItems);
 
   for (const [tag, tagItems] of Array.from(otherTagMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
-    renderGroup("tag_" + tag, tag, tagItems);
+    renderGroup("tag_" + tag, tag, sortGroupItems(tagItems));
   }
 
   renderGroup("uncategorized", "未分类", uncategorized);
@@ -708,13 +720,107 @@ async function toggleTag(sessionID, tag) {
   }
 }
 
+/* ---------------- tag pills & pool ---------------- */
+
+function getAllExistingTags() {
+  const set = new Set(["待办", "归档"]);
+  for (const s of state.allSessions || []) {
+    for (const t of s.tags || []) {
+      if (t && t.trim()) set.add(t.trim());
+    }
+  }
+  return Array.from(set);
+}
+
+function renderTagPills() {
+  if (!els.tagPillsList) return;
+  els.tagPillsList.innerHTML = "";
+  for (const tag of state.modalTags) {
+    const pill = document.createElement("span");
+    pill.className = "tag-pill";
+    if (tag === "待办") pill.classList.add("tag-todo");
+    else if (tag === "归档") pill.classList.add("tag-archive");
+
+    const label = document.createElement("span");
+    label.textContent = tag;
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "tag-pill-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = `移除「${tag}」`;
+    removeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeModalTag(tag);
+    });
+
+    pill.append(label, removeBtn);
+    els.tagPillsList.append(pill);
+  }
+}
+
+function renderTagPool() {
+  if (!els.tagPoolChips) return;
+  els.tagPoolChips.innerHTML = "";
+  const allTags = getAllExistingTags();
+  for (const tag of allTags) {
+    const isSelected = state.modalTags.includes(tag);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "pool-chip" + (isSelected ? " active" : "");
+    if (tag === "待办") chip.classList.add("chip-todo");
+    else if (tag === "归档") chip.classList.add("chip-archive");
+    chip.textContent = (isSelected ? "✓ " : "+ ") + tag;
+    chip.title = isSelected ? `点击取消「${tag}」` : `点击添加「${tag}」`;
+    chip.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (isSelected) {
+        removeModalTag(tag);
+      } else {
+        addModalTag(tag);
+      }
+    });
+    els.tagPoolChips.append(chip);
+  }
+}
+
+function addModalTag(rawTag) {
+  if (!rawTag) return;
+  const parts = rawTag.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+  let changed = false;
+  for (const part of parts) {
+    if (!state.modalTags.includes(part)) {
+      state.modalTags.push(part);
+      changed = true;
+    }
+  }
+  if (changed) {
+    renderTagPills();
+    renderTagPool();
+  }
+}
+
+function removeModalTag(tag) {
+  const next = state.modalTags.filter((t) => t !== tag);
+  if (next.length !== state.modalTags.length) {
+    state.modalTags = next;
+    renderTagPills();
+    renderTagPool();
+  }
+}
+
 function openSessionModal(sessionID) {
   const item = state.allSessions.find((s) => s.id === sessionID);
   if (!item) return;
   state.editingSessionID = sessionID;
   els.sessionModalTitle.textContent = `编辑会话 [${sessionID}]`;
   els.sessPinned.checked = !!item.pinned;
-  els.sessTags.value = (item.tags || []).join(", ");
+  state.modalTags = (item.tags || []).slice();
+  renderTagPills();
+  renderTagPool();
+  if (els.tagPillInput) {
+    els.tagPillInput.value = "";
+  }
   els.sessDueDate.value = item.due_date || "";
   els.sessionModal.showModal();
 }
@@ -724,8 +830,13 @@ async function saveSessionModal(event) {
   const sessionID = state.editingSessionID;
   if (!sessionID) return;
 
+  if (els.tagPillInput && els.tagPillInput.value.trim()) {
+    addModalTag(els.tagPillInput.value.trim());
+    els.tagPillInput.value = "";
+  }
+
   const pinned = els.sessPinned.checked;
-  const rawTags = els.sessTags.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+  const rawTags = state.modalTags.slice();
   const dueDate = els.sessDueDate.value.trim();
 
   try {
@@ -1298,19 +1409,35 @@ els.sessionModalCancel.addEventListener("click", () => els.sessionModal.close())
 els.sessClearDue.addEventListener("click", () => {
   els.sessDueDate.value = "";
 });
-document.querySelectorAll(".tag-chip").forEach((chip) => {
-  chip.addEventListener("click", () => {
-    const tag = chip.dataset.tag;
-    const current = els.sessTags.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
-    if (!current.includes(tag)) {
-      current.push(tag);
-      els.sessTags.value = current.join(", ");
-    } else {
-      const filtered = current.filter((t) => t !== tag);
-      els.sessTags.value = filtered.join(", ");
+if (els.tagPillsBox && els.tagPillInput) {
+  els.tagPillsBox.addEventListener("click", () => {
+    els.tagPillInput.focus();
+  });
+
+  els.tagPillInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === "," || e.key === "，") {
+      e.preventDefault();
+      const val = els.tagPillInput.value.trim();
+      if (val) {
+        addModalTag(val);
+        els.tagPillInput.value = "";
+      }
+    } else if (e.key === "Backspace" && els.tagPillInput.value === "") {
+      if (state.modalTags.length > 0) {
+        const last = state.modalTags[state.modalTags.length - 1];
+        removeModalTag(last);
+      }
     }
   });
-});
+
+  els.tagPillInput.addEventListener("blur", () => {
+    const val = els.tagPillInput.value.trim();
+    if (val) {
+      addModalTag(val);
+      els.tagPillInput.value = "";
+    }
+  });
+}
 
 // Close context menu on external click
 document.addEventListener("click", (e) => {
