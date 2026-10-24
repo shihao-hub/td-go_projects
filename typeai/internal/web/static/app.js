@@ -16,10 +16,12 @@ const state = {
   collapsedGroups: new Set(JSON.parse(localStorage.getItem("typeai_collapsed_groups") || "[]")),
   editingSessionID: null,
   modalTags: [],
+  searchQuery: "",
 };
 
 const els = {
   sidebar: $("sidebar"),
+  sessionSearch: $("session-search"),
   sessionList: $("session-list"),
   tabs: $("tabs"),
   topMeta: $("top-meta"),
@@ -201,8 +203,13 @@ function renderTabs() {
     const tab = document.createElement("button");
     tab.className = "tab";
     if (branch.id === state.activeBranch) tab.classList.add("active");
-    if (state.temp && state.temp.branch === branch.id) tab.classList.add("running");
-    tab.textContent = branch.id;
+    if (state.temp && state.temp.branch === branch.id) {
+      tab.classList.add("running");
+      const dot = document.createElement("span");
+      dot.className = "t-dot";
+      tab.append(dot);
+    }
+    tab.append(document.createTextNode(branch.id));
     tab.title = "单击切换 · 双击重命名 · 右键删除";
     tab.addEventListener("click", () => switchBranch(branch.id));
     tab.addEventListener("dblclick", (event) => {
@@ -231,10 +238,44 @@ function renderTranscript() {
   state.tempNodes = null;
 
   if (!messages.length && !state.temp) {
-    const note = document.createElement("div");
-    note.className = "empty-note";
-    note.textContent = "还没有消息。输入内容开始对话，或从左侧恢复历史会话。";
-    els.transcript.append(note);
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+
+    const logo = document.createElement("div");
+    logo.className = "empty-logo";
+    logo.textContent = "t";
+
+    const title = document.createElement("div");
+    title.className = "empty-title";
+    title.textContent = "开始新对话，或从左侧恢复历史会话";
+
+    const kbdRow = document.createElement("div");
+    kbdRow.className = "empty-kbd";
+
+    const kbdSearch = document.createElement("span");
+    kbdSearch.innerHTML = "<kbd>Ctrl K</kbd> 搜索会话";
+    kbdSearch.addEventListener("click", () => {
+      if (els.sessionSearch) {
+        els.sessionSearch.focus();
+        els.sessionSearch.select();
+      }
+    });
+
+    const kbdNew = document.createElement("span");
+    kbdNew.innerHTML = "<kbd>Ctrl N</kbd> 新建会话";
+    kbdNew.addEventListener("click", () => {
+      if (els.newSession) els.newSession.click();
+    });
+
+    const kbdSend = document.createElement("span");
+    kbdSend.innerHTML = "<kbd>Enter</kbd> 发送";
+    kbdSend.addEventListener("click", () => {
+      els.input.focus();
+    });
+
+    kbdRow.append(kbdSearch, kbdNew, kbdSend);
+    empty.append(logo, title, kbdRow);
+    els.transcript.append(empty);
     return;
   }
 
@@ -444,6 +485,62 @@ async function loadSessions() {
   }
 }
 
+const TAG_PALETTE = [
+  "var(--tag-0)", // 0: 琥珀（待办专用）
+  "var(--tag-1)", // 1: 雾蓝
+  "var(--tag-2)", // 2: 灰绿
+  "var(--tag-3)", // 3: 藕紫
+  "var(--tag-4)", // 4: 陶红
+  "var(--tag-5)", // 5: 青碧
+  "var(--tag-6)", // 6: 沙棕
+  "var(--tag-7)", // 7: 蓝紫灰
+];
+
+function getTagColor(tag) {
+  if (tag === "待办") return "var(--tag-0)";
+  if (tag === "归档") return "var(--faint)";
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = (hash << 5) - hash + tag.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = 1 + (Math.abs(hash) % 7);
+  return TAG_PALETTE[idx];
+}
+
+function formatRelativeTime(dateStr) {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  const now = new Date();
+  const diffMs = now - d;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "刚刚";
+
+  const isToday = d.toDateString() === now.toDateString();
+  const pad = (n) => String(n).padStart(2, "0");
+  const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (isToday) return timeStr;
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) {
+    return "昨天";
+  }
+
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  if (d > sevenDaysAgo) {
+    const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    return weekdays[d.getDay()];
+  }
+
+  const monthDay = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (d.getFullYear() === now.getFullYear()) {
+    return monthDay;
+  }
+  return `${d.getFullYear()}-${monthDay}`;
+}
+
 function formatDueDate(due) {
   if (!due) return "";
   const m = due.match(/^(\d{4})-(\d{2}-\d{2})$/);
@@ -456,7 +553,7 @@ function formatDueDate(due) {
   return `${due} 截止`;
 }
 
-function renderSessionCard(item, currentSessionID) {
+function renderSessionCard(item, currentSessionID, currentGroupTag) {
   const card = document.createElement("div");
   card.className = "session-item";
   if (item.id === currentSessionID) {
@@ -512,17 +609,23 @@ function renderSessionCard(item, currentSessionID) {
   header.append(title, actions);
   card.append(header);
 
-  // Badges row
+  // Badges row: 消除组头已表达的标签冗余
   const badges = document.createElement("div");
   badges.className = "session-badges";
 
   const tags = item.tags || [];
   for (const tag of tags) {
+    if (currentGroupTag && tag === currentGroupTag) {
+      continue;
+    }
     const tagBadge = document.createElement("span");
-    tagBadge.className = "badge badge-tag";
-    if (tag === "待办") tagBadge.classList.add("tag-todo");
-    else if (tag === "归档") tagBadge.classList.add("tag-archive");
-    tagBadge.textContent = tag;
+    tagBadge.className = "badge";
+    const tagColor = getTagColor(tag);
+    tagBadge.style.setProperty("--tag-c", tagColor);
+
+    const dot = document.createElement("span");
+    dot.className = "b-dot";
+    tagBadge.append(dot, document.createTextNode(tag));
     badges.append(tagBadge);
   }
 
@@ -539,8 +642,11 @@ function renderSessionCard(item, currentSessionID) {
 
   const meta = document.createElement("div");
   meta.className = "session-meta";
-  const when = new Date(item.updated_at).toLocaleString();
-  meta.textContent = `${when} · ${item.message_count} 条 · ${item.model}`;
+  const fullTime = new Date(item.updated_at).toLocaleString();
+  const relTime = formatRelativeTime(item.updated_at);
+  meta.textContent = `${relTime} · ${item.message_count} 条 · ${item.model}`;
+  meta.title = `更新时间: ${fullTime}
+ID: ${item.id}`;
   card.append(meta);
 
   card.addEventListener("dblclick", (e) => {
@@ -567,11 +673,23 @@ function renderSessionCard(item, currentSessionID) {
 
 function renderSessions() {
   els.sessionList.innerHTML = "";
-  const items = state.allSessions || [];
+  let items = state.allSessions || [];
+  const q = (state.searchQuery || "").trim().toLowerCase();
+  if (q) {
+    items = items.filter((item) => {
+      const title = (item.title || "").toLowerCase();
+      const firstUser = (item.first_user || "").toLowerCase();
+      const id = (item.id || "").toLowerCase();
+      const model = (item.model || "").toLowerCase();
+      const tags = (item.tags || []).join(" ").toLowerCase();
+      return title.includes(q) || firstUser.includes(q) || id.includes(q) || model.includes(q) || tags.includes(q);
+    });
+  }
+
   if (!items.length) {
     const note = document.createElement("div");
     note.className = "empty-note";
-    note.textContent = "暂无其他历史会话";
+    note.textContent = q ? `未找到匹配「${state.searchQuery}」的会话` : "暂无其他历史会话";
     els.sessionList.append(note);
     return;
   }
@@ -590,12 +708,12 @@ function renderSessions() {
 
   if (state.sessionViewMode === "list") {
     for (const item of sortGroupItems(items)) {
-      els.sessionList.append(renderSessionCard(item, currentSessionID));
+      els.sessionList.append(renderSessionCard(item, currentSessionID, null));
     }
     return;
   }
 
-  // Tree View mode - 方案 B：置顶作为组内属性沉淀在各分组头部，消除重复的顶部置顶大组
+  // Tree View mode
   const todoItems = sortGroupItems(items.filter((item) => (item.tags || []).includes("待办")));
   const archiveItems = sortGroupItems(items.filter((item) => (item.tags || []).includes("归档")));
 
@@ -610,7 +728,7 @@ function renderSessions() {
 
   const uncategorized = sortGroupItems(items.filter((item) => !item.tags || item.tags.length === 0));
 
-  const renderGroup = (groupId, title, groupItems) => {
+  const renderGroup = (groupId, title, groupItems, groupTag, dotColor) => {
     if (!groupItems.length) return;
     const group = document.createElement("div");
     group.className = "tree-group";
@@ -625,6 +743,15 @@ function renderSessions() {
     arrow.className = "tree-arrow";
     arrow.textContent = "▾";
 
+    const dot = document.createElement("span");
+    dot.className = "tree-dot";
+    if (dotColor) {
+      dot.style.background = dotColor;
+      if (groupId === "uncategorized") {
+        dot.style.opacity = "0.5";
+      }
+    }
+
     const titleEl = document.createElement("span");
     titleEl.className = "tree-title";
     titleEl.textContent = title;
@@ -633,7 +760,7 @@ function renderSessions() {
     countEl.className = "tree-count";
     countEl.textContent = groupItems.length;
 
-    header.append(arrow, titleEl, countEl);
+    header.append(arrow, dot, titleEl, countEl);
     header.addEventListener("click", () => {
       if (state.collapsedGroups.has(groupId)) {
         state.collapsedGroups.delete(groupId);
@@ -651,21 +778,21 @@ function renderSessions() {
     const itemsContainer = document.createElement("div");
     itemsContainer.className = "tree-group-items";
     for (const item of groupItems) {
-      itemsContainer.append(renderSessionCard(item, currentSessionID));
+      itemsContainer.append(renderSessionCard(item, currentSessionID, groupTag));
     }
 
     group.append(header, itemsContainer);
     els.sessionList.append(group);
   };
 
-  renderGroup("tag_todo", "待办", todoItems);
-  renderGroup("tag_archive", "归档", archiveItems);
+  renderGroup("tag_todo", "待办", todoItems, "待办", getTagColor("待办"));
+  renderGroup("tag_archive", "归档", archiveItems, "归档", getTagColor("归档"));
 
   for (const [tag, tagItems] of Array.from(otherTagMap.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
-    renderGroup("tag_" + tag, tag, sortGroupItems(tagItems));
+    renderGroup("tag_" + tag, tag, sortGroupItems(tagItems), tag, getTagColor(tag));
   }
 
-  renderGroup("uncategorized", "未分类", uncategorized);
+  renderGroup("uncategorized", "未分类", uncategorized, null, "var(--faint)");
 }
 
 /* ---------------- context menu & meta ---------------- */
@@ -820,8 +947,11 @@ function renderTagPills() {
   for (const tag of state.modalTags) {
     const pill = document.createElement("span");
     pill.className = "tag-pill";
-    if (tag === "待办") pill.classList.add("tag-todo");
-    else if (tag === "归档") pill.classList.add("tag-archive");
+    const tagColor = getTagColor(tag);
+    pill.style.setProperty("--tag-c", tagColor);
+
+    const dot = document.createElement("span");
+    dot.className = "b-dot";
 
     const label = document.createElement("span");
     label.textContent = tag;
@@ -836,7 +966,7 @@ function renderTagPills() {
       removeModalTag(tag);
     });
 
-    pill.append(label, removeBtn);
+    pill.append(dot, label, removeBtn);
     els.tagPillsList.append(pill);
   }
 }
@@ -850,9 +980,13 @@ function renderTagPool() {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "pool-chip" + (isSelected ? " active" : "");
-    if (tag === "待办") chip.classList.add("chip-todo");
-    else if (tag === "归档") chip.classList.add("chip-archive");
-    chip.textContent = (isSelected ? "✓ " : "+ ") + tag;
+    const tagColor = getTagColor(tag);
+    chip.style.setProperty("--tag-c", tagColor);
+
+    const dot = document.createElement("span");
+    dot.className = "b-dot";
+
+    chip.append(dot, document.createTextNode((isSelected ? "✓ " : "+ ") + tag));
     chip.title = isSelected ? `点击取消「${tag}」` : `点击添加「${tag}」`;
     chip.addEventListener("click", (e) => {
       e.preventDefault();
@@ -895,7 +1029,7 @@ function openSessionModal(sessionID) {
   const item = state.allSessions.find((s) => s.id === sessionID);
   if (!item) return;
   state.editingSessionID = sessionID;
-  els.sessionModalTitle.textContent = `编辑会话 [${sessionID}]`;
+  els.sessionModalTitle.innerHTML = `编辑会话属性 <span class="h-id">· ${sessionID.slice(0, 8)}</span>`;
   els.sessTitle.value = item.title || "";
   els.sessPinned.checked = !!item.pinned;
   state.modalTags = (item.tags || []).slice();
@@ -1595,3 +1729,36 @@ document.addEventListener("drop", (event) => {
   }
   els.input.focus();
 })();
+
+// Search input and global shortcut bindings
+if (els.sessionSearch) {
+  els.sessionSearch.addEventListener("input", (e) => {
+    state.searchQuery = e.target.value;
+    renderSessions();
+  });
+  els.sessionSearch.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      els.sessionSearch.value = "";
+      state.searchQuery = "";
+      renderSessions();
+      els.sessionSearch.blur();
+    }
+  });
+}
+
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+    e.preventDefault();
+    if (els.sessionSearch) {
+      els.sessionSearch.focus();
+      els.sessionSearch.select();
+    }
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === "n" || e.key === "N")) {
+    if (e.target !== els.input || !els.input.value) {
+      e.preventDefault();
+      if (els.newSession) {
+        els.newSession.click();
+      }
+    }
+  }
+});
