@@ -75,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("POST /api/sessions/new", s.handleNewSession)
 	mux.HandleFunc("POST /api/sessions/resume", s.handleResume)
+	mux.HandleFunc("POST /api/sessions/rename", s.handleRenameSession)
 	mux.HandleFunc("POST /api/sessions/meta", s.handleSessionMeta)
 	mux.HandleFunc("POST /api/sessions/delete", s.handleDeleteSession)
 	mux.HandleFunc("POST /api/images", s.handleUploadImage)
@@ -118,6 +119,7 @@ type branchView struct {
 
 type sessionView struct {
 	ID             string       `json:"id"`
+	Title          string       `json:"title,omitempty"`
 	Model          string       `json:"model"`
 	CreatedAt      time.Time    `json:"created_at"`
 	UpdatedAt      time.Time    `json:"updated_at"`
@@ -165,6 +167,7 @@ func (s *Server) toSessionView(sess session.Session) sessionView {
 	}
 	return sessionView{
 		ID:             sess.ID,
+		Title:          sess.Title,
 		Model:          sess.Model,
 		CreatedAt:      sess.CreatedAt,
 		UpdatedAt:      sess.UpdatedAt,
@@ -363,6 +366,7 @@ func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
 
 type sessionSummaryView struct {
 	ID            string    `json:"id"`
+	Title         string    `json:"title,omitempty"`
 	Model         string    `json:"model"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -390,6 +394,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		}
 		views = append(views, sessionSummaryView{
 			ID:            summary.ID,
+			Title:         summary.Title,
 			Model:         summary.Model,
 			CreatedAt:     summary.CreatedAt,
 			UpdatedAt:     summary.UpdatedAt,
@@ -407,9 +412,39 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 type sessionMetaRequest struct {
 	ID      string    `json:"id"`
+	Title   *string   `json:"title,omitempty"`
 	Pinned  *bool     `json:"pinned,omitempty"`
 	Tags    *[]string `json:"tags,omitempty"`
 	DueDate *string   `json:"due_date,omitempty"`
+}
+
+type sessionRenameRequest struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+func (s *Server) handleRenameSession(w http.ResponseWriter, r *http.Request) {
+	var req sessionRenameRequest
+	if !decodeJSON(w, r, maxChatBodyBytes, &req) {
+		return
+	}
+	s.mu.Lock()
+	if s.stream && (req.ID == "" || req.ID == s.chat.Session().ID) {
+		s.mu.Unlock()
+		writeJSONError(w, http.StatusConflict, "busy", "回答生成中，无法修改当前会话标题")
+		return
+	}
+	chat := s.chat
+	s.mu.Unlock()
+
+	sess, err := chat.RenameSession(req.ID, req.Title)
+	if err != nil {
+		writeOperationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session": s.toSessionView(*sess),
+	})
 }
 
 func (s *Server) handleSessionMeta(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +458,7 @@ func (s *Server) handleSessionMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chat, _, _ := s.snapshot()
-	sess, err := chat.UpdateSessionMeta(req.ID, req.Pinned, req.Tags, req.DueDate)
+	sess, err := chat.UpdateSessionMeta(req.ID, req.Pinned, req.Tags, req.DueDate, req.Title)
 	if err != nil {
 		writeOperationError(w, err)
 		return

@@ -324,10 +324,10 @@ func (c *Chat) AllSessionSummaries() ([]session.SessionSummary, error) {
 	return session.ListSessions(c.dataDir)
 }
 
-// UpdateSessionMeta 更新指定会话的置顶、标签与截止时间等元数据。
+// UpdateSessionMeta 更新指定会话的置顶、标签、截止时间与标题等元数据。
 // 若 sessionID 为当前会话，同步更新内存中状态；若当前会话已落盘，则保存到磁盘。
 // 若 sessionID 为其他历史会话，直接更新其落盘文件。
-func (c *Chat) UpdateSessionMeta(sessionID string, pinned *bool, tags *[]string, dueDate *string) (*session.Session, error) {
+func (c *Chat) UpdateSessionMeta(sessionID string, pinned *bool, tags *[]string, dueDate *string, title ...*string) (*session.Session, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -350,6 +350,15 @@ func (c *Chat) UpdateSessionMeta(sessionID string, pinned *bool, tags *[]string,
 		return res
 	}
 
+	var newTitle *string
+	if len(title) > 0 && title[0] != nil {
+		trimmed := strings.TrimSpace(*title[0])
+		if len([]rune(trimmed)) > 100 {
+			return nil, coded("bad_args", "会话标题长度不能超过 100 个字符")
+		}
+		newTitle = &trimmed
+	}
+
 	if sessionID == c.session.ID {
 		if pinned != nil {
 			c.session.Pinned = *pinned
@@ -359,6 +368,9 @@ func (c *Chat) UpdateSessionMeta(sessionID string, pinned *bool, tags *[]string,
 		}
 		if dueDate != nil {
 			c.session.DueDate = strings.TrimSpace(*dueDate)
+		}
+		if newTitle != nil {
+			c.session.Title = *newTitle
 		}
 		c.session.UpdatedAt = time.Now()
 		if c.hasSaved {
@@ -380,12 +392,30 @@ func (c *Chat) UpdateSessionMeta(sessionID string, pinned *bool, tags *[]string,
 		if dueDate != nil {
 			s.DueDate = strings.TrimSpace(*dueDate)
 		}
+		if newTitle != nil {
+			s.Title = *newTitle
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, coded("internal", err.Error())
 	}
 	return sess, nil
+}
+
+// RenameSession 重命名指定会话（sessionID 为空或与当前会话一致时更新当前会话；否则更新指定磁盘会话）。
+func (c *Chat) RenameSession(sessionID string, newTitle string) (*session.Session, error) {
+	trimmed := strings.TrimSpace(newTitle)
+	if len([]rune(trimmed)) > 100 {
+		return nil, coded("bad_args", "会话标题长度不能超过 100 个字符")
+	}
+	targetID := strings.TrimSpace(sessionID)
+	if targetID == "" {
+		c.mu.Lock()
+		targetID = c.session.ID
+		c.mu.Unlock()
+	}
+	return c.UpdateSessionMeta(targetID, nil, nil, nil, &trimmed)
 }
 
 // DeleteSession 从磁盘删除指定 session ID 的历史会话文件。

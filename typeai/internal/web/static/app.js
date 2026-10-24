@@ -38,6 +38,7 @@ const els = {
   sessionModal: $("session-modal"),
   sessionModalForm: $("session-modal-form"),
   sessionModalTitle: $("session-modal-title"),
+  sessTitle: $("sess-title"),
   sessPinned: $("sess-pinned"),
   sessTags: $("sess-tags"),
   sessDueDate: $("sess-due-date"),
@@ -150,7 +151,8 @@ function renderChannel() {
 function renderMeta() {
   if (!state.data) return;
   const session = state.data.session;
-  els.topMeta.textContent = `${session.model} · ${session.id} · [${state.activeBranch}]`;
+  const titlePart = session.title ? `【${session.title}】 ` : "";
+  els.topMeta.textContent = `${titlePart}${session.model} · ${session.id} · [${state.activeBranch}]`;
 }
 
 function renderTabs() {
@@ -418,11 +420,22 @@ function renderSessionCard(item, currentSessionID) {
 
   const title = document.createElement("div");
   title.className = "session-title";
-  title.textContent = item.first_user || item.id;
-  title.title = item.first_user || item.id;
+  const displayTitle = item.title || item.first_user || item.id;
+  title.textContent = displayTitle;
+  title.title = displayTitle;
 
   const actions = document.createElement("div");
   actions.className = "session-actions";
+
+  const renameBtn = document.createElement("button");
+  renameBtn.type = "button";
+  renameBtn.className = "session-action-btn";
+  renameBtn.textContent = "✏️";
+  renameBtn.title = "重命名会话（双击卡片亦可重命名）";
+  renameBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    renameSession(item.id, item.title || item.first_user || "");
+  });
 
   const pinBtn = document.createElement("button");
   pinBtn.type = "button";
@@ -437,14 +450,14 @@ function renderSessionCard(item, currentSessionID) {
   const editBtn = document.createElement("button");
   editBtn.type = "button";
   editBtn.className = "session-action-btn";
-  editBtn.textContent = "✎";
-  editBtn.title = "设置标签与截止时间";
+  editBtn.textContent = "⚙️";
+  editBtn.title = "编辑会话属性（标签、截止时间等）";
   editBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     openSessionModal(item.id);
   });
 
-  actions.append(pinBtn, editBtn);
+  actions.append(renameBtn, pinBtn, editBtn);
   header.append(title, actions);
   card.append(header);
 
@@ -485,6 +498,12 @@ function renderSessionCard(item, currentSessionID) {
   const when = new Date(item.updated_at).toLocaleString();
   meta.textContent = `${when} · ${item.message_count} 条 · ${item.model}`;
   card.append(meta);
+
+  card.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    renameSession(item.id, item.title || item.first_user || "");
+  });
 
   card.addEventListener("click", () => {
     if (item.id === currentSessionID) {
@@ -614,6 +633,11 @@ function showContextMenu(x, y, item) {
 
   const actions = [
     {
+      icon: "✏️",
+      label: "重命名会话…",
+      onClick: () => renameSession(item.id, item.title || item.first_user || ""),
+    },
+    {
       icon: "📌",
       label: item.pinned ? "取消置顶" : "置顶会话",
       onClick: () => togglePin(item.id),
@@ -707,11 +731,32 @@ async function toggleTag(sessionID, tag) {
   }
 }
 
+async function renameSession(id, currentTitle) {
+  const next = window.prompt("输入会话新标题（清空则恢复默认提问预览）：", currentTitle || "");
+  if (next === null) return;
+  try {
+    const data = await api("/api/sessions/rename", {
+      method: "POST",
+      body: { id, title: next.trim() },
+    });
+    if (state.data && state.data.session && state.data.session.id === id) {
+      applySession(data.session);
+    }
+    await loadSessions();
+    if (state.data && state.data.session && state.data.session.id === id) {
+      await loadState();
+    }
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
 function openSessionModal(sessionID) {
   const item = state.allSessions.find((s) => s.id === sessionID);
   if (!item) return;
   state.editingSessionID = sessionID;
   els.sessionModalTitle.textContent = `编辑会话 [${sessionID}]`;
+  els.sessTitle.value = item.title || "";
   els.sessPinned.checked = !!item.pinned;
   els.sessTags.value = (item.tags || []).join(", ");
   els.sessDueDate.value = item.due_date || "";
@@ -723,6 +768,7 @@ async function saveSessionModal(event) {
   const sessionID = state.editingSessionID;
   if (!sessionID) return;
 
+  const title = els.sessTitle.value.trim();
   const pinned = els.sessPinned.checked;
   const rawTags = els.sessTags.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
   const dueDate = els.sessDueDate.value.trim();
@@ -732,6 +778,7 @@ async function saveSessionModal(event) {
       method: "POST",
       body: {
         id: sessionID,
+        title,
         pinned,
         tags: rawTags,
         due_date: dueDate,
@@ -740,9 +787,11 @@ async function saveSessionModal(event) {
     els.sessionModal.close();
     state.editingSessionID = null;
     if (state.data && state.data.session && state.data.session.id === sessionID) {
+      state.data.session.title = title;
       state.data.session.pinned = pinned;
       state.data.session.tags = rawTags;
       state.data.session.due_date = dueDate;
+      await loadState();
     }
     await loadSessions();
   } catch (error) {

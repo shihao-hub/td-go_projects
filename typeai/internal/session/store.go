@@ -38,6 +38,7 @@ type Image struct {
 type Session struct {
 	SchemaVersion  int       `json:"schema_version"`
 	ID             string    `json:"id"`
+	Title          string    `json:"title,omitempty"`
 	Model          string    `json:"model"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -53,6 +54,7 @@ type Session struct {
 // SessionSummary 是会话选择列表使用的只读快照。
 type SessionSummary struct {
 	ID            string
+	Title         string
 	Path          string
 	Model         string
 	CreatedAt     time.Time
@@ -237,6 +239,14 @@ func UpdateSessionMeta(dataDir string, id string, mutate func(s *Session) error)
 	return sess, nil
 }
 
+// UpdateSessionTitle 更新指定 session ID 的会话标题。
+func UpdateSessionTitle(dataDir string, id string, newTitle string) (*Session, error) {
+	return UpdateSessionMeta(dataDir, id, func(s *Session) error {
+		s.Title = strings.TrimSpace(newTitle)
+		return nil
+	})
+}
+
 // DeleteSession 从 sessions 目录删除指定 session ID 的持久化文件。
 func DeleteSession(dataDir string, id string) error {
 	if !IsValidSessionID(id) {
@@ -296,6 +306,7 @@ func ListSessions(dataDir string) ([]SessionSummary, error) {
 		seen[sess.ID] = true
 		summaries = append(summaries, SessionSummary{
 			ID:            sess.ID,
+			Title:         sess.Title,
 			Path:          path,
 			Model:         sess.Model,
 			CreatedAt:     sess.CreatedAt,

@@ -92,7 +92,7 @@ func (m *model) sessionPickerView() string {
 
 func (m *model) visibleResumePickerItems() string {
 	count := len(m.resumeSummaries)
-	visibleCount := max(1, (m.height-6)/4)
+	visibleCount := max(1, (m.height-6)/5)
 	start := min(count-visibleCount, m.resumePickerIndex)
 	start = max(0, start)
 	end := min(count, start+visibleCount)
@@ -132,6 +132,9 @@ func resumePickerItem(summary session.SessionSummary, selected bool) string {
 		summary.MessageCount,
 	)
 	lines := []string{header}
+	if summary.Title != "" {
+		lines = append(lines, "Title:  "+truncateRunes(summary.Title, width))
+	}
 	if len(summary.Tags) > 0 || summary.DueDate != "" {
 		parts := make([]string, 0, 2)
 		if len(summary.Tags) > 0 {

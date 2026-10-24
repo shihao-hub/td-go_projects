@@ -14,17 +14,17 @@
   - 支持 `/title <新标题>` 与 `/session rename <新标题>` 快速为当前会话起名。
 
 **任务分解**：
-- [ ] Task 1: 数据层与存储支持会话 Title
+- [x] Task 1: 数据层与存储支持会话 Title
   - 文件：`internal/session/store.go`、`internal/session/store_test.go`
   - 实现：`Session` 与 `SessionSummary` 增补 `Title` 字段；`ListSessions` 提取 Title；新增 `UpdateSessionTitle(dataDir, sessionID, newTitle)` 原子写盘。
-- [ ] Task 2: 业务层与 HTTP API 暴露重命名
+- [x] Task 2: 业务层与 HTTP API 暴露重命名
   - 文件：`internal/service/chat.go`、`internal/api/server.go`
   - 实现：`Chat.RenameSession(id, title)` 业务方法；增加 `POST /api/sessions/rename` 处理函数与请求体解析。
-- [ ] Task 3: WebUI 界面支持双击与悬停改名
+- [x] Task 3: WebUI 界面支持双击与悬停改名
   - 文件：`internal/web/static/app.js`、`internal/web/static/style.css`
   - 实现：会话列表渲染优先使用 `title`；为会话项绑定 `dblclick` 与悬停 ✏️ 图标交互；调用 API 后即时更新。
-- [ ] Task 4: TUI 弹窗展示与改名命令
+- [x] Task 4: TUI 弹窗展示与改名命令
   - 文件：`internal/tui/model.go`、`internal/tui/session_picker.go`
   - 实现：`/resume` 会话弹窗优先展示自定义 Title；增加 `/title` 命令行支持。
-- [ ] Task 5: 自动化测试与全量回归验证
-  - 验证：运行 `go test ./...` 与 `python scripts/build.py -v dev`。
+- [x] Task 5: 自动化测试与全量回归验证
+  - 验证：运行 `go test ./...` 与 `python scripts/build.py`。

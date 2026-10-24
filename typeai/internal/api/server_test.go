@@ -160,3 +160,105 @@ func TestSessionMetaAndUpdate(t *testing.T) {
 		t.Errorf("expected 0 sessions after deletion, got %d", len(listResp.Items))
 	}
 }
+
+func TestSessionRenameAPI(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Config{
+		BaseURL: "http://localhost",
+		Model:   "test-model",
+	}
+	now := time.Now()
+	chat, err := service.NewChat(cfg, dir, now)
+	if err != nil {
+		t.Fatalf("NewChat() error = %v", err)
+	}
+
+	server := NewServer(Options{
+		Chat:    chat,
+		Config:  cfg,
+		DataDir: dir,
+		Version: "v0.1.0-test",
+		Channel: "test",
+	})
+	handler := server.Handler()
+
+	// 1. Rename current session via POST /api/sessions/rename
+	body, _ := json.Marshal(sessionRenameRequest{
+		ID:    "",
+		Title: "当前会话新标题",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sessions/rename", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/sessions/rename status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Session sessionView `json:"session"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode resp error = %v", err)
+	}
+	if resp.Session.Title != "当前会话新标题" {
+		t.Errorf("resp.Session.Title = %q, want 当前会话新标题", resp.Session.Title)
+	}
+
+	// 2. Verify GET /api/state returns the title
+	req = httptest.NewRequest(http.MethodGet, "/api/state", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	var stateResp stateResponse
+	_ = json.NewDecoder(w.Body).Decode(&stateResp)
+	if stateResp.Session.Title != "当前会话新标题" {
+		t.Errorf("stateResp.Session.Title = %q, want 当前会话新标题", stateResp.Session.Title)
+	}
+
+	// 3. Create a disk session and rename it
+	store2, _ := session.New(dir, now.Add(-time.Hour))
+	sess2 := session.Session{
+		SchemaVersion: session.SchemaVersion,
+		ID:            store2.ID(),
+		Model:         "m2",
+		CreatedAt:     now.Add(-time.Hour),
+		UpdatedAt:     now.Add(-time.Hour),
+		Branches: []session.Branch{
+			{
+				ID:        session.DefaultRootBranchID,
+				CreatedAt: now.Add(-time.Hour),
+				Messages: []session.Message{
+					{Role: "user", Content: "q", CreatedAt: now.Add(-time.Hour)},
+					{Role: "assistant", Content: "a", CreatedAt: now.Add(-time.Hour)},
+				},
+			},
+		},
+	}
+	_ = store2.Save(sess2)
+
+	body2, _ := json.Marshal(sessionRenameRequest{
+		ID:    store2.ID(),
+		Title: "历史会话新标题",
+	})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/sessions/rename", bytes.NewReader(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req2)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST /api/sessions/rename disk status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	// 4. Verify GET /api/sessions returns the updated title in items
+	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, listReq)
+	var listResp struct {
+		Items []sessionSummaryView `json:"items"`
+	}
+	_ = json.NewDecoder(w.Body).Decode(&listResp)
+	if len(listResp.Items) != 1 {
+		t.Fatalf("expected 1 disk session, got %d", len(listResp.Items))
+	}
+	if listResp.Items[0].Title != "历史会话新标题" {
+		t.Errorf("list item title = %q, want 历史会话新标题", listResp.Items[0].Title)
+	}
+}

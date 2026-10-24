@@ -813,6 +813,32 @@ func (m *model) submit() tea.Cmd {
 		}
 		return cmd
 	}
+	if input == "/title" || strings.HasPrefix(input, "/title ") || strings.HasPrefix(input, "/session rename") {
+		var newTitle string
+		if strings.HasPrefix(input, "/session rename") {
+			newTitle = strings.TrimSpace(strings.TrimPrefix(input, "/session rename"))
+		} else {
+			newTitle = strings.TrimSpace(strings.TrimPrefix(input, "/title"))
+		}
+		m.input.Reset()
+		m.syncInputLayout()
+		if newTitle == "" {
+			m.operationErr = fmt.Errorf("用法: /title <新标题> 或 /session rename <新标题>")
+			m.status = "error"
+			m.refreshViewport()
+			return nil
+		}
+		if _, err := m.chat.RenameSession("", newTitle); err != nil {
+			m.operationErr = err
+			m.status = "error"
+			m.refreshViewport()
+			return nil
+		}
+		m.operationErr = nil
+		m.status = fmt.Sprintf("已将会话标题修改为: %s", newTitle)
+		m.refreshViewport()
+		return nil
+	}
 	if input == "/resume" || strings.HasPrefix(input, "/resume ") {
 		arg := strings.TrimSpace(strings.TrimPrefix(input, "/resume"))
 		m.input.Reset()

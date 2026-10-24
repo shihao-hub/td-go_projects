@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"typeai/internal/llm"
+	"typeai/internal/config"
+	"typeai/internal/session"
 	"typeai/internal/service"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -243,5 +245,59 @@ func TestAltVInsertsClipboardImageMarker(t *testing.T) {
 	m.applyClipboardImage(clipboardMsg)
 	if got := m.input.Value(); got != imageMarker(path) {
 		t.Fatalf("input = %q, want %q", got, imageMarker(path))
+	}
+}
+
+func TestTitleCommand(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	chat, err := service.NewChat(config.Config{
+		BaseURL: "http://localhost",
+		Model:   "m",
+	}, dir, now)
+	if err != nil {
+		t.Fatalf("NewChat() error = %v", err)
+	}
+
+	m := newModel(chat, newMarkdownRenderer("notty"), false, 80, 24)
+	m.resize(80, 24)
+
+	// Test /title <新标题>
+	m.input.SetValue("/title 终端改名测试")
+	cmd := m.submit()
+	if cmd != nil {
+		t.Fatal("expected nil command from /title")
+	}
+	if m.operationErr != nil {
+		t.Fatalf("unexpected operationErr: %v", m.operationErr)
+	}
+	if chat.Session().Title != "终端改名测试" {
+		t.Errorf("chat title = %q, want 终端改名测试", chat.Session().Title)
+	}
+	if !strings.Contains(m.status, "终端改名测试") {
+		t.Errorf("m.status = %q, want containing title", m.status)
+	}
+
+	// Test /session rename <新标题>
+	m.input.SetValue("/session rename 别名改名测试")
+	_ = m.submit()
+	if chat.Session().Title != "别名改名测试" {
+		t.Errorf("chat title = %q, want 别名改名测试", chat.Session().Title)
+	}
+}
+
+func TestResumePickerRendersTitle(t *testing.T) {
+	summary := session.SessionSummary{
+		ID:            "a1b2c3d4",
+		Title:         "自定义架构设计会话",
+		Model:         "deepseek-chat",
+		UpdatedAt:     time.Now(),
+		FirstUser:     "首轮问题",
+		LastAssistant: "首轮回答",
+		Branches:      []string{"main"},
+	}
+	rendered := resumePickerItem(summary, false)
+	if !strings.Contains(rendered, "Title:  自定义架构设计会话") {
+		t.Errorf("rendered resume item missing title line: %s", rendered)
 	}
 }

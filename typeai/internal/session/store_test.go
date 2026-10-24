@@ -171,3 +171,72 @@ func TestListSessionsPinnedSortingAndMeta(t *testing.T) {
 		t.Errorf("expected sess2 to be first now, got %s", summariesAfter[0].ID)
 	}
 }
+
+func TestUpdateSessionTitleAndList(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	store, err := New(dir, now)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	sess := Session{
+		SchemaVersion: SchemaVersion,
+		ID:            store.ID(),
+		Model:         "deepseek-chat",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Messages: []Message{
+			{Role: "user", Content: "首条提问内容", CreatedAt: now},
+			{Role: "assistant", Content: "回答内容", CreatedAt: now},
+		},
+	}
+	if err := store.Save(sess); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+
+	// 初始状态没有自定义标题
+	summaries, err := ListSessions(dir)
+	if err != nil {
+		t.Fatalf("ListSessions error: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries))
+	}
+	if summaries[0].Title != "" {
+		t.Errorf("expected empty initial title, got %q", summaries[0].Title)
+	}
+	if summaries[0].FirstUser != "首条提问内容" {
+		t.Errorf("expected FirstUser %q, got %q", "首条提问内容", summaries[0].FirstUser)
+	}
+
+	// 更新标题
+	updated, err := UpdateSessionTitle(dir, store.ID(), "Instant 深入解析与使用")
+	if err != nil {
+		t.Fatalf("UpdateSessionTitle error: %v", err)
+	}
+	if updated.Title != "Instant 深入解析与使用" {
+		t.Errorf("updated.Title = %q, want %q", updated.Title, "Instant 深入解析与使用")
+	}
+
+	// 重新列出会话摘要，Title 应被正确提取
+	summaries2, err := ListSessions(dir)
+	if err != nil {
+		t.Fatalf("ListSessions error: %v", err)
+	}
+	if len(summaries2) != 1 {
+		t.Fatalf("expected 1 summary, got %d", len(summaries2))
+	}
+	if summaries2[0].Title != "Instant 深入解析与使用" {
+		t.Errorf("summary title = %q, want %q", summaries2[0].Title, "Instant 深入解析与使用")
+	}
+
+	// 清空标题（测试去除空白与回退）
+	updatedEmpty, err := UpdateSessionTitle(dir, store.ID(), "   ")
+	if err != nil {
+		t.Fatalf("UpdateSessionTitle empty error: %v", err)
+	}
+	if updatedEmpty.Title != "" {
+		t.Errorf("expected empty title after whitespace update, got %q", updatedEmpty.Title)
+	}
+}

@@ -259,3 +259,64 @@ func TestChatUpdateSessionMetaAndDelete(t *testing.T) {
 		t.Errorf("expected 0 disk sessions after deletion, got %d", len(all))
 	}
 }
+
+func TestChatRenameSession(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	chat, err := NewChat(config.Config{
+		BaseURL: "http://localhost",
+		APIKey:  "k",
+		Model:   "m",
+	}, dir, now)
+	if err != nil {
+		t.Fatalf("NewChat() error = %v", err)
+	}
+
+	// Rename current session
+	updated, err := chat.RenameSession("", "当前会话标题")
+	if err != nil {
+		t.Fatalf("RenameSession() error = %v", err)
+	}
+	if updated.Title != "当前会话标题" {
+		t.Errorf("updated.Title = %q, want 当前会话标题", updated.Title)
+	}
+	if chat.Session().Title != "当前会话标题" {
+		t.Errorf("chat.Session().Title = %q, want 当前会话标题", chat.Session().Title)
+	}
+
+	// Create and rename a disk session
+	store2, _ := session.New(dir, now.Add(-time.Hour))
+	sess2 := session.Session{
+		SchemaVersion: session.SchemaVersion,
+		ID:            store2.ID(),
+		Model:         "m2",
+		CreatedAt:     now.Add(-time.Hour),
+		UpdatedAt:     now.Add(-time.Hour),
+		Branches: []session.Branch{
+			{
+				ID:        session.DefaultRootBranchID,
+				CreatedAt: now.Add(-time.Hour),
+				Messages: []session.Message{
+					{Role: "user", Content: "q", CreatedAt: now.Add(-time.Hour)},
+					{Role: "assistant", Content: "a", CreatedAt: now.Add(-time.Hour)},
+				},
+			},
+		},
+	}
+	_ = store2.Save(sess2)
+
+	updated2, err := chat.RenameSession(store2.ID(), "历史会话标题")
+	if err != nil {
+		t.Fatalf("RenameSession for disk session error: %v", err)
+	}
+	if updated2.Title != "历史会话标题" {
+		t.Errorf("updated2.Title = %q, want 历史会话标题", updated2.Title)
+	}
+
+	// Too long title error check
+	longTitle := strings.Repeat("长", 101)
+	_, err = chat.RenameSession("", longTitle)
+	if err == nil {
+		t.Errorf("expected error for title > 100 characters, got nil")
+	}
+}
