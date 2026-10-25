@@ -317,6 +317,30 @@ body {
   white-space: nowrap;
 }
 
+/* 卡片悬停时的分组快捷入口，避免必须在详情页才能分组 */
+.card-group-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tool-card:hover .card-group-btn,
+.card-group-btn:focus-visible { opacity: 1; }
+
+.card-group-btn:hover {
+  color: var(--accent);
+  border-color: rgba(240, 160, 40, 0.45);
+}
+
 /* ---------- 分组标签页 ---------- */
 
 .group-tabs {
@@ -372,6 +396,15 @@ body {
   height: 6px;
   border-radius: 50%;
   background: var(--live);
+}
+
+.tabs-hint {
+  flex: 0 0 auto;
+  align-self: center;
+  padding-left: 6px;
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .tool-list.grouped .card-group { display: none; }
@@ -528,9 +561,15 @@ body {
 .group-chip:hover { border-color: var(--accent); }
 
 .group-chip.unset {
-  color: var(--muted);
+  color: var(--accent);
   background: transparent;
-  border-color: var(--line-strong);
+  border: 1px dashed rgba(240, 160, 40, 0.5);
+}
+
+.group-chip.unset:hover {
+  background: var(--accent-dim);
+  border-style: solid;
+  border-color: var(--accent);
 }
 
 .group-chips {

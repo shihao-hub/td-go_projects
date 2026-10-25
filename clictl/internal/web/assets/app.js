@@ -267,6 +267,7 @@
           <span class="card-name">${escapeHtml(tool.name)}</span>
           ${groupTag}
           ${tool.status === "invalid" ? '<span class="tag-invalid">失效</span>' : ""}
+          <button type="button" class="card-group-btn" data-group-for="${escapeHtml(tool.name)}" title="设置分组">分组</button>
         </div>
         <div class="card-path" title="${escapeHtml(tool.path)}">${escapeHtml(tool.path)}</div>
         <div class="card-foot">
@@ -280,6 +281,15 @@
     toolListEl.querySelectorAll(".tool-card").forEach((card) => {
       card.addEventListener("click", () => {
         selectTool(card.dataset.name).catch(reportError);
+      });
+    });
+    // 卡片上的分组快捷入口：先选中再弹分组窗，不改变列表滚动位置。
+    toolListEl.querySelectorAll(".card-group-btn").forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectTool(btn.dataset.groupFor)
+          .then(() => openGroupDialog())
+          .catch(reportError);
       });
     });
   }
@@ -332,16 +342,21 @@
 
     const tabsEl = el("groupTabs");
     tabsEl.hidden = false;
-    tabsEl.innerHTML = tabs
-      .map(
-        (tab) => `
+    const hint =
+      groups.length === 0
+        ? '<span class="tabs-hint">还没有分组：卡片悬停点「分组」，或点详情标题旁的「设置分组」</span>'
+        : "";
+    tabsEl.innerHTML =
+      tabs
+        .map(
+          (tab) => `
         <button type="button" class="group-tab ${tab.name === state.activeGroup ? "active" : ""}" data-group="${escapeHtml(tab.name)}" role="tab" aria-selected="${tab.name === state.activeGroup}">
           ${tab.running ? '<span class="tab-pulse" title="该组有后台实例"></span>' : ""}
           <span class="tab-label">${escapeHtml(tab.label)}</span>
           <span class="tab-count">${tab.count}</span>
         </button>`
-      )
-      .join("");
+        )
+        .join("") + hint;
 
     const visible =
       state.activeGroup === "" ? items : items.filter((tool) => groupOf(tool) === state.activeGroup);
@@ -395,7 +410,8 @@
 
     const groupChip = el("detailGroupChip");
     const group = groupOf(tool);
-    groupChip.textContent = group;
+    groupChip.textContent = group === UNGROUPED ? "设置分组" : group;
+    groupChip.title = group === UNGROUPED ? "点击为该工具设置分组" : `当前分组「${group}」，点击修改`;
     groupChip.classList.toggle("unset", group === UNGROUPED);
 
     let metaText = "（无）";
