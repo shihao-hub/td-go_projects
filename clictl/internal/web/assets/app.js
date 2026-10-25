@@ -4,6 +4,7 @@
   "use strict";
 
   const UNGROUPED = "未分组";
+  const UNGROUPED_KEY = "__ungrouped__";
   const SORT_MODES = new Set(["name", "recent", "launches", "added"]);
 
   const state = {
@@ -168,6 +169,12 @@
     return group || UNGROUPED;
   }
 
+  // 「未分组」不是真实分组名（用户可把 group 命名成「未分组」），tab 用独立哨兵做 key。
+  function groupKey(tool) {
+    const group = groupOf(tool);
+    return group === UNGROUPED ? UNGROUPED_KEY : group;
+  }
+
   function compareName(a, b) {
     return a.name.localeCompare(b.name, "zh-Hans-CN", { sensitivity: "base" });
   }
@@ -315,7 +322,8 @@
   // 分组 tab：横向标签页切换，替代垂直折叠树，工具多时不再需要往下滚。
   function renderTabs(items) {
     const groups = existingGroups();
-    if (state.activeGroup && groups.indexOf(state.activeGroup) === -1) {
+    const validKeys = new Set(["", UNGROUPED_KEY, ...groups]);
+    if (!validKeys.has(state.activeGroup)) {
       state.activeGroup = "";
       savePreferences();
     }
@@ -323,21 +331,21 @@
     const counts = new Map();
     const runningGroups = new Set();
     for (const tool of items) {
-      const name = groupOf(tool);
-      counts.set(name, (counts.get(name) || 0) + 1);
-      if (state.running.has(tool.name)) runningGroups.add(name);
+      const key = groupKey(tool);
+      counts.set(key, (counts.get(key) || 0) + 1);
+      if (state.running.has(tool.name)) runningGroups.add(key);
     }
 
-    const tabs = [{ name: "", label: "全部", count: items.length, running: runningGroups.has(UNGROUPED) }];
+    const tabs = [{ key: "", label: "全部", count: items.length, running: runningGroups.has(UNGROUPED_KEY) }];
     if (groups.length > 0) {
       for (const name of groups) {
-        tabs.push({ name, label: name, count: counts.get(name) || 0, running: runningGroups.has(name) });
+        tabs.push({ key: name, label: name, count: counts.get(name) || 0, running: runningGroups.has(name) });
       }
       tabs.push({
-        name: UNGROUPED,
+        key: UNGROUPED_KEY,
         label: UNGROUPED,
-        count: counts.get(UNGROUPED) || 0,
-        running: runningGroups.has(UNGROUPED),
+        count: counts.get(UNGROUPED_KEY) || 0,
+        running: runningGroups.has(UNGROUPED_KEY),
       });
     }
 
@@ -347,7 +355,7 @@
     tabsEl.innerHTML = tabs
       .map(
         (tab) => `
-        <button type="button" class="group-tab ${tab.name === state.activeGroup ? "active" : ""}" data-group="${escapeHtml(tab.name)}" role="tab" aria-selected="${tab.name === state.activeGroup}">
+        <button type="button" class="group-tab ${tab.key === state.activeGroup ? "active" : ""}" data-group="${escapeHtml(tab.key)}" role="tab" aria-selected="${tab.key === state.activeGroup}">
           ${tab.running ? '<span class="tab-pulse" title="该组有后台实例"></span>' : ""}
           <span class="tab-label">${escapeHtml(tab.label)}</span>
           <span class="tab-count">${tab.count}</span>
@@ -356,7 +364,7 @@
       .join("");
 
     const visible =
-      state.activeGroup === "" ? items : items.filter((tool) => groupOf(tool) === state.activeGroup);
+      state.activeGroup === "" ? items : items.filter((tool) => groupKey(tool) === state.activeGroup);
     countEl.textContent = `${visible.length} 个`;
     toolListEl.innerHTML = visible.length
       ? visible.map(renderCard).join("")
@@ -485,7 +493,8 @@
     const groups = new Set();
     for (const tool of state.tools) {
       const group = groupOf(tool);
-      if (group !== UNGROUPED) groups.add(group);
+      // 排掉 tab 哨兵 key，避免真实分组名与「未分组」标识冲突。
+      if (group !== UNGROUPED && group !== UNGROUPED_KEY) groups.add(group);
     }
     return [...groups].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { sensitivity: "base" }));
   }
@@ -750,9 +759,9 @@
       toolListEl.scrollTop = 0;
       savePreferences();
       // 切到具体分组时，若右侧详情还是别的组，就顺势选中该组第一个工具。
-      const outside = next !== "" && (!state.current || groupOf(state.current.tool) !== next);
+      const outside = next !== "" && (!state.current || groupKey(state.current.tool) !== next);
       const first = outside
-        ? sortTools(filteredTools()).find((tool) => groupOf(tool) === next)
+        ? sortTools(filteredTools()).find((tool) => groupKey(tool) === next)
         : null;
       if (first) selectTool(first.name).catch(reportError);
     });
