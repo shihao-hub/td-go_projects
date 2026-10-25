@@ -2,7 +2,7 @@
 
 本文件记录 clictl 的版本变更。格式参考 Keep a Changelog，版本号遵循语义化版本。
 
-## [Unreleased]
+## [2.1.0] - 2026-10-25
 
 ### Added
 
