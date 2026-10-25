@@ -163,13 +163,13 @@ def update_shortcut_icon(lnk_path: Path, icon_location: str) -> bool:
         return False
 
 
-EXCLUDED_LNK_KEYWORDS = ("manager", "tools", "helper", "updater", "uninstall", "setup")
+EXCLUDED_LNK_KEYWORDS = ("manager", "tools", "ide", "helper", "updater", "uninstall", "setup")
 
 
 def is_antigravity_shortcut(lnk: Path, target_exe: Path | None = None) -> bool:
-    """严格判断快捷方式是否归属于 Antigravity IDE。"""
+    """严格判断快捷方式是否归属于 Antigravity 官方主程序。"""
     stem_lower = lnk.stem.lower()
-    # 1. 过滤名字中包含 manager / tools / updater 等周边独立工具的快捷方式
+    # 1. 过滤名字中包含 manager / tools / ide / updater 等周边独立工具的快捷方式
     if any(k in stem_lower for k in EXCLUDED_LNK_KEYWORDS):
         return False
 
@@ -179,14 +179,18 @@ def is_antigravity_shortcut(lnk: Path, target_exe: Path | None = None) -> bool:
         return False
 
     actual_name_lower = actual_target.name.lower()
-    # 目标 EXE 文件名必须是 Antigravity 官方主程序
-    if actual_name_lower not in ("antigravity.exe", "antigravity ide.exe"):
+    # 目标 EXE 文件名必须是 Antigravity 官方主程序 (排除 Antigravity IDE.exe 等)
+    if actual_name_lower != "antigravity.exe":
         return False
 
-    # 若指定了当前注入的 target_exe，校验是否与 target_exe 同名
+    # 若指定了当前注入的 target_exe，严格校验绝对路径是否完全一致
     if target_exe:
-        if actual_name_lower != target_exe.name.lower():
-            return False
+        try:
+            if actual_target.resolve() != target_exe.resolve():
+                return False
+        except Exception:
+            if actual_name_lower != target_exe.name.lower():
+                return False
 
     return True
 
