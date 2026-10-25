@@ -253,7 +253,7 @@ func (s *Store) GetTool(name string) (Tool, error) {
 	return t, nil
 }
 
-// ListTools 列出工具，按 launch_count 降序、name 升序；status 空串 = 不过滤。
+// ListTools 列出工具，按 name 升序（稳定排序，不因启动次数变化而跳动）；status 空串 = 不过滤。
 // 每次调用先现场校验所有工具文件状态并回写，保证 --status 过滤基于实时结论。
 func (s *Store) ListTools(status string) ([]Tool, error) {
 	if err := s.syncAllStatuses(); err != nil {
@@ -266,7 +266,7 @@ func (s *Store) ListTools(status string) ([]Tool, error) {
 		q += ` WHERE t.status = ?`
 		args = append(args, status)
 	}
-	q += ` ORDER BY launch_count DESC, t.name ASC`
+	q += ` ORDER BY t.name ASC`
 
 	rows, err := s.db.Query(q, args...)
 	if err != nil {

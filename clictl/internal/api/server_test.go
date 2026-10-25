@@ -14,12 +14,13 @@ import (
 
 func newTestServer(t *testing.T) (http.Handler, *service.Service) {
 	t.Helper()
-	svc, err := service.OpenAt(filepath.Join(t.TempDir(), "clictl.db"))
+	dbPath := filepath.Join(t.TempDir(), "clictl.db")
+	svc, err := service.OpenAt(dbPath)
 	if err != nil {
 		t.Fatalf("打开测试库失败: %v", err)
 	}
 	t.Cleanup(func() { _ = svc.Close() })
-	return NewServer(svc, Meta{Channel: "dev", Version: "test"}).Handler(), svc
+	return NewServer(svc, Meta{Channel: "dev", Version: "test", DBPath: dbPath}).Handler(), svc
 }
 
 // fakeExe 造一个可注册的 .exe（内容不重要，add 只做路径与后缀校验）。
@@ -129,6 +130,29 @@ func TestMetaValidationSurfacesAsBadRequest(t *testing.T) {
 	}
 	if env.Error == nil || env.Error.Code != "meta_unknown_key" {
 		t.Fatalf("错误码 = %+v, want meta_unknown_key", env.Error)
+	}
+}
+
+func TestMetaAcceptsGroup(t *testing.T) {
+	h, _ := newTestServer(t)
+	exe := fakeExe(t)
+	do(t, h, http.MethodPost, "/api/tools", map[string]any{
+		"path": exe,
+		"name": "demo",
+		"meta": map[string]any{"group": "  Dev  "},
+	})
+
+	_, env := do(t, h, http.MethodGet, "/api/tools/demo", nil)
+	var info struct {
+		Tool struct {
+			Meta map[string]any `json:"meta"`
+		} `json:"tool"`
+	}
+	if err := json.Unmarshal(env.Data, &info); err != nil {
+		t.Fatalf("解析 info 失败: %v", err)
+	}
+	if info.Tool.Meta["group"] != "Dev" {
+		t.Fatalf("group 应裁剪空白后保存为 Dev，实际 %+v", info.Tool.Meta)
 	}
 }
 

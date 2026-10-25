@@ -3,6 +3,9 @@
 (function () {
   "use strict";
 
+  const UNGROUPED = "未分组";
+  const SORT_MODES = new Set(["name", "recent", "launches", "added"]);
+
   const state = {
     tools: [],
     running: new Map(), // name -> pids
@@ -10,6 +13,9 @@
     filter: "all",
     query: "",
     meta: null,
+    viewMode: "flat",
+    sortMode: "name",
+    collapsedGroups: new Set(),
   };
 
   const el = (id) => document.getElementById(id);
@@ -113,6 +119,79 @@
     console.error(err);
   }
 
+  // ---------- 视图偏好 ----------
+
+  async function loadPreferences() {
+    try {
+      const prefs = await request("/api/preferences");
+      if (prefs) {
+        state.viewMode = prefs.view_mode === "tree" ? "tree" : "flat";
+        state.sortMode = SORT_MODES.has(prefs.sort_mode) ? prefs.sort_mode : "name";
+        state.collapsedGroups = new Set(Array.isArray(prefs.collapsed_groups) ? prefs.collapsed_groups : []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    updateViewControls();
+  }
+
+  async function savePreferences() {
+    try {
+      await post("/api/preferences", {
+        view_mode: state.viewMode,
+        sort_mode: state.sortMode,
+        collapsed_groups: Array.from(state.collapsedGroups),
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  function updateViewControls() {
+    el("viewToggle")
+      .querySelectorAll(".view-btn")
+      .forEach((btn) => btn.classList.toggle("active", btn.dataset.view === state.viewMode));
+    el("sortSelect").value = state.sortMode;
+  }
+
+  // ---------- 分组与排序 ----------
+
+  function groupOf(tool) {
+    const group = tool.meta && typeof tool.meta.group === "string" ? tool.meta.group.trim() : "";
+    return group || UNGROUPED;
+  }
+
+  function compareName(a, b) {
+    return a.name.localeCompare(b.name, "zh-Hans-CN", { sensitivity: "base" });
+  }
+
+  function sortTools(list) {
+    const arr = [...list];
+    switch (state.sortMode) {
+      case "recent":
+        arr.sort((a, b) => {
+          if (!a.last_launch && !b.last_launch) return compareName(a, b);
+          if (!a.last_launch) return 1;
+          if (!b.last_launch) return -1;
+          if (a.last_launch === b.last_launch) return compareName(a, b);
+          return a.last_launch < b.last_launch ? 1 : -1;
+        });
+        break;
+      case "launches":
+        arr.sort((a, b) => (b.launch_count || 0) - (a.launch_count || 0) || compareName(a, b));
+        break;
+      case "added":
+        arr.sort((a, b) => {
+          if (a.added_at === b.added_at) return compareName(a, b);
+          return a.added_at < b.added_at ? 1 : -1;
+        });
+        break;
+      default:
+        arr.sort(compareName);
+    }
+    return arr;
+  }
+
   // ---------- 列表 ----------
 
   async function loadMeta() {
@@ -167,39 +246,98 @@
     });
   }
 
-  function renderList() {
-    const items = filteredTools();
-    countEl.textContent = `${items.length} 个`;
-    if (items.length === 0) {
-      toolListEl.innerHTML = `<div class="empty-hint">${state.tools.length === 0 ? "尚未注册任何工具" : "没有匹配的工具"}</div>`;
-      return;
-    }
-    toolListEl.innerHTML = items
-      .map((tool) => {
-        const running = state.running.has(tool.name);
-        const active = state.current && state.current.tool.name === tool.name ? "active" : "";
-        const invalid = tool.status === "invalid" ? "invalid" : "";
-        return `
-          <div class="tool-card ${active} ${invalid}" data-name="${escapeHtml(tool.name)}">
-            <div class="card-top">
-              ${running ? '<span class="pulse" title="后台运行中"></span>' : ""}
-              <span class="card-name">${escapeHtml(tool.name)}</span>
-              ${tool.status === "invalid" ? '<span class="tag-invalid">失效</span>' : ""}
-            </div>
-            <div class="card-path" title="${escapeHtml(tool.path)}">${escapeHtml(tool.path)}</div>
-            <div class="card-foot">
-              <span>${tool.launch_count || 0} 次启动</span>
-              <span>${tool.last_launch ? formatTime(tool.last_launch) : "从未启动"}</span>
-            </div>
-          </div>`;
-      })
-      .join("");
+  function renderCard(tool) {
+    const running = state.running.has(tool.name);
+    const active = state.current && state.current.tool.name === tool.name ? "active" : "";
+    const invalid = tool.status === "invalid" ? "invalid" : "";
+    const group = groupOf(tool);
+    const groupTag =
+      group !== UNGROUPED ? `<span class="card-group" title="分组">${escapeHtml(group)}</span>` : "";
+    return `
+      <div class="tool-card ${active} ${invalid}" data-name="${escapeHtml(tool.name)}">
+        <div class="card-top">
+          ${running ? '<span class="pulse" title="后台运行中"></span>' : ""}
+          <span class="card-name">${escapeHtml(tool.name)}</span>
+          ${groupTag}
+          ${tool.status === "invalid" ? '<span class="tag-invalid">失效</span>' : ""}
+        </div>
+        <div class="card-path" title="${escapeHtml(tool.path)}">${escapeHtml(tool.path)}</div>
+        <div class="card-foot">
+          <span>${tool.launch_count || 0} 次启动</span>
+          <span>${tool.last_launch ? formatTime(tool.last_launch) : "从未启动"}</span>
+        </div>
+      </div>`;
+  }
 
+  function bindCards() {
     toolListEl.querySelectorAll(".tool-card").forEach((card) => {
       card.addEventListener("click", () => {
         selectTool(card.dataset.name).catch(reportError);
       });
     });
+  }
+
+  function renderList() {
+    const items = sortTools(filteredTools());
+    countEl.textContent = `${items.length} 个`;
+    if (items.length === 0) {
+      toolListEl.innerHTML = `<div class="empty-hint">${state.tools.length === 0 ? "尚未注册任何工具" : "没有匹配的工具"}</div>`;
+      return;
+    }
+    if (state.viewMode === "tree") {
+      renderTree(items);
+      return;
+    }
+    toolListEl.innerHTML = items.map(renderCard).join("");
+    bindCards();
+  }
+
+  function renderTree(items) {
+    const groups = new Map();
+    for (const tool of items) {
+      const name = groupOf(tool);
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(tool);
+    }
+    const names = [...groups.keys()].sort((a, b) => {
+      if (a === UNGROUPED) return 1;
+      if (b === UNGROUPED) return -1;
+      return a.localeCompare(b, "zh-Hans-CN", { sensitivity: "base" });
+    });
+    toolListEl.innerHTML = names
+      .map((name) => {
+        const groupItems = groups.get(name);
+        const collapsed = state.collapsedGroups.has(name);
+        const runningCount = groupItems.filter((tool) => state.running.has(tool.name)).length;
+        return `
+          <div class="tree-group ${collapsed ? "collapsed" : ""}">
+            <div class="tree-group-header" data-group-toggle="${escapeHtml(name)}">
+              <span class="tree-arrow">▾</span>
+              <span class="tree-dot"></span>
+              <span class="tree-title">${escapeHtml(name)}</span>
+              ${runningCount ? `<span class="tree-running">${runningCount} 运行中</span>` : ""}
+              <span class="tree-count">${groupItems.length}</span>
+            </div>
+            <div class="tree-group-items">${groupItems.map(renderCard).join("")}</div>
+          </div>`;
+      })
+      .join("");
+
+    toolListEl.querySelectorAll("[data-group-toggle]").forEach((header) => {
+      header.addEventListener("click", () => {
+        const name = header.dataset.groupToggle;
+        const groupEl = header.closest(".tree-group");
+        if (state.collapsedGroups.has(name)) {
+          state.collapsedGroups.delete(name);
+          groupEl.classList.remove("collapsed");
+        } else {
+          state.collapsedGroups.add(name);
+          groupEl.classList.add("collapsed");
+        }
+        savePreferences();
+      });
+    });
+    bindCards();
   }
 
   // ---------- 详情 ----------
@@ -242,6 +380,11 @@
     el("statSize").textContent = formatBytes(tool.size_bytes);
     el("statPids").textContent = running && info.running.pids.length ? info.running.pids.join(", ") : "无";
     el("detailPath").textContent = tool.path;
+
+    const groupChip = el("detailGroupChip");
+    const group = groupOf(tool);
+    groupChip.textContent = group;
+    groupChip.classList.toggle("unset", group === UNGROUPED);
 
     let metaText = "（无）";
     if (tool.meta && Object.keys(tool.meta).length > 0) {
@@ -306,6 +449,74 @@
         } else {
           toast(`已停止 ${name}（${(res.killed || []).length} 个实例）`);
         }
+        await loadTools();
+      } catch (err) {
+        reportError(err);
+      }
+    });
+  }
+
+  function existingGroups() {
+    const groups = new Set();
+    for (const tool of state.tools) {
+      const group = groupOf(tool);
+      if (group !== UNGROUPED) groups.add(group);
+    }
+    return [...groups].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { sensitivity: "base" }));
+  }
+
+  function renderGroupOptions() {
+    const groups = existingGroups();
+    el("groupOptions").innerHTML = groups
+      .map((group) => `<option value="${escapeHtml(group)}"></option>`)
+      .join("");
+    const chips = [`<button type="button" class="group-chip-option" data-group="">未分组</button>`].concat(
+      groups.map(
+        (group) =>
+          `<button type="button" class="group-chip-option" data-group="${escapeHtml(group)}">${escapeHtml(group)}</button>`
+      )
+    );
+    el("groupChips").innerHTML = chips.join("");
+    el("groupChips")
+      .querySelectorAll(".group-chip-option")
+      .forEach((chip) => {
+        chip.addEventListener("click", () => {
+          el("groupDialogInput").value = chip.dataset.group || "";
+          el("groupDialogInput").focus();
+        });
+      });
+  }
+
+  function openGroupDialog() {
+    if (!state.current) return;
+    renderGroupOptions();
+    const group = groupOf(state.current.tool);
+    el("groupDialogInput").value = group === UNGROUPED ? "" : group;
+    el("groupDialog").showModal();
+    el("groupDialogInput").focus();
+  }
+
+  async function submitGroup(event) {
+    event.preventDefault();
+    if (!state.current) return;
+    const name = state.current.tool.name;
+    const group = el("groupDialogInput").value.trim();
+    const meta = Object.assign({}, state.current.tool.meta || {});
+    if (group) {
+      meta.group = group;
+    } else {
+      delete meta.group;
+    }
+    await withBusy(event.submitter, async () => {
+      try {
+        await request(`/api/tools/${encodeURIComponent(name)}/meta`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ meta }),
+        });
+        el("groupDialog").close();
+        toast(group ? `已归入分组「${group}」` : "已移出分组");
+        await selectTool(name);
         await loadTools();
       } catch (err) {
         reportError(err);
@@ -414,6 +625,15 @@
       }
     }
 
+    const group = el("addGroup").value.trim();
+    if (group) {
+      if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+        meta.group = group;
+      } else {
+        meta = { group };
+      }
+    }
+
     try {
       const tool = await post("/api/tools", {
         path,
@@ -486,6 +706,26 @@
       renderList();
     });
 
+    el("viewToggle").addEventListener("click", (event) => {
+      const btn = event.target.closest(".view-btn");
+      if (!btn) return;
+      state.viewMode = btn.dataset.view === "tree" ? "tree" : "flat";
+      updateViewControls();
+      renderList();
+      savePreferences();
+    });
+
+    el("sortSelect").addEventListener("change", () => {
+      const value = el("sortSelect").value;
+      state.sortMode = SORT_MODES.has(value) ? value : "name";
+      renderList();
+      savePreferences();
+    });
+
+    el("detailGroupChip").addEventListener("click", openGroupDialog);
+    el("groupCancel").addEventListener("click", () => el("groupDialog").close());
+    el("groupForm").addEventListener("submit", submitGroup);
+
     el("startBtn").addEventListener("click", (event) => startTool([], event.currentTarget, primaryMode()));
     el("startAltBtn").addEventListener("click", (event) => startTool([], event.currentTarget, "detached"));
     el("startArgsBtn").addEventListener("click", (event) =>
@@ -524,6 +764,7 @@
 
     el("addBtn").addEventListener("click", () => {
       el("addForm").reset();
+      renderGroupOptions();
       el("addDialog").showModal();
     });
     el("addCancel").addEventListener("click", () => el("addDialog").close());
@@ -552,6 +793,7 @@
 
   window.addEventListener("DOMContentLoaded", async () => {
     bind();
+    await loadPreferences();
     await loadMeta();
     await loadTools();
     setInterval(() => {

@@ -45,6 +45,8 @@ func NewServer(svc *service.Service, meta Meta) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/meta", s.handleMeta)
+	mux.HandleFunc("GET /api/preferences", s.handleGetPreferences)
+	mux.HandleFunc("POST /api/preferences", s.handlePostPreferences)
 	mux.HandleFunc("GET /api/tools", s.handleTools)
 	mux.HandleFunc("POST /api/tools", s.handleAdd)
 	mux.HandleFunc("GET /api/tools/{name}", s.handleInfo)

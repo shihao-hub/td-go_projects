@@ -171,7 +171,7 @@ func EmitHelp() {
 			{"cmd": "add <path> [--name N] [--desc D] [--meta JSON]", "desc": "注册 exe；name 默认=文件名去 .exe 小写化"},
 			{"cmd": "rm <name>", "desc": "删除注册（级联删其 launches）"},
 			{"cmd": "set <name> --meta JSON", "desc": "整体替换 meta（传 {} 清空）"},
-			{"cmd": "list [--status active|invalid] [--running]", "desc": "全部工具，launch_count 降序；--running 只看后台活实例"},
+			{"cmd": "list [--status active|invalid] [--running]", "desc": "全部工具，名称升序；--running 只看后台活实例"},
 			{"cmd": "info <name>", "desc": "详情 + 最近 10 条启动 + 累计耗时 + 后台运行状态"},
 			{"cmd": "run <name> [args...]", "desc": "前台透传启动（要看输出、等结果的用它）；退出码=子进程码，未注册/失效=127；未注册时附相似名 suggestions"},
 			{"cmd": "start [--console] <name> [args...]", "desc": "启动并立即返回 pid；--console 为命令行工具开独立控制台窗口，缺省后台分离（GUI/托盘/服务类）；未注册/失效=127"},

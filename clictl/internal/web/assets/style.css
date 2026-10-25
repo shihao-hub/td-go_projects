@@ -194,6 +194,55 @@ body {
 
 .count { font-size: 11.5px; color: var(--muted); }
 
+.list-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.view-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.view-btn {
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.view-btn:hover { color: var(--text); }
+
+.view-btn.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.sort-select {
+  padding: 5px 8px;
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: none;
+  cursor: pointer;
+}
+
+.sort-select:focus { border-color: var(--accent); }
+
+
 .tool-list {
   flex: 1;
   overflow-y: auto;
@@ -252,6 +301,86 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
+
+.card-group {
+  flex: 0 0 auto;
+  max-width: 110px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 树状分组 ---------- */
+
+.tree-group { margin-bottom: 10px; }
+.tree-group:last-child { margin-bottom: 0; }
+
+.tree-group-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree-group-header:hover { background: var(--panel-2); }
+
+.tree-arrow {
+  color: var(--muted);
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.tree-group.collapsed .tree-arrow { transform: rotate(-90deg); }
+
+.tree-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.tree-title {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-running {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--live);
+}
+
+.tree-count {
+  margin-left: auto;
+  font: 11px var(--mono);
+  color: var(--muted);
+}
+
+.tree-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 0 10px;
+}
+
+.tree-group.collapsed .tree-group-items { display: none; }
+
+.tree-group .card-group { display: none; }
+
 
 .pulse {
   width: 7px;
@@ -384,6 +513,52 @@ body {
 }
 
 .run-row input:focus { border-color: var(--accent); }
+
+.group-chip {
+  max-width: 180px;
+  padding: 2px 8px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid rgba(240, 160, 40, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.group-chip::after { content: " ✎"; opacity: 0.7; }
+
+.group-chip:hover { border-color: var(--accent); }
+
+.group-chip.unset {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--line-strong);
+}
+
+.group-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.group-chip-option {
+  padding: 3px 9px;
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.group-chip-option:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
 
 .stat-grid {
   display: grid;

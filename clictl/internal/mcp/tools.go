@@ -95,12 +95,12 @@ type addIn struct {
 	Path string         `json:"path" jsonschema:"exe 文件路径；须为 .exe 后缀且文件存在"`
 	Name string         `json:"name,omitempty" jsonschema:"调用名；缺省为文件名去 .exe 后小写化"`
 	Desc string         `json:"desc,omitempty" jsonschema:"描述"`
-	Meta map[string]any `json:"meta,omitempty" jsonschema:"扩展属性对象；仅允许 source 与 tags 两个 key，传 {} 等价于不设置"`
+	Meta map[string]any `json:"meta,omitempty" jsonschema:"扩展属性对象；仅允许 source、tags、group 三个 key，传 {} 等价于不设置"`
 }
 
 type setIn struct {
 	Name string         `json:"name" jsonschema:"工具调用名（大小写不敏感）"`
-	Meta map[string]any `json:"meta" jsonschema:"整体替换后的扩展属性对象；传 {} 清空；仅允许 source 与 tags"`
+	Meta map[string]any `json:"meta" jsonschema:"整体替换后的扩展属性对象；传 {} 清空；仅允许 source、tags、group"`
 }
 
 type startIn struct {
@@ -140,7 +140,7 @@ func registerTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "clictl.list",
-		Description: "列出已注册的工具（按启动次数降序）；可选按状态过滤或只看有后台活实例的",
+		Description: "列出已注册的工具（按名称升序）；可选按状态过滤或只看有后台活实例的",
 		Annotations: ro("工具列表"),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in listIn) (*mcp.CallToolResult, listOut, error) {
 		svc, err := mustSvc()
@@ -217,7 +217,7 @@ func registerTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "clictl.set",
-		Description: "整体替换工具的扩展属性 meta（传 {} 清空）；仅允许 source 与 tags 两个 key",
+		Description: "整体替换工具的扩展属性 meta（传 {} 清空）；仅允许 source、tags、group 三个 key",
 		Annotations: &mcp.ToolAnnotations{Title: "更新 meta", DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in setIn) (*mcp.CallToolResult, toolView, error) {
 		svc, err := mustSvc()

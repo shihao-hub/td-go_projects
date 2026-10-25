@@ -14,6 +14,7 @@ const (
 	metaSourceMaxLen = 64   // source 最大字节数
 	metaTagsMaxCount = 8    // tags 最多项数
 	metaTagMaxLen    = 32   // 单个 tag 最大字节数
+	metaGroupMaxLen  = 32   // 分组名最大字节数
 )
 
 // MetaError meta 校验错误，Code 即 JSON 错误码：
@@ -28,7 +29,8 @@ func (e *MetaError) Error() string { return e.Message }
 // ValidateMeta 校验并规范化 meta JSON。
 // 规则：
 //   - 空串 / null / {} → 存储 NULL（返回 nil）
-//   - 必须是 JSON 对象；key 白名单：source（string ≤64B）、tags（[]string ≤8 项、每项 ≤32B）
+//   - 必须是 JSON 对象；key 白名单：source（string ≤64B）、tags（[]string ≤8 项、每项 ≤32B）、
+//     group（string ≤32B，首尾空白裁剪）
 //   - 未知 key → meta_unknown_key；类型/长度不符 → meta_invalid；规范化后 >4KB → meta_too_large
 //   - tags 去重后小写存储并排序，保证同输入同存储
 func ValidateMeta(raw []byte) (json.RawMessage, error) {
@@ -78,8 +80,21 @@ func ValidateMeta(raw []byte) (json.RawMessage, error) {
 				sort.Strings(dedup)
 				out["tags"] = dedup
 			}
+		case "group":
+			var s string
+			if err := json.Unmarshal(val, &s); err != nil {
+				return nil, &MetaError{Code: "meta_invalid", Message: "group 必须是字符串"}
+			}
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if len(s) > metaGroupMaxLen {
+				return nil, &MetaError{Code: "meta_invalid", Message: fmt.Sprintf("group 超长（≤%d 字节）", metaGroupMaxLen)}
+			}
+			out["group"] = s
 		default:
-			return nil, &MetaError{Code: "meta_unknown_key", Message: fmt.Sprintf("未知的 meta key: %q（白名单: source, tags）", key)}
+			return nil, &MetaError{Code: "meta_unknown_key", Message: fmt.Sprintf("未知的 meta key: %q（白名单: source, tags, group）", key)}
 		}
 	}
 
