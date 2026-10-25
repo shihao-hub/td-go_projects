@@ -302,6 +302,7 @@
       return;
     }
     el("groupTabs").hidden = true;
+    el("groupHint").hidden = true;
     countEl.textContent = `${items.length} 个`;
     if (items.length === 0) {
       toolListEl.innerHTML = `<div class="empty-hint">${state.tools.length === 0 ? "尚未注册任何工具" : "没有匹配的工具"}</div>`;
@@ -342,21 +343,17 @@
 
     const tabsEl = el("groupTabs");
     tabsEl.hidden = false;
-    const hint =
-      groups.length === 0
-        ? '<span class="tabs-hint">还没有分组：卡片悬停点「分组」，或点详情标题旁的「设置分组」</span>'
-        : "";
-    tabsEl.innerHTML =
-      tabs
-        .map(
-          (tab) => `
+    el("groupHint").hidden = groups.length > 0;
+    tabsEl.innerHTML = tabs
+      .map(
+        (tab) => `
         <button type="button" class="group-tab ${tab.name === state.activeGroup ? "active" : ""}" data-group="${escapeHtml(tab.name)}" role="tab" aria-selected="${tab.name === state.activeGroup}">
           ${tab.running ? '<span class="tab-pulse" title="该组有后台实例"></span>' : ""}
           <span class="tab-label">${escapeHtml(tab.label)}</span>
           <span class="tab-count">${tab.count}</span>
         </button>`
-        )
-        .join("") + hint;
+      )
+      .join("");
 
     const visible =
       state.activeGroup === "" ? items : items.filter((tool) => groupOf(tool) === state.activeGroup);
