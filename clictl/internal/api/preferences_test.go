@@ -29,27 +29,39 @@ func TestPreferencesDefaults(t *testing.T) {
 	if prefs.ViewMode != "flat" || prefs.SortMode != "name" {
 		t.Fatalf("默认偏好异常: %+v", prefs)
 	}
-	if prefs.CollapsedGroups == nil || len(prefs.CollapsedGroups) != 0 {
-		t.Fatalf("默认折叠组应为空数组: %+v", prefs)
+	if prefs.ActiveGroup != "" {
+		t.Fatalf("默认分组应为全部: %+v", prefs)
 	}
 }
 
 func TestPreferencesPersistAndNormalize(t *testing.T) {
 	h, _ := newTestServer(t)
 	rec, env := do(t, h, http.MethodPost, "/api/preferences", map[string]any{
-		"view_mode":        "tree",
-		"sort_mode":        "recent",
-		"collapsed_groups": []string{"dev", "", "dev", "release"},
+		"view_mode":    "tabs",
+		"sort_mode":    "recent",
+		"active_group": "  dev  ",
 	})
 	if rec.Code != http.StatusOK || !env.OK {
 		t.Fatalf("保存偏好失败: HTTP %d, %s", rec.Code, rec.Body.String())
 	}
 	prefs := getPrefs(t, h)
-	if prefs.ViewMode != "tree" || prefs.SortMode != "recent" {
+	if prefs.ViewMode != "tabs" || prefs.SortMode != "recent" {
 		t.Fatalf("偏好未持久化: %+v", prefs)
 	}
-	if len(prefs.CollapsedGroups) != 2 || prefs.CollapsedGroups[0] != "dev" || prefs.CollapsedGroups[1] != "release" {
-		t.Fatalf("折叠组未去重/过滤: %+v", prefs.CollapsedGroups)
+	if prefs.ActiveGroup != "dev" {
+		t.Fatalf("分组名未裁剪空白: %q", prefs.ActiveGroup)
+	}
+}
+
+// 旧版树状视图已由分组 tab 取代，读旧偏好时应静默迁移。
+func TestPreferencesLegacyTreeMigratesToTabs(t *testing.T) {
+	h, _ := newTestServer(t)
+	_, env := do(t, h, http.MethodPost, "/api/preferences", map[string]any{"view_mode": "tree"})
+	if !env.OK {
+		t.Fatalf("保存偏好失败: %s", string(env.Data))
+	}
+	if prefs := getPrefs(t, h); prefs.ViewMode != "tabs" {
+		t.Fatalf("view_mode=tree 应迁移为 tabs: %+v", prefs)
 	}
 }
 
@@ -78,7 +90,7 @@ func TestPreferencesFileLivesBesideDB(t *testing.T) {
 	t.Cleanup(func() { _ = svc.Close() })
 	h := NewServer(svc, Meta{DBPath: dbPath}).Handler()
 
-	if _, env := do(t, h, http.MethodPost, "/api/preferences", map[string]any{"view_mode": "tree"}); !env.OK {
+	if _, env := do(t, h, http.MethodPost, "/api/preferences", map[string]any{"view_mode": "tabs"}); !env.OK {
 		t.Fatalf("保存偏好失败: %s", string(env.Data))
 	}
 	if _, err := os.Stat(filepath.Join(dir, uiPreferencesFileName)); err != nil {

@@ -317,69 +317,64 @@ body {
   white-space: nowrap;
 }
 
-/* ---------- 树状分组 ---------- */
+/* ---------- 分组标签页 ---------- */
 
-.tree-group { margin-bottom: 10px; }
-.tree-group:last-child { margin-bottom: 0; }
-
-.tree-group-header {
+.group-tabs {
   display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: thin;
+}
+
+.group-tabs[hidden] { display: none; }
+
+.group-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 4px;
-  border-radius: 6px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.tree-group-header:hover { background: var(--panel-2); }
-
-.tree-arrow {
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11.5px;
   color: var(--muted);
-  font-size: 10px;
-  transition: transform 0.15s;
-}
-
-.tree-group.collapsed .tree-arrow { transform: rotate(-90deg); }
-
-.tree-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--line-strong);
-}
-
-.tree-title {
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
   white-space: nowrap;
 }
 
-.tree-running {
-  flex: 0 0 auto;
-  font-size: 10.5px;
-  color: var(--live);
+.group-tab:hover { color: var(--text); background: var(--panel-2); }
+
+.group-tab.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: rgba(240, 160, 40, 0.3);
 }
 
-.tree-count {
-  margin-left: auto;
-  font: 11px var(--mono);
+.tab-label {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-count {
+  font: 10.5px var(--mono);
   color: var(--muted);
 }
 
-.tree-group-items {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 4px 0 0 10px;
+.group-tab.active .tab-count { color: var(--accent); }
+
+.tab-pulse {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
 }
 
-.tree-group.collapsed .tree-group-items { display: none; }
-
-.tree-group .card-group { display: none; }
+.tool-list.grouped .card-group { display: none; }
 
 
 .pulse {

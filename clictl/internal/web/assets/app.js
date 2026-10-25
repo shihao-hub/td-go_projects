@@ -15,7 +15,7 @@
     meta: null,
     viewMode: "flat",
     sortMode: "name",
-    collapsedGroups: new Set(),
+    activeGroup: "",
   };
 
   const el = (id) => document.getElementById(id);
@@ -121,13 +121,16 @@
 
   // ---------- 视图偏好 ----------
 
+  let prefsTimer = null;
+
   async function loadPreferences() {
     try {
       const prefs = await request("/api/preferences");
       if (prefs) {
-        state.viewMode = prefs.view_mode === "tree" ? "tree" : "flat";
+        const mode = prefs.view_mode === "tabs" || prefs.view_mode === "tree" ? "tabs" : "flat";
+        state.viewMode = mode;
         state.sortMode = SORT_MODES.has(prefs.sort_mode) ? prefs.sort_mode : "name";
-        state.collapsedGroups = new Set(Array.isArray(prefs.collapsed_groups) ? prefs.collapsed_groups : []);
+        state.activeGroup = typeof prefs.active_group === "string" ? prefs.active_group.trim() : "";
       }
     } catch (err) {
       console.error(err);
@@ -135,16 +138,20 @@
     updateViewControls();
   }
 
-  async function savePreferences() {
-    try {
-      await post("/api/preferences", {
-        view_mode: state.viewMode,
-        sort_mode: state.sortMode,
-        collapsed_groups: Array.from(state.collapsedGroups),
-      });
-    } catch (err) {
-      console.error(err);
-    }
+  // 连续切换视图/标签时合并写盘，避免每次都落盘一份 JSON。
+  function savePreferences() {
+    clearTimeout(prefsTimer);
+    prefsTimer = setTimeout(async () => {
+      try {
+        await post("/api/preferences", {
+          view_mode: state.viewMode,
+          sort_mode: state.sortMode,
+          active_group: state.activeGroup,
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }, 250);
   }
 
   function updateViewControls() {
@@ -279,64 +286,69 @@
 
   function renderList() {
     const items = sortTools(filteredTools());
+    toolListEl.classList.toggle("grouped", state.viewMode === "tabs");
+    if (state.viewMode === "tabs") {
+      renderTabs(items);
+      return;
+    }
+    el("groupTabs").hidden = true;
     countEl.textContent = `${items.length} 个`;
     if (items.length === 0) {
       toolListEl.innerHTML = `<div class="empty-hint">${state.tools.length === 0 ? "尚未注册任何工具" : "没有匹配的工具"}</div>`;
-      return;
-    }
-    if (state.viewMode === "tree") {
-      renderTree(items);
       return;
     }
     toolListEl.innerHTML = items.map(renderCard).join("");
     bindCards();
   }
 
-  function renderTree(items) {
-    const groups = new Map();
+  // 分组 tab：横向标签页切换，替代垂直折叠树，工具多时不再需要往下滚。
+  function renderTabs(items) {
+    const groups = existingGroups();
+    if (state.activeGroup && groups.indexOf(state.activeGroup) === -1) {
+      state.activeGroup = "";
+      savePreferences();
+    }
+
+    const counts = new Map();
+    const runningGroups = new Set();
     for (const tool of items) {
       const name = groupOf(tool);
-      if (!groups.has(name)) groups.set(name, []);
-      groups.get(name).push(tool);
+      counts.set(name, (counts.get(name) || 0) + 1);
+      if (state.running.has(tool.name)) runningGroups.add(name);
     }
-    const names = [...groups.keys()].sort((a, b) => {
-      if (a === UNGROUPED) return 1;
-      if (b === UNGROUPED) return -1;
-      return a.localeCompare(b, "zh-Hans-CN", { sensitivity: "base" });
-    });
-    toolListEl.innerHTML = names
-      .map((name) => {
-        const groupItems = groups.get(name);
-        const collapsed = state.collapsedGroups.has(name);
-        const runningCount = groupItems.filter((tool) => state.running.has(tool.name)).length;
-        return `
-          <div class="tree-group ${collapsed ? "collapsed" : ""}">
-            <div class="tree-group-header" data-group-toggle="${escapeHtml(name)}">
-              <span class="tree-arrow">▾</span>
-              <span class="tree-dot"></span>
-              <span class="tree-title">${escapeHtml(name)}</span>
-              ${runningCount ? `<span class="tree-running">${runningCount} 运行中</span>` : ""}
-              <span class="tree-count">${groupItems.length}</span>
-            </div>
-            <div class="tree-group-items">${groupItems.map(renderCard).join("")}</div>
-          </div>`;
-      })
+
+    const tabs = [{ name: "", label: "全部", count: items.length, running: runningGroups.has(UNGROUPED) }];
+    if (groups.length > 0) {
+      for (const name of groups) {
+        tabs.push({ name, label: name, count: counts.get(name) || 0, running: runningGroups.has(name) });
+      }
+      tabs.push({
+        name: UNGROUPED,
+        label: UNGROUPED,
+        count: counts.get(UNGROUPED) || 0,
+        running: runningGroups.has(UNGROUPED),
+      });
+    }
+
+    const tabsEl = el("groupTabs");
+    tabsEl.hidden = false;
+    tabsEl.innerHTML = tabs
+      .map(
+        (tab) => `
+        <button type="button" class="group-tab ${tab.name === state.activeGroup ? "active" : ""}" data-group="${escapeHtml(tab.name)}" role="tab" aria-selected="${tab.name === state.activeGroup}">
+          ${tab.running ? '<span class="tab-pulse" title="该组有后台实例"></span>' : ""}
+          <span class="tab-label">${escapeHtml(tab.label)}</span>
+          <span class="tab-count">${tab.count}</span>
+        </button>`
+      )
       .join("");
 
-    toolListEl.querySelectorAll("[data-group-toggle]").forEach((header) => {
-      header.addEventListener("click", () => {
-        const name = header.dataset.groupToggle;
-        const groupEl = header.closest(".tree-group");
-        if (state.collapsedGroups.has(name)) {
-          state.collapsedGroups.delete(name);
-          groupEl.classList.remove("collapsed");
-        } else {
-          state.collapsedGroups.add(name);
-          groupEl.classList.add("collapsed");
-        }
-        savePreferences();
-      });
-    });
+    const visible =
+      state.activeGroup === "" ? items : items.filter((tool) => groupOf(tool) === state.activeGroup);
+    countEl.textContent = `${visible.length} 个`;
+    toolListEl.innerHTML = visible.length
+      ? visible.map(renderCard).join("")
+      : '<div class="empty-hint">该分组下没有匹配的工具</div>';
     bindCards();
   }
 
@@ -709,10 +721,27 @@
     el("viewToggle").addEventListener("click", (event) => {
       const btn = event.target.closest(".view-btn");
       if (!btn) return;
-      state.viewMode = btn.dataset.view === "tree" ? "tree" : "flat";
+      state.viewMode = btn.dataset.view === "tabs" ? "tabs" : "flat";
       updateViewControls();
       renderList();
       savePreferences();
+    });
+
+    el("groupTabs").addEventListener("click", (event) => {
+      const tab = event.target.closest(".group-tab");
+      if (!tab) return;
+      const next = tab.dataset.group || "";
+      if (next === state.activeGroup) return;
+      state.activeGroup = next;
+      renderList();
+      toolListEl.scrollTop = 0;
+      savePreferences();
+      // 切到具体分组时，若右侧详情还是别的组，就顺势选中该组第一个工具。
+      const outside = next !== "" && (!state.current || groupOf(state.current.tool) !== next);
+      const first = outside
+        ? sortTools(filteredTools()).find((tool) => groupOf(tool) === next)
+        : null;
+      if (first) selectTool(first.name).catch(reportError);
     });
 
     el("sortSelect").addEventListener("change", () => {

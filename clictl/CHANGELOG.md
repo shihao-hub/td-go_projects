@@ -6,9 +6,9 @@
 
 ### Added
 
-- WebUI 分组：`meta.group`（≤32 字节，首尾空白裁剪），注册弹窗与详情标题旁分组徽标均可设置（徽标点击弹窗，支持选择已有分组或新建）；树状视图按组折叠并显示数量/运行中提示
-- WebUI 视图切换：平铺（默认）/ 树状，平铺按钮在前；排序选择（名称 / 最近启动 / 启动次数 / 添加时间）
-- UI 偏好服务端持久化：`/api/preferences` + `<通道目录>\ui_preferences.json`，规避 GUI 随机端口导致 localStorage origin 漂移
+- WebUI 分组：`meta.group`（≤32 字节，首尾空白裁剪），注册弹窗与详情标题旁分组徽标均可设置（徽标点击弹窗，支持选择已有分组或新建）；分组视图以标签页切换，标签显示数量与运行中提示
+- WebUI 视图切换：平铺（默认）/ 分组（tab 切换），平铺按钮在前；排序选择（名称 / 最近启动 / 启动次数 / 添加时间）
+- UI 偏好服务端持久化：`/api/preferences` + `<通道目录>\ui_preferences.json`（视图 / 排序 / 当前分组），规避 GUI 随机端口导致 localStorage origin 漂移
 
 ### Changed
 

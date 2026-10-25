@@ -48,7 +48,7 @@
         <div class="list-controls">
           <div class="view-toggle" id="viewToggle">
             <button type="button" class="view-btn active" data-view="flat" title="不分组平铺显示">平铺</button>
-            <button type="button" class="view-btn" data-view="tree" title="按 meta.group 树状分组">树状</button>
+            <button type="button" class="view-btn" data-view="tabs" title="按 meta.group 分组，以标签页切换">分组</button>
           </div>
           <select id="sortSelect" class="sort-select" title="排序方式">
             <option value="name">名称</option>
@@ -57,6 +57,7 @@
             <option value="added">添加时间</option>
           </select>
         </div>
+        <div class="group-tabs" id="groupTabs" hidden></div>
         <div class="tool-list" id="toolList"></div>
       </aside>
 
