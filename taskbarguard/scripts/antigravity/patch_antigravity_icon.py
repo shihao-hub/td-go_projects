@@ -120,6 +120,29 @@ def apply_icon_to_file(rcedit_exe: Path, target_exe: Path, ico_path: Path, max_r
     return False
 
 
+def get_shortcut_target(lnk_path: Path) -> Path | None:
+    """使用 PowerShell WScript.Shell 读取快捷方式的 TargetPath。"""
+    try:
+        ps_cmd = (
+            f"$sh = New-Object -ComObject WScript.Shell; "
+            f"$t = $sh.CreateShortcut('{str(lnk_path)}'); "
+            f"[Console]::WriteLine($t.TargetPath)"
+        )
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode == 0:
+            target_str = res.stdout.strip()
+            if target_str:
+                return Path(target_str)
+    except Exception:
+        pass
+    return None
+
+
 def update_shortcut_icon(lnk_path: Path, icon_location: str) -> bool:
     """使用 PowerShell WScript.Shell 穿透修改快捷方式的 IconLocation。"""
     try:
@@ -140,7 +163,39 @@ def update_shortcut_icon(lnk_path: Path, icon_location: str) -> bool:
         return False
 
 
-def refresh_windows_icon_cache(icon_file_for_shortcuts: Path | None = None, restart_explorer: bool = False) -> None:
+EXCLUDED_LNK_KEYWORDS = ("manager", "tools", "helper", "updater", "uninstall", "setup")
+
+
+def is_antigravity_shortcut(lnk: Path, target_exe: Path | None = None) -> bool:
+    """严格判断快捷方式是否归属于 Antigravity IDE。"""
+    stem_lower = lnk.stem.lower()
+    # 1. 过滤名字中包含 manager / tools / updater 等周边独立工具的快捷方式
+    if any(k in stem_lower for k in EXCLUDED_LNK_KEYWORDS):
+        return False
+
+    # 2. 读取快捷方式的实际 TargetPath
+    actual_target = get_shortcut_target(lnk)
+    if not actual_target:
+        return False
+
+    actual_name_lower = actual_target.name.lower()
+    # 目标 EXE 文件名必须是 Antigravity 官方主程序
+    if actual_name_lower not in ("antigravity.exe", "antigravity ide.exe"):
+        return False
+
+    # 若指定了当前注入的 target_exe，校验是否与 target_exe 同名
+    if target_exe:
+        if actual_name_lower != target_exe.name.lower():
+            return False
+
+    return True
+
+
+def refresh_windows_icon_cache(
+    target_exe: Path | None = None,
+    icon_file_for_shortcuts: Path | None = None,
+    restart_explorer: bool = False,
+) -> None:
     print("[*] 正在穿透刷新 Windows 任务栏钉选项与快捷方式...")
 
     dirs_to_check = [
@@ -158,6 +213,8 @@ def refresh_windows_icon_cache(icon_file_for_shortcuts: Path | None = None, rest
         for pat in ["*Antigravity*.lnk", "*antigravity*.lnk"]:
             for lnk in d.rglob(pat):
                 try:
+                    if not is_antigravity_shortcut(lnk, target_exe):
+                        continue
                     if icon_file_for_shortcuts and icon_file_for_shortcuts.is_file():
                         update_shortcut_icon(lnk, f"{str(icon_file_for_shortcuts.resolve())},0")
                     os.utime(lnk, None)
@@ -257,7 +314,7 @@ def main() -> int:
             shutil.copy2(bak_path, exe_path)
             print(f"[+] 已恢复官方原始 EXE: {exe_path}")
 
-        refresh_windows_icon_cache(icon_file_for_shortcuts=exe_path, restart_explorer=args.restart_explorer)
+        refresh_windows_icon_cache(target_exe=exe_path, icon_file_for_shortcuts=exe_path, restart_explorer=args.restart_explorer)
         print("[SUCCESS] Antigravity 已成功还原为官方图标！")
         return 0
 
@@ -321,7 +378,7 @@ def main() -> int:
         print(f"[+] 原子热替换完成！新版可执行文件已就位，原有进程不受任何中断影响。")
 
     # 5. 穿透刷新任务栏与系统图标
-    refresh_windows_icon_cache(icon_file_for_shortcuts=target_ico, restart_explorer=args.restart_explorer)
+    refresh_windows_icon_cache(target_exe=exe_path, icon_file_for_shortcuts=target_ico, restart_explorer=args.restart_explorer)
 
     print("\n" + "=" * 60)
     print("[SUCCESS] Antigravity 任务栏与外壳图标补丁完成！")
