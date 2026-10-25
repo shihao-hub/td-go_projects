@@ -226,16 +226,10 @@ def refresh_windows_icon_cache(
                 except Exception:
                     pass
 
-    try:
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "StartMenuExperienceHost.exe"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        print("[+] 已重置 Windows 11 开始菜单宿主 (StartMenuExperienceHost)")
-    except Exception:
-        pass
+    # 注：安全下线强杀 StartMenuExperienceHost.exe。
+    # 强制杀死 UWP 宿主会破坏 start2.bin 写入事务并被系统判定为异常崩溃，
+    # 导致 Windows 11 触发自愈合并，重新追加 OEM/官方默认固定图标。
+    # 图标刷新仅需依赖 utime + ie4uinit + SHChangeNotify。
 
     if restart_explorer:
         print("[*] 正在执行 Explorer 重启与图标缓存深度清理...")

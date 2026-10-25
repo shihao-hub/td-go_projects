@@ -83,7 +83,7 @@ def find_target_exe(custom_path: str | None) -> Path:
         r"D:\Program Files\JetBrains\IntelliJ IDEA*\bin\idea64.exe",
         r"C:\Program Files\JetBrains\IntelliJ IDEA*\bin\idea64.exe",
         os.path.expandvars(r"%LOCALAPPDATA%\Programs\IntelliJ IDEA*\bin\idea64.exe"),
-        os.path.expandvars(r"%LOCALAPPDATA%\JetBrains\Toolbox\apps\IDEA*\*\bin\idea64.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\JetBrains\Toolbox\apps\IDEA*\*bin\idea64.exe"),
     ]
     for pattern in search_patterns:
         matches = sorted(glob.glob(pattern), reverse=True)
@@ -219,19 +219,12 @@ def refresh_windows_icon_cache(restart_explorer: bool = False) -> None:
                 except Exception:
                     pass
 
-    # 2. 静默重置 Windows 11 开始菜单宿主 (StartMenuExperienceHost)
-    try:
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "StartMenuExperienceHost.exe"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        print("[+] 已重置 Windows 11 开始菜单宿主 (StartMenuExperienceHost)")
-    except Exception:
-        pass
+    # 注：安全下线强杀 StartMenuExperienceHost.exe。
+    # 强制杀死 UWP 宿主会破坏 start2.bin 写入事务并被系统判定为异常崩溃，
+    # 导致 Windows 11 触发自愈合并，重新追加 OEM/官方默认固定图标。
+    # 图标刷新仅需依赖 utime + ie4uinit + SHChangeNotify。
 
-    # 3. 若指定了 restart_explorer，执行 Explorer 离线缓存清空与平滑重启
+    # 2. 若指定了 restart_explorer，执行 Explorer 离线缓存清空与平滑重启
     if restart_explorer:
         print("[*] 正在执行 Explorer 重启与图标缓存深度清理...")
         subprocess.run(["powershell", "-NoProfile", "-Command", "Stop-Process -Name explorer -Force"], check=False)
@@ -256,16 +249,15 @@ def refresh_windows_icon_cache(restart_explorer: bool = False) -> None:
         subprocess.run(["powershell", "-NoProfile", "-Command", "Start-Process explorer.exe"], check=False)
         time.sleep(1.2)
 
-    # 4. 调用 Windows 系统自带外壳图标刷新器 ie4uinit
+    # 3. 调用 Windows 系统自带外壳图标刷新器 ie4uinit
     try:
         subprocess.run(["ie4uinit.exe", "-show"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("[+] 已调用系统内置 ie4uinit 刷新图标位图缓存")
     except Exception:
         pass
 
-    # 5. 广播 SHChangeNotify 外壳关联变更通知
+    # 4. 广播 SHChangeNotify 外壳关联变更通知
     try:
-        # SHCNE_ASSOCCHANGED = 0x08000000, SHCNF_FLUSH = 0x1000
         ctypes.windll.shell32.SHChangeNotify(0x08000000, 0x1000, 0, 0)
         print("[+] 已广播 Windows SHChangeNotify 外壳关联更新")
     except Exception as e:
