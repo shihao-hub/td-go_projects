@@ -77,3 +77,31 @@ func FilterAlive(launches []store.Launch, toolPath string) []store.Launch {
 	}
 	return alive
 }
+
+// expectedPath 按启动记录的目标取应比对的程序路径；
+// 旧记录 target 为空时回退到 tool.Path（兼容）。
+func expectedPath(tool store.Tool, l store.Launch) string {
+	switch l.Target {
+	case store.TargetExe:
+		if tool.Exe != nil {
+			return tool.Exe.Path
+		}
+	case store.TargetSource:
+		if tool.Source != nil {
+			return tool.Source.Program
+		}
+	}
+	return tool.Path
+}
+
+// FilterAliveForTool 按每条启动记录的目标分别做路径比对，
+// 支持同一卡片 exe / 源码双目标并行运行。
+func FilterAliveForTool(launches []store.Launch, tool store.Tool) []store.Launch {
+	alive := make([]store.Launch, 0, len(launches))
+	for _, l := range launches {
+		if l.PID != nil && Alive(*l.PID, expectedPath(tool, l)) {
+			alive = append(alive, l)
+		}
+	}
+	return alive
+}

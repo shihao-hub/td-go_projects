@@ -69,13 +69,19 @@ func wrapErr(prefix string, err error) error {
 	if errors.As(err, &metaErr) {
 		return &Error{Code: metaErr.Code, Message: metaErr.Message, ExitCode: 1}
 	}
+	var valErr *store.ValidationError
+	if errors.As(err, &valErr) {
+		return &Error{Code: valErr.Code, Message: valErr.Message, ExitCode: 1}
+	}
 	var confErr *store.ConflictError
 	if errors.As(err, &confErr) {
 		switch confErr.Field {
 		case "name":
 			return &Error{Code: "conflict", Message: "该 name 已被其他工具使用", ExitCode: 1}
-		case "path":
+		case "exe_path":
 			return &Error{Code: "conflict", Message: "该 exe 路径已注册为其他工具", ExitCode: 1}
+		case "source":
+			return &Error{Code: "conflict", Message: "该源码命令与工作目录已注册为其他工具", ExitCode: 1}
 		default:
 			return &Error{Code: "conflict", Message: "唯一性冲突: " + confErr.Field, ExitCode: 1}
 		}

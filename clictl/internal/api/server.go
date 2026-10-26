@@ -21,6 +21,7 @@ import (
 
 	"clictl/internal/runner"
 	"clictl/internal/service"
+	"clictl/internal/store"
 	"clictl/internal/web"
 )
 
@@ -50,9 +51,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tools", s.handleTools)
 	mux.HandleFunc("POST /api/tools", s.handleAdd)
 	mux.HandleFunc("GET /api/tools/{name}", s.handleInfo)
+	mux.HandleFunc("PUT /api/tools/{name}", s.handleUpdate)
 	mux.HandleFunc("DELETE /api/tools/{name}", s.handleRemove)
 	mux.HandleFunc("PUT /api/tools/{name}/meta", s.handleSetMeta)
 	mux.HandleFunc("POST /api/tools/{name}/start", s.handleStart)
+	mux.HandleFunc("POST /api/tools/{name}/console", s.handleConsole)
 	mux.HandleFunc("POST /api/tools/{name}/stop", s.handleStop)
 	mux.HandleFunc("POST /api/tools/{name}/reveal", s.handleReveal)
 	mux.HandleFunc("GET /api/fs", s.handleFS)
@@ -145,11 +148,25 @@ func (s *Server) handleTools(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, res)
 }
 
+type exeInput struct {
+	Path string `json:"path"`
+}
+
+type sourceInput struct {
+	Program string   `json:"program"`
+	Workdir string   `json:"workdir"`
+	Args    []string `json:"args"`
+	Type    string   `json:"type"`
+}
+
 type addRequest struct {
-	Path string          `json:"path"`
-	Name string          `json:"name"`
-	Desc string          `json:"desc"`
-	Meta json.RawMessage `json:"meta"`
+	Path          string          `json:"path"` // 兼容旧字段：等价于 exe.path
+	Name          string          `json:"name"`
+	Desc          string          `json:"desc"`
+	Meta          json.RawMessage `json:"meta"`
+	DefaultTarget string          `json:"default_target"`
+	Exe           *exeInput       `json:"exe"`
+	Source        *sourceInput    `json:"source"`
 }
 
 func (s *Server) handleAdd(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +175,73 @@ func (s *Server) handleAdd(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad_args", err.Error())
 		return
 	}
-	tool, err := s.svc.Add(req.Path, req.Name, req.Desc, req.Meta)
+	if req.Exe == nil && req.Path != "" {
+		req.Exe = &exeInput{Path: req.Path}
+	}
+	var exePath string
+	if req.Exe != nil {
+		exePath = req.Exe.Path
+	}
+	var src *service.CommandInput
+	if req.Source != nil {
+		src = &service.CommandInput{
+			Program: req.Source.Program,
+			Workdir: req.Source.Workdir,
+			Args:    req.Source.Args,
+			Type:    req.Source.Type,
+		}
+	}
+	tool, err := s.svc.Create(service.CreateInput{
+		Name:          req.Name,
+		Description:   req.Desc,
+		Meta:          req.Meta,
+		DefaultTarget: req.DefaultTarget,
+		ExePath:       exePath,
+		Source:        src,
+	})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeOK(w, tool)
+}
+
+type updateRequest struct {
+	Desc          string          `json:"desc"`
+	Meta          json.RawMessage `json:"meta"`
+	DefaultTarget string          `json:"default_target"`
+	Exe           *exeInput       `json:"exe"`    // null = 删除 exe 目标
+	Source        *sourceInput    `json:"source"` // null = 删除源码目标
+}
+
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	var req updateRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_args", err.Error())
+		return
+	}
+	var exePath *string
+	if req.Exe != nil {
+		p := req.Exe.Path
+		exePath = &p
+	}
+	var src *service.CommandInput
+	if req.Source != nil {
+		src = &service.CommandInput{
+			Program: req.Source.Program,
+			Workdir: req.Source.Workdir,
+			Args:    req.Source.Args,
+			Type:    req.Source.Type,
+		}
+	}
+	tool, err := s.svc.Update(service.UpdateInput{
+		Name:          r.PathValue("name"),
+		Description:   req.Desc,
+		Meta:          req.Meta,
+		DefaultTarget: req.DefaultTarget,
+		ExePath:       exePath,
+		Source:        src,
+	})
 	if err != nil {
 		fail(w, err)
 		return
@@ -206,8 +289,9 @@ func (s *Server) handleSetMeta(w http.ResponseWriter, r *http.Request) {
 }
 
 type startRequest struct {
-	Args []string `json:"args"`
-	Mode string   `json:"mode"` // console | detached；空 = 按 PE 子系统自动选择
+	Target string   `json:"target"` // exe | source；空 = 卡片默认目标
+	Args   []string `json:"args"`
+	Mode   string   `json:"mode"` // console | hidden | detached；空 = 按目标自动选择
 }
 
 func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
@@ -218,13 +302,42 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	switch req.Mode {
-	case "", runner.ModeConsole, runner.ModeDetached:
+	switch req.Target {
+	case "", store.TargetExe, store.TargetSource:
 	default:
-		writeErr(w, http.StatusBadRequest, "bad_args", "mode 仅支持 console | detached")
+		writeErr(w, http.StatusBadRequest, "bad_args", "target 仅支持 exe | source")
 		return
 	}
-	res, err := s.svc.StartWithMode(r.PathValue("name"), req.Args, req.Mode)
+	switch req.Mode {
+	case "", runner.ModeConsole, runner.ModeHidden, runner.ModeDetached:
+	default:
+		writeErr(w, http.StatusBadRequest, "bad_args", "mode 仅支持 console | hidden | detached")
+		return
+	}
+	res, err := s.svc.StartWithMode(r.PathValue("name"), req.Target, req.Args, req.Mode)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeOK(w, res)
+}
+
+type consoleRequest struct {
+	Visible *bool `json:"visible"`
+	PID     int   `json:"pid"`
+}
+
+func (s *Server) handleConsole(w http.ResponseWriter, r *http.Request) {
+	var req consoleRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_args", err.Error())
+		return
+	}
+	if req.Visible == nil {
+		writeErr(w, http.StatusBadRequest, "bad_args", "visible 必填")
+		return
+	}
+	res, err := s.svc.SetConsoleVisible(r.PathValue("name"), req.PID, *req.Visible)
 	if err != nil {
 		fail(w, err)
 		return
@@ -242,17 +355,33 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	writeOK(w, res)
 }
 
+type revealRequest struct {
+	Target string `json:"target"`
+}
+
 func (s *Server) handleReveal(w http.ResponseWriter, r *http.Request) {
-	info, err := s.svc.Info(r.PathValue("name"))
+	var req revealRequest
+	if r.ContentLength > 0 {
+		if err := decodeJSON(r, &req); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad_args", err.Error())
+			return
+		}
+	}
+	res, err := s.svc.Reveal(r.PathValue("name"), req.Target)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	if err := revealInExplorer(info.Tool.Path); err != nil {
+	if res.IsDir {
+		err = openDir(res.Path)
+	} else {
+		err = revealInExplorer(res.Path)
+	}
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "reveal_failed", err.Error())
 		return
 	}
-	writeOK(w, map[string]string{"path": info.Tool.Path})
+	writeOK(w, res)
 }
 
 func revealInExplorer(path string) error {
@@ -261,6 +390,18 @@ func revealInExplorer(path string) error {
 	}
 	cmd := exec.Command("explorer", "/select,"+path)
 	// explorer 成功时也可能返回非 0，忽略退出码，只要进程能拉起。
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
+func openDir(path string) error {
+	if runtime.GOOS != "windows" {
+		return fmt.Errorf("仅支持 Windows")
+	}
+	cmd := exec.Command("explorer", path)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -383,9 +524,10 @@ func fail(w http.ResponseWriter, err error) {
 // statusFor 业务错误码 → HTTP 状态码（127 等进程退出码语义在 HTTP 层不适用）。
 func statusFor(code string) int {
 	switch code {
-	case "not_found", "file_not_found", "dest_not_found":
+	case "not_found", "file_not_found", "dest_not_found", "not_running",
+		"program_not_found", "workdir_not_found", "no_exe_target", "no_source_target":
 		return http.StatusNotFound
-	case "conflict", "dest_exists", "already_running", "same_path":
+	case "conflict", "dest_exists", "already_running", "same_path", "console_unavailable":
 		return http.StatusConflict
 	case "bad_args", "not_exe", "meta_invalid", "meta_unknown_key", "meta_too_large":
 		return http.StatusBadRequest

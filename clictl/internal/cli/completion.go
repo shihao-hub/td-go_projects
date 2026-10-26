@@ -24,12 +24,12 @@ Register-ArgumentCompleter -Native -CommandName clictl -ScriptBlock {
             $elems = @($elems | Select-Object -First ($elems.Count - 1))
         }
         if ($elems.Count -eq 0) {
-            'add','rm','set','list','info','run','start','stop','cp','version','help','completion' |
+            'add','add-cmd','edit','rm','set','list','info','run','start','stop','console','cp','version','help','completion' |
                 Where-Object { $_ -like "$wordToComplete*" }
             return
         }
         $sub = "$($elems[0])"
-        if (@('run','start','stop','rm','info','set','cp') -contains $sub -and $elems.Count -eq 1) {
+        if (@('run','start','stop','rm','info','set','cp','edit','console') -contains $sub -and $elems.Count -eq 1) {
             & clictl completion names 2>$null | Where-Object { $_ -like "$wordToComplete*" }
         }
     } catch { }

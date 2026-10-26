@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"clictl/internal/service"
+	"clictl/internal/store"
 )
 
 // run 工具的非交互执行核心（跨平台；进程树管理见 exec_windows.go / exec_other.go）。
@@ -70,15 +71,15 @@ func (lb *limitedBuffer) Write(p []byte) (int, error) {
 
 // execTool 非交互执行：stdin 关闭、参数数组直传、收集输出与退出码。
 // 取消（ctx）/超时 → 杀整棵进程树；启动记账闭环与 CLI run 一致。
-func execTool(ctx context.Context, svc *service.Service, name string, args []string, timeoutMs int64) (runOut, error) {
-	tool, err := svc.PreflightRun(name)
+func execTool(ctx context.Context, svc *service.Service, name, target string, args []string, timeoutMs int64) (runOut, error) {
+	tool, spec, err := svc.Resolve(name, target, args)
 	if err != nil {
 		return runOut{}, err
 	}
-	out := runOut{Name: tool.Name, Path: tool.Path}
+	out := runOut{Name: tool.Name, Path: spec.Program}
 
 	start := time.Now()
-	launchID, err := svc.Store().InsertLaunch(tool.ID, start)
+	launchID, err := svc.Store().InsertLaunch(tool.ID, start, spec.Target, store.ModeRun)
 	if err != nil {
 		return out, &service.Error{Code: "db_error", Message: "写入启动记录失败: " + err.Error()}
 	}
@@ -99,7 +100,8 @@ func execTool(ctx context.Context, svc *service.Service, name string, args []str
 	}
 	defer tree.close() // server 崩溃时由 OS 兜底回收整树（KILL_ON_JOB_CLOSE）
 
-	cmd := exec.Command(tool.Path, args...)
+	cmd := exec.Command(spec.Program, spec.Args...)
+	cmd.Dir = spec.Dir
 	cmd.Stdin = nil // 非交互：子进程 stdin 连接 os.DevNull
 	var stdout, stderr limitedBuffer
 	cmd.Stdout = &stdout

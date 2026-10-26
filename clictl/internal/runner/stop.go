@@ -11,8 +11,10 @@ import (
 
 // KilledProcess 一个被成功终止的后台实例
 type KilledProcess struct {
-	LaunchID int64 `json:"launch_id"`
-	PID      int   `json:"pid"`
+	LaunchID int64  `json:"launch_id"`
+	PID      int    `json:"pid"`
+	Target   string `json:"target,omitempty"`
+	Mode     string `json:"mode,omitempty"`
 }
 
 // StopResult stop 命令的 JSON 输出形状
@@ -23,12 +25,12 @@ type StopResult struct {
 	AlreadyStopped bool            `json:"already_stopped"` // 无存活实例（killed/failed 均空）
 }
 
-// Stop 全杀：终止该工具全部存活的后台实例。
+// Stop 全杀：终止该工具全部存活的后台实例（exe 与源码目标一起清空）。
 // 树杀用 taskkill /PID <pid> /T /F——/T 连同子进程一起终止（托盘/服务程序常有子进程），
 // /F 强杀（后台进程无控制台，无法优雅响应 Ctrl+C 类信号）。
 // 强杀拿不到真实退出码，闭环记录统一回写 exit_code=1（TerminateProcess 惯例值）。
 func Stop(st *store.Store, name string) (StopResult, *RunError) {
-	tool, rerr := lookup(st, name)
+	tool, rerr := lookupTool(st, name)
 	if rerr != nil {
 		return StopResult{}, rerr
 	}
@@ -37,15 +39,16 @@ func Stop(st *store.Store, name string) (StopResult, *RunError) {
 	if err != nil {
 		return StopResult{}, &RunError{Code: "db_error", Message: "查询启动记录失败: " + err.Error(), ExitCode: 1}
 	}
-	alive := FilterAlive(unfinished, tool.Path)
+	alive := FilterAliveForTool(unfinished, tool)
 
 	res := StopResult{Name: tool.Name, Killed: []KilledProcess{}, Failed: []KilledProcess{}}
 	now := time.Now()
 	for _, l := range alive {
-		kp := KilledProcess{LaunchID: l.ID, PID: *l.PID}
+		kp := KilledProcess{LaunchID: l.ID, PID: *l.PID, Target: l.Target, Mode: l.Mode}
+		expect := expectedPath(tool, l)
 		// 输出全部丢弃：成败以复探为准，不信 taskkill 的返回码（部分失败时它也返回非 0）
 		_ = exec.Command("taskkill", "/PID", strconv.Itoa(*l.PID), "/T", "/F").Run()
-		if Alive(*l.PID, tool.Path) {
+		if Alive(*l.PID, expect) {
 			res.Failed = append(res.Failed, kp)
 			continue
 		}

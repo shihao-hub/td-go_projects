@@ -24,7 +24,7 @@
       </div>
 
       <div class="topbar-search">
-        <input id="searchInput" type="search" placeholder="搜索工具名 / 路径 / 描述" autocomplete="off" spellcheck="false">
+        <input id="searchInput" type="search" placeholder="搜索工具名 / 路径 / 命令 / 描述" autocomplete="off" spellcheck="false">
       </div>
 
       <div class="topbar-actions">
@@ -66,7 +66,7 @@
         <div class="empty-state" id="emptyState">
           <span class="empty-glyph">⌘</span>
           <p>从左侧选择一个工具查看详情</p>
-          <p class="muted">或点击右上角「注册工具」把任意 exe 收编进启动台</p>
+          <p class="muted">或点击右上角「注册工具」收编 exe 或源码命令</p>
         </div>
 
         <div class="detail" id="detail" hidden>
@@ -83,19 +83,50 @@
             </div>
             <div class="detail-actions">
               <button class="btn btn-primary" id="startBtn">启动</button>
-              <button class="btn" id="startAltBtn" hidden>后台启动</button>
+              <button class="btn" id="startAltBtn" hidden>源码启动</button>
               <button class="btn" id="stopBtn">停止</button>
+              <button class="btn" id="consoleBtn" hidden>控制台</button>
               <button class="btn" id="revealBtn">定位</button>
+              <button class="btn" id="editBtn">编辑</button>
               <button class="btn" id="metaBtn">meta</button>
               <button class="btn btn-danger" id="deleteBtn">删除</button>
             </div>
           </div>
 
           <div class="run-row" id="runRow" hidden>
+            <label for="startTarget">启动目标</label>
+            <select id="startTarget" class="target-select"></select>
             <label for="startArgs">启动参数</label>
             <input id="startArgs" type="text" placeholder="可选，空格分隔；含空格请用引号包裹，按 shell 规则解析" spellcheck="false">
             <button class="btn btn-primary" id="startArgsBtn">带参数启动</button>
           </div>
+
+          <section class="target-list" id="targetList" hidden>
+            <div class="target-row" id="exeTargetRow" hidden>
+              <div class="target-main">
+                <span class="target-badge exe">EXE</span>
+                <code class="target-path" id="exeTargetPath">--</code>
+                <span class="target-status" id="exeTargetStatus"></span>
+              </div>
+              <div class="target-actions">
+                <button class="btn" id="exeStartBtn">启动 exe</button>
+                <button class="btn" id="exeRevealBtn">定位</button>
+              </div>
+            </div>
+            <div class="target-row" id="sourceTargetRow" hidden>
+              <div class="target-main">
+                <span class="target-badge source">源码</span>
+                <code class="target-path" id="sourceTargetCommand">--</code>
+                <span class="target-status" id="sourceTargetStatus"></span>
+                <div class="target-sub" id="sourceTargetDetail">--</div>
+              </div>
+              <div class="target-actions">
+                <button class="btn btn-primary" id="sourceStartBtn">源码启动</button>
+                <button class="btn" id="sourceConsoleBtn">终端启动</button>
+                <button class="btn" id="sourceRevealBtn">打开目录</button>
+              </div>
+            </div>
+          </section>
 
           <div class="stat-grid">
             <div class="stat">
@@ -107,7 +138,7 @@
               <strong id="statDuration">0s</strong>
             </div>
             <div class="stat">
-              <span class="stat-label">文件大小</span>
+              <span class="stat-label" id="statSizeLabel">文件大小</span>
               <strong id="statSize">--</strong>
             </div>
             <div class="stat">
@@ -116,9 +147,35 @@
             </div>
           </div>
 
-          <section class="field-block">
+          <section class="field-block" id="exeFieldBlock">
             <h3>可执行文件</h3>
             <code class="path" id="detailPath">--</code>
+          </section>
+
+          <section class="field-block" id="sourceFieldBlock" hidden>
+            <h3>源码命令</h3>
+            <div class="kv-row">
+              <span class="kv-label">程序</span>
+              <code class="path" id="detailSourceProgram">--</code>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">工作目录</span>
+              <code class="path" id="detailSourceWorkdir">--</code>
+              <button type="button" class="btn" id="sourceWorkdirOpenBtn">打开目录</button>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">固定参数</span>
+              <code class="path" id="detailSourceArgs">--</code>
+            </div>
+            <div class="kv-row">
+              <span class="kv-label">类型</span>
+              <span id="detailSourceType">--</span>
+            </div>
+          </section>
+
+          <section class="field-block" id="instanceBlock" hidden>
+            <h3>运行实例</h3>
+            <div class="instance-list" id="instanceList"></div>
           </section>
 
           <section class="field-block">
@@ -130,7 +187,7 @@
             <h3>最近启动</h3>
             <table class="launch-table">
               <thead>
-                <tr><th>开始时间</th><th>耗时</th><th>退出码</th><th>PID</th></tr>
+                <tr><th>开始时间</th><th>目标</th><th>模式</th><th>耗时</th><th>退出码</th><th>PID</th></tr>
               </thead>
               <tbody id="launchBody"></tbody>
             </table>
@@ -140,18 +197,68 @@
     </div>
   </div>
 
-  <!-- 注册工具 -->
-  <dialog id="addDialog" class="dialog">
+  <!-- 注册 / 编辑工具 -->
+  <dialog id="addDialog" class="dialog dialog-wide">
     <form method="dialog" class="dialog-form" id="addForm">
-      <h2>注册工具</h2>
-      <p class="muted">路径必须是本地 .exe；名称留空时取文件名小写。</p>
+      <h2 id="addDialogTitle">注册工具</h2>
+      <p class="muted">exe 与源码命令至少填写一项，可同时配置。源码命令支持工作目录与固定前缀参数。</p>
 
-      <label class="field">
-        <span>exe 路径</span>
-        <div class="path-input">
-          <input id="addPath" type="text" placeholder="C:\Tools\app.exe" spellcheck="false" required>
-          <button type="button" class="btn" id="browseBtn">浏览</button>
+      <section class="form-section">
+        <label class="check-row">
+          <input type="checkbox" id="addExeEnabled" checked>
+          <span>可执行文件</span>
+        </label>
+        <div id="addExeFields" class="section-fields">
+          <label class="field">
+            <span>exe 路径</span>
+            <div class="path-input">
+              <input id="addPath" type="text" placeholder="C:\Tools\app.exe" spellcheck="false">
+              <button type="button" class="btn" id="browseExeBtn">浏览</button>
+            </div>
+          </label>
         </div>
+      </section>
+
+      <section class="form-section">
+        <label class="check-row">
+          <input type="checkbox" id="addSourceEnabled">
+          <span>源码命令</span>
+        </label>
+        <div id="addSourceFields" class="section-fields" hidden>
+          <label class="field">
+            <span>程序</span>
+            <div class="path-input">
+              <input id="addSourceProgram" type="text" placeholder="uv 或 C:\...\uv.exe" spellcheck="false">
+              <button type="button" class="btn" id="browseProgramBtn">浏览</button>
+            </div>
+          </label>
+          <label class="field">
+            <span>固定参数</span>
+            <input id="addSourceArgs" type="text" placeholder="run zedhub-gui；含空格用引号" spellcheck="false">
+          </label>
+          <label class="field">
+            <span>工作目录</span>
+            <div class="path-input">
+              <input id="addSourceWorkdir" type="text" placeholder="D:\projects\myapp" spellcheck="false">
+              <button type="button" class="btn" id="browseWorkdirBtn">浏览</button>
+            </div>
+          </label>
+          <label class="field">
+            <span>类型</span>
+            <select id="addSourceType">
+              <option value="gui">窗口程序（默认隐藏控制台）</option>
+              <option value="console">命令行（默认可见控制台）</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <label class="field" id="addDefaultField" hidden>
+        <span>默认启动目标</span>
+        <select id="addDefaultTarget">
+          <option value="exe">exe</option>
+          <option value="source">源码</option>
+        </select>
       </label>
 
       <div class="field-row">
@@ -177,7 +284,7 @@
 
       <div class="dialog-actions">
         <button type="button" class="btn" id="addCancel">取消</button>
-        <button type="submit" class="btn btn-accent">注册</button>
+        <button type="submit" class="btn btn-accent" id="addSubmitBtn">注册</button>
       </div>
     </form>
   </dialog>
@@ -185,13 +292,14 @@
   <!-- 目录浏览 -->
   <dialog id="browseDialog" class="dialog dialog-wide">
     <div class="dialog-form">
-      <h2>选择 exe</h2>
+      <h2 id="browseTitle">选择 exe</h2>
       <div class="browse-bar">
         <button type="button" class="btn" id="browseUp">上级</button>
         <code id="browsePath">--</code>
       </div>
       <div class="browse-list" id="browseList"></div>
       <div class="dialog-actions">
+        <button type="button" class="btn" id="browseSelectDir" hidden>选择此目录</button>
         <button type="button" class="btn" id="browseCancel">取消</button>
       </div>
     </div>
@@ -229,6 +337,19 @@
         <button type="submit" class="btn btn-accent">保存</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- 控制台显隐 -->
+  <dialog id="consoleDialog" class="dialog">
+    <div class="dialog-form">
+      <h2>控制台</h2>
+      <p class="muted" id="consoleHint">显示或隐藏运行中实例的控制台窗口，不会重启进程。</p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-primary" id="consoleShowBtn">显示控制台</button>
+        <button type="button" class="btn" id="consoleHideBtn">隐藏控制台</button>
+        <button type="button" class="btn" id="consoleCancel">关闭</button>
+      </div>
+    </div>
   </dialog>
 
   <div class="toast" id="toast" hidden></div>

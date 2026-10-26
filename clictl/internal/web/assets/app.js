@@ -1,4 +1,4 @@
-// clictl WebUI：工具注册、启动、停止与启动记录查看。
+// clictl WebUI：exe / 源码双目标注册、启动、控制台显隐与启动记录查看。
 // 与 CLI 共用同一套 /api 契约（{ok, data} / {ok, error}）。
 (function () {
   "use strict";
@@ -17,6 +17,10 @@
     viewMode: "flat",
     sortMode: "name",
     activeGroup: "",
+    editingName: null,
+    browseMode: "exe",
+    startTarget: "",
+    consolePID: 0,
   };
 
   const el = (id) => document.getElementById(id);
@@ -53,6 +57,14 @@
       method: "POST",
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  }
+
+  function put(path, body) {
+    return request(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
   }
 
@@ -120,6 +132,74 @@
     console.error(err);
   }
 
+  // ---------- 目标辅助 ----------
+
+  function defaultTarget(tool) {
+    if (!tool) return "exe";
+    if (tool.default_target === "source" && tool.source) return "source";
+    if (tool.default_target === "exe" && tool.exe) return "exe";
+    if (tool.exe) return "exe";
+    if (tool.source) return "source";
+    return "exe";
+  }
+
+  function targetData(tool, target) {
+    if (!tool) return null;
+    return target === "source" ? tool.source || null : tool.exe || null;
+  }
+
+  function targetActive(tool, target) {
+    const t = targetData(tool, target);
+    return !!(t && t.status === "active");
+  }
+
+  function targetConsole(tool, target) {
+    if (target === "source") return !!(tool && tool.source && tool.source.type === "console");
+    return !!(tool && tool.exe && tool.exe.console);
+  }
+
+  function targetMode(tool, target) {
+    if (target === "source") return targetConsole(tool, target) ? "console" : "hidden";
+    return targetConsole(tool, target) ? "console" : "detached";
+  }
+
+  function targetLabel(target) {
+    return target === "source" ? "源码" : "exe";
+  }
+
+  function modeLabel(mode) {
+    switch (mode) {
+      case "run": return "前台";
+      case "console": return "可见控制台";
+      case "hidden": return "隐藏控制台";
+      case "detached": return "无控制台";
+      default: return mode || "--";
+    }
+  }
+
+  function altAction(tool) {
+    if (!tool) return null;
+    const def = defaultTarget(tool);
+    if (tool.exe && tool.source) {
+      const other = def === "exe" ? "source" : "exe";
+      const label = other === "source"
+        ? (tool.source.type === "console" ? "终端启动" : "源码启动")
+        : "启动 exe";
+      return { target: other, mode: targetMode(tool, other), label };
+    }
+    if (def === "exe") {
+      if (tool.exe && tool.exe.console) return { target: "exe", mode: "detached", label: "后台启动" };
+      return null;
+    }
+    const mode = tool.source.type === "console" ? "hidden" : "console";
+    return { target: "source", mode, label: mode === "console" ? "终端启动" : "后台启动" };
+  }
+
+  function primaryLabel(tool, target) {
+    if (target === "source") return targetConsole(tool, target) ? "终端启动" : "源码启动";
+    return targetConsole(tool, target) ? "终端启动" : "启动";
+  }
+
   // ---------- 视图偏好 ----------
 
   let prefsTimer = null;
@@ -139,7 +219,6 @@
     updateViewControls();
   }
 
-  // 连续切换视图/标签时合并写盘，避免每次都落盘一份 JSON。
   function savePreferences() {
     clearTimeout(prefsTimer);
     prefsTimer = setTimeout(async () => {
@@ -169,7 +248,6 @@
     return group || UNGROUPED;
   }
 
-  // 「未分组」不是真实分组名（用户可把 group 命名成「未分组」），tab 用独立哨兵做 key。
   function groupKey(tool) {
     const group = groupOf(tool);
     return group === UNGROUPED ? UNGROUPED_KEY : group;
@@ -229,7 +307,6 @@
       state.tools = tools || [];
       state.running = new Map((running || []).map((item) => [item.name, item.running_pids || []]));
       renderList();
-      // 首次加载自动展开第一个工具，避免打开就是全空详情区。
       if (!state.current && !state.autoSelected && state.tools.length > 0) {
         state.autoSelected = true;
         await selectTool(state.tools[0].name);
@@ -252,11 +329,17 @@
       if (state.filter === "invalid" && tool.status !== "invalid") return false;
       if (!state.query) return true;
       const q = state.query.toLowerCase();
-      return (
-        tool.name.toLowerCase().includes(q) ||
-        (tool.path || "").toLowerCase().includes(q) ||
-        (tool.description || "").toLowerCase().includes(q)
-      );
+      const hay = [
+        tool.name,
+        tool.path,
+        tool.description,
+        tool.exe ? tool.exe.path : "",
+        tool.source ? tool.source.program : "",
+        tool.source ? tool.source.workdir : "",
+        tool.source ? tool.source.command : "",
+        tool.source ? (tool.source.args || []).join(" ") : "",
+      ].join(" ").toLowerCase();
+      return hay.includes(q);
     });
   }
 
@@ -267,16 +350,29 @@
     const group = groupOf(tool);
     const groupTag =
       group !== UNGROUPED ? `<span class="card-group" title="分组">${escapeHtml(group)}</span>` : "";
+    const exeBadge = tool.exe ? '<span class="card-kind exe">exe</span>' : "";
+    const sourceBadge = tool.source ? '<span class="card-kind source">源码</span>' : "";
+    let warn = "";
+    if (tool.status === "invalid") {
+      warn = '<span class="tag-invalid">失效</span>';
+    } else if (tool.exe && tool.exe.status === "invalid") {
+      warn = '<span class="tag-warn">exe 失效</span>';
+    } else if (tool.source && tool.source.status === "invalid") {
+      warn = '<span class="tag-warn">源码失效</span>';
+    }
+    const pathText = tool.exe ? tool.exe.path : tool.source ? tool.source.command : tool.path;
     return `
       <div class="tool-card ${active} ${invalid}" data-name="${escapeHtml(tool.name)}">
         <div class="card-top">
           ${running ? '<span class="pulse" title="后台运行中"></span>' : ""}
           <span class="card-name">${escapeHtml(tool.name)}</span>
+          ${exeBadge}
+          ${sourceBadge}
           ${groupTag}
-          ${tool.status === "invalid" ? '<span class="tag-invalid">失效</span>' : ""}
+          ${warn}
           <button type="button" class="card-group-btn" data-group-for="${escapeHtml(tool.name)}" title="设置分组">分组</button>
         </div>
-        <div class="card-path" title="${escapeHtml(tool.path)}">${escapeHtml(tool.path)}</div>
+        <div class="card-path" title="${escapeHtml(tool.path)}">${escapeHtml(pathText)}</div>
         <div class="card-foot">
           <span>${tool.launch_count || 0} 次启动</span>
           <span>${tool.last_launch ? formatTime(tool.last_launch) : "从未启动"}</span>
@@ -290,7 +386,6 @@
         selectTool(card.dataset.name).catch(reportError);
       });
     });
-    // 卡片上的分组快捷入口：先选中再弹分组窗，不改变列表滚动位置。
     toolListEl.querySelectorAll(".card-group-btn").forEach((btn) => {
       btn.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -319,7 +414,6 @@
     bindCards();
   }
 
-  // 分组 tab：横向标签页切换，替代垂直折叠树，工具多时不再需要往下滚。
   function renderTabs(items) {
     const groups = existingGroups();
     const validKeys = new Set(["", UNGROUPED_KEY, ...groups]);
@@ -394,24 +488,69 @@
     detailEl.hidden = false;
 
     const tool = info.tool;
+    const def = defaultTarget(tool);
     const running = info.running && info.running.alive;
-    const isConsole = !!info.console;
     el("detailName").textContent = tool.name;
-    el("detailType").textContent = isConsole ? "命令行" : "窗口程序";
-    el("detailType").className = `type-badge ${isConsole ? "console" : "gui"}`;
-    el("startBtn").textContent = isConsole ? "终端启动" : "启动";
-    el("startBtn").title = isConsole ? "在独立控制台窗口启动" : "后台分离启动";
-    el("startAltBtn").hidden = !isConsole;
-    el("detailDesc").textContent = tool.description || "未填写描述";
-    el("detailStatus").textContent = tool.status === "active" ? (running ? "运行中" : "就绪") : "文件失效";
+    const instances = (info.running && info.running.instances) || [];
+
+    let typeText = "窗口程序";
+    let typeClass = "gui";
+    if (tool.kind === "both") {
+      typeText = "exe + 源码";
+      typeClass = "both";
+    } else if (tool.kind === "source" || (!tool.exe && tool.source)) {
+      typeText = "源码命令";
+      typeClass = "source";
+    } else if (targetConsole(tool, "exe")) {
+      typeText = "命令行";
+      typeClass = "console";
+    }
+    el("detailType").textContent = typeText;
+    el("detailType").className = `type-badge ${typeClass}`;
+
+    const invalidTargets = [];
+    if (tool.exe && tool.exe.status !== "active") invalidTargets.push("exe");
+    if (tool.source && tool.source.status !== "active") invalidTargets.push("源码");
+    let statusText;
+    if (tool.status !== "active") {
+      statusText = "失效";
+    } else if (running) {
+      statusText = "运行中";
+    } else if (invalidTargets.length > 0) {
+      statusText = "部分失效";
+    } else {
+      statusText = "就绪";
+    }
+    el("detailStatus").textContent = statusText;
     const dot = el("detailStatusDot");
     dot.className = `status-dot ${tool.status === "active" ? "ok" : "bad"}`;
 
+    el("startBtn").textContent = primaryLabel(tool, def);
+    el("startBtn").title = `默认目标：${targetLabel(def)}`;
+    el("startBtn").disabled = !targetActive(tool, def);
+
+    const alt = altAction(tool);
+    el("startAltBtn").hidden = !alt;
+    if (alt) {
+      el("startAltBtn").textContent = alt.label;
+      el("startAltBtn").title = `${targetLabel(alt.target)} · ${modeLabel(alt.mode)}`;
+      el("startAltBtn").disabled = !targetActive(tool, alt.target);
+    }
+
+    el("consoleBtn").hidden = !instances.some((i) => i.mode === "hidden" || i.mode === "console");
+    el("stopBtn").disabled = !running;
+
+    el("detailDesc").textContent = tool.description || "未填写描述";
     el("statLaunches").textContent = String(tool.launch_count || 0);
     el("statDuration").textContent = formatDuration(info.total_duration_ms);
-    el("statSize").textContent = formatBytes(tool.size_bytes);
+    if (tool.exe) {
+      el("statSizeLabel").textContent = "exe 大小";
+      el("statSize").textContent = formatBytes(tool.exe.size_bytes);
+    } else {
+      el("statSizeLabel").textContent = "启动方式";
+      el("statSize").textContent = "源码命令";
+    }
     el("statPids").textContent = running && info.running.pids.length ? info.running.pids.join(", ") : "无";
-    el("detailPath").textContent = tool.path;
 
     const groupChip = el("detailGroupChip");
     const group = groupOf(tool);
@@ -425,6 +564,83 @@
     }
     el("detailMeta").textContent = metaText;
 
+    // 启动目标区块
+    el("targetList").hidden = !tool.exe && !tool.source;
+    el("exeTargetRow").hidden = !tool.exe;
+    el("sourceTargetRow").hidden = !tool.source;
+    if (tool.exe) {
+      el("exeTargetPath").textContent = tool.exe.path;
+      el("exeTargetStatus").textContent = tool.exe.status === "active" ? "就绪" : "失效";
+      el("exeTargetStatus").className = `target-status ${tool.exe.status === "active" ? "ok" : "bad"}`;
+      el("exeStartBtn").disabled = tool.exe.status !== "active";
+      el("exeStartBtn").textContent = tool.exe.console ? "终端启动" : "启动 exe";
+      el("exeRevealBtn").disabled = tool.exe.status !== "active";
+    }
+    if (tool.source) {
+      el("sourceTargetCommand").textContent = tool.source.command || `${tool.source.program} ${(tool.source.args || []).join(" ")}`;
+      el("sourceTargetStatus").textContent = tool.source.status === "active" ? "就绪" : "失效";
+      el("sourceTargetStatus").className = `target-status ${tool.source.status === "active" ? "ok" : "bad"}`;
+      el("sourceTargetDetail").textContent = `工作目录 ${tool.source.workdir} · ${tool.source.type === "console" ? "命令行" : "窗口程序"}`;
+      const srcConsole = tool.source.type === "console";
+      el("sourceStartBtn").textContent = srcConsole ? "终端启动" : "源码启动";
+      el("sourceConsoleBtn").textContent = srcConsole ? "后台启动" : "终端启动";
+      el("sourceStartBtn").disabled = tool.source.status !== "active";
+      el("sourceConsoleBtn").disabled = tool.source.status !== "active";
+      el("sourceRevealBtn").disabled = tool.source.status !== "active";
+    }
+
+    // 带参数启动目标下拉
+    const targetSelect = el("startTarget");
+    const options = [`<option value="">默认 (${targetLabel(def)})</option>`];
+    if (tool.exe) options.push(`<option value="exe"${tool.exe.status === "active" ? "" : " disabled"}>exe</option>`);
+    if (tool.source) options.push(`<option value="source"${tool.source.status === "active" ? "" : " disabled"}>源码</option>`);
+    targetSelect.innerHTML = options.join("");
+    const validChoices = new Set(["", ...(tool.exe ? ["exe"] : []), ...(tool.source ? ["source"] : [])]);
+    if (!validChoices.has(state.startTarget)) state.startTarget = "";
+    targetSelect.value = state.startTarget;
+    targetSelect.disabled = !(tool.exe && tool.source);
+    el("runRow").hidden = !tool.exe && !tool.source;
+
+    // 字段区块
+    el("exeFieldBlock").hidden = !tool.exe;
+    if (tool.exe) el("detailPath").textContent = tool.exe.path;
+    el("sourceFieldBlock").hidden = !tool.source;
+    if (tool.source) {
+      el("detailSourceProgram").textContent = tool.source.program;
+      el("detailSourceWorkdir").textContent = tool.source.workdir;
+      el("detailSourceArgs").textContent = (tool.source.args || []).length ? tool.source.args.join(" ") : "（无）";
+      el("detailSourceType").textContent = tool.source.type === "console" ? "命令行" : "窗口程序";
+      el("sourceWorkdirOpenBtn").disabled = tool.source.status !== "active";
+    }
+
+    // 运行实例
+    el("instanceBlock").hidden = instances.length === 0;
+    if (instances.length) {
+      el("instanceList").innerHTML = instances
+        .map((inst) => {
+          const canConsole = inst.mode === "hidden" || inst.mode === "console";
+          const actions = canConsole
+            ? `<button type="button" class="btn" data-console-pid="${inst.pid}" data-console-visible="1">显示控制台</button>
+               <button type="button" class="btn" data-console-pid="${inst.pid}" data-console-visible="0">隐藏</button>`
+            : `<span class="instance-note">${modeLabel(inst.mode)}</span>`;
+          return `<div class="instance-row">
+            <span class="instance-pid">PID ${inst.pid}</span>
+            <span class="instance-target">${targetLabel(inst.target)}</span>
+            <span class="instance-mode">${modeLabel(inst.mode)}</span>
+            <span class="instance-time">${formatTime(inst.started_at)}</span>
+            <span class="instance-actions">${actions}</span>
+          </div>`;
+        })
+        .join("");
+      el("instanceList")
+        .querySelectorAll("[data-console-pid]")
+        .forEach((btn) => {
+          btn.addEventListener("click", () => {
+            consoleAction(Number(btn.dataset.consolePid), btn.dataset.consoleVisible === "1", btn);
+          });
+        });
+    }
+
     const rows = info.recent_launches || [];
     el("launchBody").innerHTML = rows.length
       ? rows
@@ -432,30 +648,34 @@
             const duration = launch.duration_ms == null ? "未闭环" : formatDuration(launch.duration_ms);
             const code = launch.exit_code == null ? "--" : String(launch.exit_code);
             const pid = launch.pid == null ? "--" : String(launch.pid);
-            return `<tr><td>${formatTime(launch.started_at)}</td><td>${duration}</td><td>${code}</td><td>${pid}</td></tr>`;
+            const target = launch.target === "source" ? "源码" : launch.target === "exe" ? "exe" : "--";
+            const mode = modeLabel(launch.mode);
+            return `<tr><td>${formatTime(launch.started_at)}</td><td>${target}</td><td>${mode}</td><td>${duration}</td><td>${code}</td><td>${pid}</td></tr>`;
           })
           .join("")
-      : '<tr><td colspan="4" class="muted">暂无启动记录</td></tr>';
-
-    el("stopBtn").disabled = !running;
-    el("runRow").hidden = tool.status !== "active";
+      : '<tr><td colspan="6" class="muted">暂无启动记录</td></tr>';
   }
 
   // ---------- 动作 ----------
 
-  async function startTool(args, button, mode) {
+  async function startTool(target, args, button, mode) {
     if (!state.current) return;
-    const name = state.current.tool.name;
+    const tool = state.current.tool;
+    const name = tool.name;
+    if (!targetActive(tool, target)) {
+      toast(`${targetLabel(target)} 目标不可用`, true);
+      return;
+    }
     await withBusy(button, async () => {
       try {
-        const payload = { args: args || [] };
-        if (mode) payload.mode = mode;
+        const payload = { target, args: args || [] };
+        payload.mode = mode || targetMode(tool, target);
         const res = await post(`/api/tools/${encodeURIComponent(name)}/start`, payload);
-        const where = res.mode === "console" ? "终端窗口" : "后台";
+        const where = res.mode === "console" ? "可见控制台" : res.mode === "hidden" ? "隐藏控制台" : "后台";
         if (res.already_running) {
-          toast(`${name} 已在${where}启动（PID ${res.pid}），已有实例在运行`);
+          toast(`${name} 已在${where}启动（${targetLabel(res.target)} · PID ${res.pid}），已有实例在运行`);
         } else {
-          toast(`已在${where}启动 ${name}（PID ${res.pid}）`);
+          toast(`已在${where}启动 ${name}（${targetLabel(res.target)} · PID ${res.pid}）`);
         }
         await loadTools();
       } catch (err) {
@@ -464,9 +684,11 @@
     });
   }
 
-  // 主启动模式：命令行工具开控制台窗口，窗口程序后台分离。
-  function primaryMode() {
-    return state.current && state.current.console ? "console" : "detached";
+  async function startAlt(button) {
+    if (!state.current) return;
+    const alt = altAction(state.current.tool);
+    if (!alt) return;
+    await startTool(alt.target, [], button, alt.mode);
   }
 
   async function stopTool(button) {
@@ -489,11 +711,52 @@
     });
   }
 
+  async function consoleAction(pid, visible, button) {
+    if (!state.current) return;
+    const name = state.current.tool.name;
+    await withBusy(button, async () => {
+      try {
+        const res = await post(`/api/tools/${encodeURIComponent(name)}/console`, { pid, visible });
+        toast(`${visible ? "已显示" : "已隐藏"}控制台（PID ${res.pid}）`);
+        await selectTool(name, { keepScroll: true, silent: true });
+      } catch (err) {
+        reportError(err);
+      }
+    });
+  }
+
+  async function reveal(target) {
+    if (!state.current) return;
+    try {
+      await post(`/api/tools/${encodeURIComponent(state.current.tool.name)}/reveal`, { target });
+    } catch (err) {
+      reportError(err);
+    }
+  }
+
+  function openConsoleDialog(pid) {
+    if (!state.current) return;
+    const instances = (state.current.running && state.current.running.instances) || [];
+    let inst = null;
+    if (pid) {
+      inst = instances.find((i) => i.pid === pid) || null;
+    } else {
+      inst = [...instances].reverse().find((i) => i.mode === "hidden" || i.mode === "console") || null;
+    }
+    if (!inst) {
+      toast("没有可操作的控制台实例", true);
+      return;
+    }
+    state.consolePID = inst.pid;
+    el("consoleHint").textContent =
+      `PID ${inst.pid} · ${targetLabel(inst.target)} · ${modeLabel(inst.mode)}。显示/隐藏不会重启进程；关闭控制台窗口会结束进程。`;
+    el("consoleDialog").showModal();
+  }
+
   function existingGroups() {
     const groups = new Set();
     for (const tool of state.tools) {
       const group = groupOf(tool);
-      // 排掉 tab 哨兵 key，避免真实分组名与「未分组」标识冲突。
       if (group !== UNGROUPED && group !== UNGROUPED_KEY) groups.add(group);
     }
     return [...groups].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { sensitivity: "base" }));
@@ -543,11 +806,7 @@
     }
     await withBusy(event.submitter, async () => {
       try {
-        await request(`/api/tools/${encodeURIComponent(name)}/meta`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ meta }),
-        });
+        await put(`/api/tools/${encodeURIComponent(name)}/meta`, { meta });
         el("groupDialog").close();
         toast(group ? `已归入分组「${group}」` : "已移出分组");
         await selectTool(name);
@@ -558,7 +817,6 @@
     });
   }
 
-  // 解析启动参数：支持单双引号包裹，避免空格被拆散。
   function parseArgs(input) {
     const args = [];
     let current = "";
@@ -593,13 +851,144 @@
     return args;
   }
 
-  // ---------- 注册 / 浏览 ----------
+  // ---------- 注册 / 编辑 ----------
+
+  function openCreateDialog() {
+    openAddDialog(null);
+  }
+
+  function openEditDialog() {
+    if (state.current) openAddDialog(state.current.tool);
+  }
+
+  function openAddDialog(tool) {
+    state.editingName = tool ? tool.name : null;
+    el("addDialogTitle").textContent = tool ? "编辑工具" : "注册工具";
+    el("addSubmitBtn").textContent = tool ? "保存" : "注册";
+    el("addForm").reset();
+    el("addName").disabled = !!tool;
+
+    el("addExeEnabled").checked = tool ? !!tool.exe : true;
+    el("addSourceEnabled").checked = tool ? !!tool.source : false;
+    el("addPath").value = tool && tool.exe ? tool.exe.path : "";
+    el("addSourceProgram").value = tool && tool.source ? tool.source.program : "";
+    el("addSourceArgs").value = tool && tool.source ? (tool.source.args || []).join(" ") : "";
+    el("addSourceWorkdir").value = tool && tool.source ? tool.source.workdir : "";
+    el("addSourceType").value = tool && tool.source ? tool.source.type : "gui";
+    el("addDefaultTarget").value = tool ? defaultTarget(tool) : "exe";
+    el("addName").value = tool ? tool.name : "";
+    el("addDesc").value = tool ? tool.description : "";
+    const meta = tool && tool.meta ? tool.meta : null;
+    el("addMeta").value = meta && Object.keys(meta).length ? JSON.stringify(meta) : "";
+    el("addGroup").value = meta && typeof meta.group === "string" ? meta.group : "";
+
+    updateAddSections();
+    renderGroupOptions();
+    el("addDialog").showModal();
+  }
+
+  function updateAddSections() {
+    const exeOn = el("addExeEnabled").checked;
+    const srcOn = el("addSourceEnabled").checked;
+    el("addExeFields").hidden = !exeOn;
+    el("addSourceFields").hidden = !srcOn;
+    el("addDefaultField").hidden = !(exeOn && srcOn);
+    if (exeOn && !srcOn) {
+      el("addDefaultTarget").value = "exe";
+    } else if (!exeOn && srcOn) {
+      el("addDefaultTarget").value = "source";
+    } else if (exeOn && srcOn) {
+      const v = el("addDefaultTarget").value;
+      if (v !== "exe" && v !== "source") el("addDefaultTarget").value = "exe";
+    }
+  }
+
+  function collectAddForm() {
+    const exeOn = el("addExeEnabled").checked;
+    const srcOn = el("addSourceEnabled").checked;
+    if (!exeOn && !srcOn) throw new Error("exe 与源码命令至少启用一项");
+
+    let meta = null;
+    const metaText = el("addMeta").value.trim();
+    if (metaText) {
+      try {
+        meta = JSON.parse(metaText);
+      } catch (err) {
+        throw new Error("meta 不是合法 JSON");
+      }
+    }
+    const group = el("addGroup").value.trim();
+    if (group) {
+      if (!meta || typeof meta !== "object" || Array.isArray(meta)) meta = {};
+      meta.group = group;
+    } else if (meta && typeof meta === "object" && !Array.isArray(meta)) {
+      delete meta.group;
+    }
+
+    const exePath = el("addPath").value.trim();
+    const source = {
+      program: el("addSourceProgram").value.trim(),
+      workdir: el("addSourceWorkdir").value.trim(),
+      args: parseArgs(el("addSourceArgs").value),
+      type: el("addSourceType").value,
+    };
+    if (exeOn && !exePath) throw new Error("已启用可执行文件，请填写 exe 路径");
+    if (srcOn && !source.program) throw new Error("已启用源码命令，请填写程序");
+    if (srcOn && !source.workdir) throw new Error("已启用源码命令，请填写工作目录");
+
+    return {
+      name: el("addName").value.trim(),
+      desc: el("addDesc").value.trim(),
+      meta,
+      default_target: exeOn && srcOn ? el("addDefaultTarget").value : exeOn ? "exe" : "source",
+      exe: exeOn ? { path: exePath } : null,
+      source: srcOn ? source : null,
+    };
+  }
+
+  async function submitAdd(event) {
+    event.preventDefault();
+    let payload;
+    try {
+      payload = collectAddForm();
+    } catch (err) {
+      toast(err.message, true);
+      return;
+    }
+    await withBusy(el("addSubmitBtn"), async () => {
+      try {
+        let tool;
+        if (state.editingName) {
+          tool = await put(`/api/tools/${encodeURIComponent(state.editingName)}`, payload);
+        } else {
+          tool = await post("/api/tools", payload);
+        }
+        el("addDialog").close();
+        toast(`${state.editingName ? "已保存" : "已注册"} ${tool.name}`);
+        state.editingName = null;
+        await loadTools();
+        await selectTool(tool.name);
+      } catch (err) {
+        reportError(err);
+      }
+    });
+  }
+
+  // ---------- 目录浏览 ----------
 
   let browseDir = "";
 
-  async function openBrowse() {
+  async function openBrowse(mode) {
+    state.browseMode = mode;
+    el("browseTitle").textContent =
+      mode === "workdir" ? "选择工作目录" : mode === "program" ? "选择程序" : "选择 exe";
+    el("browseSelectDir").hidden = mode !== "workdir";
     el("browseDialog").showModal();
-    await loadBrowse(browseDir || "");
+    let start = browseDir;
+    if (mode === "workdir" && el("addSourceWorkdir").value.trim()) {
+      start = el("addSourceWorkdir").value.trim();
+    }
+    await loadBrowse(start || "");
   }
 
   async function loadBrowse(dir) {
@@ -630,9 +1019,21 @@
             loadBrowse(item.dataset.dir);
             return;
           }
-          el("addPath").value = item.dataset.file;
+          const file = item.dataset.file;
+          if (!file) return;
+          if (state.browseMode === "workdir") return;
+          if (state.browseMode === "program") {
+            el("addSourceProgram").value = file;
+            if (!el("addName").value) {
+              const base = file.split("\\").pop().replace(/\.exe$/i, "");
+              el("addName").value = base.toLowerCase();
+            }
+            el("browseDialog").close();
+            return;
+          }
+          el("addPath").value = file;
           if (!el("addName").value) {
-            const base = item.dataset.file.split("\\").pop().replace(/\.exe$/i, "");
+            const base = file.split("\\").pop().replace(/\.exe$/i, "");
             el("addName").value = base.toLowerCase();
           }
           el("browseDialog").close();
@@ -643,46 +1044,10 @@
     }
   }
 
-  async function submitAdd(event) {
-    event.preventDefault();
-    const path = el("addPath").value.trim();
-    if (!path) return;
-
-    let meta = null;
-    const metaText = el("addMeta").value.trim();
-    if (metaText) {
-      try {
-        meta = JSON.parse(metaText);
-      } catch (err) {
-        toast("meta 不是合法 JSON", true);
-        return;
-      }
-    }
-
-    const group = el("addGroup").value.trim();
-    if (group) {
-      if (meta && typeof meta === "object" && !Array.isArray(meta)) {
-        meta.group = group;
-      } else {
-        meta = { group };
-      }
-    }
-
-    try {
-      const tool = await post("/api/tools", {
-        path,
-        name: el("addName").value.trim(),
-        desc: el("addDesc").value.trim(),
-        meta,
-      });
-      el("addDialog").close();
-      el("addForm").reset();
-      toast(`已注册 ${tool.name}`);
-      await loadTools();
-      await selectTool(tool.name);
-    } catch (err) {
-      reportError(err);
-    }
+  function selectBrowseDir() {
+    if (state.browseMode !== "workdir" || !browseDir) return;
+    el("addSourceWorkdir").value = browseDir;
+    el("browseDialog").close();
   }
 
   // ---------- meta ----------
@@ -705,11 +1070,7 @@
       return;
     }
     try {
-      await request(`/api/tools/${encodeURIComponent(state.current.tool.name)}/meta`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meta }),
-      });
+      await put(`/api/tools/${encodeURIComponent(state.current.tool.name)}/meta`, { meta });
       el("metaDialog").close();
       toast("meta 已更新");
       await selectTool(state.current.tool.name);
@@ -758,7 +1119,6 @@
       renderList();
       toolListEl.scrollTop = 0;
       savePreferences();
-      // 切到具体分组时，若右侧详情还是别的组，就顺势选中该组第一个工具。
       const outside = next !== "" && (!state.current || groupKey(state.current.tool) !== next);
       const first = outside
         ? sortTools(filteredTools()).find((tool) => groupKey(tool) === next)
@@ -777,28 +1137,60 @@
     el("groupCancel").addEventListener("click", () => el("groupDialog").close());
     el("groupForm").addEventListener("submit", submitGroup);
 
-    el("startBtn").addEventListener("click", (event) => startTool([], event.currentTarget, primaryMode()));
-    el("startAltBtn").addEventListener("click", (event) => startTool([], event.currentTarget, "detached"));
-    el("startArgsBtn").addEventListener("click", (event) =>
-      startTool(parseArgs(el("startArgs").value), event.currentTarget, primaryMode())
-    );
-    el("stopBtn").addEventListener("click", (event) => stopTool(event.currentTarget));
-
-    el("revealBtn").addEventListener("click", async (event) => {
+    el("startBtn").addEventListener("click", (event) => {
       if (!state.current) return;
-      await withBusy(event.currentTarget, async () => {
+      const tool = state.current.tool;
+      const target = defaultTarget(tool);
+      startTool(target, [], event.currentTarget, targetMode(tool, target));
+    });
+    el("startAltBtn").addEventListener("click", (event) => startAlt(event.currentTarget));
+    el("startArgsBtn").addEventListener("click", (event) => {
+      if (!state.current) return;
+      const tool = state.current.tool;
+      const target = state.startTarget || defaultTarget(tool);
+      startTool(target, parseArgs(el("startArgs").value), event.currentTarget, targetMode(tool, target));
+    });
+    el("startTarget").addEventListener("change", () => {
+      state.startTarget = el("startTarget").value;
+    });
+    el("stopBtn").addEventListener("click", (event) => stopTool(event.currentTarget));
+    el("consoleBtn").addEventListener("click", () => openConsoleDialog(0));
+
+    el("exeStartBtn").addEventListener("click", (event) => {
+      if (!state.current) return;
+      startTool("exe", [], event.currentTarget, targetMode(state.current.tool, "exe"));
+    });
+    el("sourceStartBtn").addEventListener("click", (event) => {
+      if (!state.current) return;
+      startTool("source", [], event.currentTarget, targetMode(state.current.tool, "source"));
+    });
+    el("sourceConsoleBtn").addEventListener("click", (event) => {
+      if (!state.current) return;
+      const tool = state.current.tool;
+      const mode = targetConsole(tool, "source") ? "hidden" : "console";
+      startTool("source", [], event.currentTarget, mode);
+    });
+    el("exeRevealBtn").addEventListener("click", () => reveal("exe"));
+    el("sourceRevealBtn").addEventListener("click", () => reveal("source"));
+    el("sourceWorkdirOpenBtn").addEventListener("click", () => reveal("source"));
+
+    el("revealBtn").addEventListener("click", (event) => {
+      if (!state.current) return;
+      withBusy(event.currentTarget, async () => {
         try {
-          await post(`/api/tools/${encodeURIComponent(state.current.tool.name)}/reveal`);
+          await reveal(defaultTarget(state.current.tool));
         } catch (err) {
           reportError(err);
         }
       });
     });
 
+    el("editBtn").addEventListener("click", openEditDialog);
+
     el("deleteBtn").addEventListener("click", async (event) => {
       if (!state.current) return;
       const name = state.current.tool.name;
-      if (!confirm(`确定删除注册项「${name}」？\n仅移除注册与启动记录，不删除 exe 文件。`)) return;
+      if (!confirm(`确定删除注册项「${name}」？\n仅移除注册与启动记录，不删除 exe 或源码文件。`)) return;
       await withBusy(event.currentTarget, async () => {
         try {
           await request(`/api/tools/${encodeURIComponent(name)}`, { method: "DELETE" });
@@ -813,15 +1205,15 @@
       });
     });
 
-    el("addBtn").addEventListener("click", () => {
-      el("addForm").reset();
-      renderGroupOptions();
-      el("addDialog").showModal();
-    });
+    el("addBtn").addEventListener("click", openCreateDialog);
     el("addCancel").addEventListener("click", () => el("addDialog").close());
     el("addForm").addEventListener("submit", submitAdd);
+    el("addExeEnabled").addEventListener("change", updateAddSections);
+    el("addSourceEnabled").addEventListener("change", updateAddSections);
+    el("browseExeBtn").addEventListener("click", () => openBrowse("exe"));
+    el("browseProgramBtn").addEventListener("click", () => openBrowse("program"));
+    el("browseWorkdirBtn").addEventListener("click", () => openBrowse("workdir"));
 
-    el("browseBtn").addEventListener("click", openBrowse);
     el("browseUp").addEventListener("click", () => {
       if (!browseDir) return;
       const parts = browseDir.replace(/[\\/]+$/, "").split(/[\\/]/);
@@ -829,11 +1221,20 @@
       const parent = parts.join("\\");
       loadBrowse(parent.length <= 2 ? "" : parent);
     });
+    el("browseSelectDir").addEventListener("click", selectBrowseDir);
     el("browseCancel").addEventListener("click", () => el("browseDialog").close());
 
     el("metaBtn").addEventListener("click", openMetaDialog);
     el("metaCancel").addEventListener("click", () => el("metaDialog").close());
     el("metaForm").addEventListener("submit", submitMeta);
+
+    el("consoleShowBtn").addEventListener("click", (event) => {
+      consoleAction(state.consolePID, true, event.currentTarget);
+    });
+    el("consoleHideBtn").addEventListener("click", (event) => {
+      consoleAction(state.consolePID, false, event.currentTarget);
+    });
+    el("consoleCancel").addEventListener("click", () => el("consoleDialog").close());
 
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {

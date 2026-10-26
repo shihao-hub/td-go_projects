@@ -2,6 +2,33 @@
 
 本文件记录 clictl 的版本变更。格式参考 Keep a Changelog，版本号遵循语义化版本。
 
+## [2.2.0] - 2026-10-26
+
+### Added
+
+- 双目标卡片：一张卡片可同时持有 exe 与源码命令（`source_program` / `source_workdir` / `source_args` / `source_type`），支持仅 exe、仅源码、exe + 源码；默认目标固定 exe，仅源码卡片自然为 source
+- 源码命令启动：`clictl add-cmd`（同名卡片无源码目标时附加，否则创建仅源码卡片）、`clictl edit` 全量编辑 exe/源码/默认目标/描述/meta；`add <path>` 同名卡片无 exe 时附加 exe
+- 隐藏控制台：`start --hidden` / 源码 gui 默认 hidden，启动时用 `CREATE_NEW_CONSOLE + STARTF_USESHOWWINDOW/SW_HIDE` 保留真实 TTY 但不显示窗口
+- 控制台按需显隐：`clictl console <name> --show|--hide [--pid N]` 与 `POST /api/tools/{name}/console`，通过短命 `__console-ctl` helper `AttachConsole(pid)` + `ShowWindow`，不重启进程；WebUI 运行实例列表逐 PID 操作
+- `run/start` 新增 `--exe|--source` 目标参数；`start` 模式扩展为 `console|hidden|detached`；`start` 返回 `target`/`mode`
+- WebUI 双目标注册/编辑弹窗、默认目标选择、源码启动/终端启动/打开目录、带参数启动目标下拉、运行实例与最近启动的目标/模式列
+- REST：`POST /api/tools` 支持 `exe`/`source` 双目标；新增 `PUT /api/tools/{name}` 全量编辑；`start` 支持 `target`/`hidden`；`reveal` 支持 `target`
+- MCP：`clictl.add` 支持 program/workdir/args/type/default_target；`clictl.start` 支持 target/mode；`clictl.run` 支持 target；`info` 返回双目标与实例
+- 数据迁移：tools v3（旧 `path` → `exe_path`，新增 source 列与 partial unique indexes）；launches 增加 `target`/`mode`；父仓 `migrations/002_v2.2.0_command_tools.sql` 存档
+
+### Changed
+
+- 总体 `status` 语义：双目标卡片任一目标有效 = active；详情分别给出 `exe.status` / `source.status`，失效一侧按钮禁用
+- `list` 卡片显示 exe/源码徽标与部分失效提示；搜索覆盖源码程序/命令/工作目录
+- `cp` 仅作用于 exe 目标；仅源码卡片报 `no_exe_target`
+- PowerShell 补全子命令与工具名补全纳入 `add-cmd` / `edit` / `console`
+
+### Tests
+
+- store v1→v3 迁移、双目标唯一性/附加/编辑/删除、任一目标有效状态、launches target/mode
+- runner `BuildSpec`、双目标探活、隐藏控制台 launch → 显示 → 隐藏 → 停止集成测试
+- API 源码注册/双目标编辑/删除目标/缺失工作目录/无实例 console
+
 ## [2.1.3] - 2026-10-25
 
 ### Fixed

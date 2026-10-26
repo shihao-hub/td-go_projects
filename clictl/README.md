@@ -4,16 +4,18 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 
 ## 特性
 
-- **桌面启动台（clictl-gui）**：托盘常驻，窗口内完成注册/搜索/启动/停止/定位/编辑 meta/查看启动记录；关闭窗口不退进程，再次打开精确恢复上次尺寸与位置
+- **桌面启动台（clictl-gui）**：托盘常驻，窗口内完成注册/搜索/启动/停止/定位/编辑 exe 与源码目标/查看启动记录；关闭窗口不退进程，再次打开精确恢复上次尺寸与位置
+- **双目标卡片**：一张卡片可同时持有 exe 与源码命令（如 `uv run zedhub-gui`），支持仅 exe / 仅源码 / 双目标；源码命令带工作目录与固定前缀参数，默认目标固定 exe
+- **按需控制台**：源码/命令行目标以隐藏控制台启动，详情页可随时显示/隐藏控制台窗口，不重启进程；`start --console` 仍直接打开可见控制台
 - **分组与视图**：`meta.group` 自定义分组；详情标题旁分组徽标点击即设，注册弹窗也可选已有分组；平铺（默认）/ 分组（标签页切换）两种视图，工具再多也只横向滚动标签栏，名称升序稳定排序，列表顺序不随启动次数跳动；视图、排序与当前分组服务端持久化
 - **双通道产物**：`bin/clictl-gui[-dev].exe` 只出窗口（带任何参数都不做 CLI），`bin/clictl-cli[-dev].exe` 是 console 子系统，prompt/管道/重定向全部合规；二者不可合并（原因见 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md`）
 - **同一 HTTP Handler**：GUI 与 `clictl serve` 托管完全相同的 WebUI + REST；WebUI 根路径永远是完整工作台，不存在「GUI 有页面、CLI 只有裸 API」的分裂
 - **管理命令永远输出 JSON**：`{"ok":true,"data":...}` / `{"ok":false,"error":{"code":"...","message":"..."}}`
 - **MCP server（`clictl mcp`）**：标准 MCP stdio 协议通道，把注册/启动/执行暴露为带 JSON Schema 的 MCP 工具（`clictl.list` / `clictl.run` 等 10 个）；`clictl schema` 可离线导出与 `tools/list` 同源的工具定义
 - **前台透传启动（run）**：stdin/stdout/stderr/退出码全部直通子进程，不经任何 shell 包裹，管理数据不混入 stdout
-- **双模式启动（start）**：窗口程序默认 DETACHED 后台分离（点火即走、不闪黑框）；`--console` 为命令行工具开独立控制台窗口（可见、可交互），记录 PID 供探活；`stop` 全量树杀
-- **类型自识别**：读取 exe 的 PE 子系统，WebUI 自动区分「命令行」与「窗口程序」，主按钮对应「终端启动」/「启动」
-- **真实控制台句柄**：终端启动用原生 `CreateProcess`（不设置 `STARTF_USESTDHANDLES`），窗口内 stdin/stdout/stderr 是真正的控制台设备（`isTTY=true`），TUI 程序可正常渲染与交互
+- **多模式启动（start）**：窗口程序默认 DETACHED 后台分离（点火即走、不闪黑框）；命令行/源码默认可见或隐藏控制台；`--console` 可见控制台、`--hidden` 隐藏控制台（可随时显示/隐藏）、`--detached` 完全无控制台；`stop` 全量树杀
+- **类型自识别**：exe 读取 PE 子系统区分「命令行」/「窗口程序」；源码命令按注册时的 `gui`/`console` 类型选择默认模式，WebUI 双目标分别显示启动按钮
+- **真实控制台句柄**：终端/隐藏控制台均用原生 `CreateProcess`（不设置 `STARTF_USESTDHANDLES`），窗口内 stdin/stdout/stderr 是真正的控制台设备（`isTTY=true`），TUI 程序可正常渲染与交互；隐藏控制台通过 `AttachConsole` + `ShowWindow` 按需显示
 - **PID 探活**：OpenProcess 存在性 + 终止态 + exe 路径比对三重校验（防 PID 回收复用误判）
 - **智能提示**：`run`/`start`/`stop` 未注册名时附相似名建议；PowerShell Tab 补全子命令与工具名
 - **启动记账**：启动次数、上次启动时间、耗时、退出码、后台实例 PID
@@ -31,26 +33,30 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 
 ## run vs start
 
-> **要在当前终端看输出、等它干完的用 `run`；点火就走的用 `start`；命令行工具要在独立窗口里跑的用 `start --console`。** WebUI 只提供 `start`（浏览器无法接管 TTY），需要前台透传/管道仍请用 `clictl-cli run`。
+> **要在当前终端看输出、等它干完的用 `run`；点火就走的用 `start`；需要可见/隐藏控制台用 `start --console` / `start --hidden`。** WebUI 只提供 `start`（浏览器无法接管 TTY），需要前台透传/管道仍请用 `clictl-cli run`。
 
-| | `run` | `start` | `start --console` |
-|---|---|---|---|
-| 语义 | 前台透传，阻塞到子进程退出 | 后台分离（DETACHED），立即返回 | 开独立控制台窗口，立即返回 |
-| IO | 当前终端 stdin/stdout/stderr 直通 | 全部断开 | 子进程独占新窗口的控制台 |
-| 退出码 | 透传子进程码 | 0 成功 / 127 未注册或失效 | 0 成功 / 127 未注册或失效 |
-| 记账 | 闭环 | 只落 started_at + pid；`stop` 闭环 | 同 start；GUI/serve 常驻时窗口关闭即闭环 |
+| | `run` | `start` | `start --console` | `start --hidden` |
+|---|---|---|---|---|
+| 语义 | 前台透传，阻塞到子进程退出 | 按目标默认模式启动，立即返回 | 可见控制台窗口，立即返回 | 隐藏控制台，立即返回 |
+| 默认场景 | 调试/看输出 | exe GUI → detached；源码 gui → hidden；console 目标 → console | 需要交互/看窗口 | 不占屏幕，可随时显示 |
+| IO | 当前终端 stdin/stdout/stderr 直通 | 无控制台（detached）或隐藏/可见控制台 | 子进程独占新窗口的控制台 | 子进程独占隐藏控制台 |
+| 退出码 | 透传子进程码 | 0 成功 / 127 未注册或失效 | 0 成功 / 127 未注册或失效 | 0 成功 / 127 未注册或失效 |
+| 记账 | 闭环 | 只落 started_at + pid；`stop` 闭环 | 同 start；GUI/serve 常驻时窗口关闭即闭环 | 同 start；`console` 显示/隐藏不重启进程 |
 
 ## 命令（`clictl-cli`）
 
 | 命令 | 说明 | 退出码 |
 |---|---|---|
-| `clictl add <path> [--name N] [--desc D] [--meta JSON]` | 注册 exe；name 默认=文件名去 `.exe` 小写化 | 0 / 1 |
+| `clictl add <path> [--name N] [--desc D] [--meta JSON]` | 注册/附加 exe；name 默认=文件名去 `.exe` 小写化 | 0 / 1 |
+| `clictl add-cmd --name N --program P --dir D --type gui\|console [--arg A ...]` | 注册/附加源码命令；同名卡片无源码目标时附加，否则创建仅源码卡片 | 0 / 1 |
+| `clictl edit <name> [--desc D] [--default exe\|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui\|console] [--source-arg A ...] [--no-source] [--meta JSON]` | 全量编辑 exe/源码/默认目标/描述/meta | 0 / 1 |
 | `clictl rm <name>` | 删除注册（级联删其 launches） | 0 / 1(not_found) |
 | `clictl set <name> --meta JSON` | 整体替换 meta（传 `{}` 清空） | 0 / 1 |
 | `clictl list [--status active\|invalid] [--running]` | 全部工具，名称升序；`--running` 只看后台活实例 | 0 |
 | `clictl info <name>` | 详情 + 最近 10 条启动 + 累计耗时 + 后台运行状态 | 0 / 1 |
-| `clictl run <name> [args...]` | 前台透传启动；未注册时 stderr 错误附相似名 `suggestions` | =子进程码 / 127 |
-| `clictl start [--console] <name> [args...]` | 启动并输出 pid；`--console` 开独立控制台窗口，缺省 DETACHED 后台分离；已有活实例时附 `already_running` | 0 / 127 |
+| `clictl run [--exe\|--source] <name> [args...]` | 前台透传启动；缺省走卡片默认目标；未注册时 stderr 错误附相似名 `suggestions` | =子进程码 / 127 |
+| `clictl start [--console\|--hidden\|--detached] [--exe\|--source] <name> [args...]` | 启动并输出 pid；缺省按目标类型自动选择；已有同目标活实例时附 `already_running` | 0 / 127 |
+| `clictl console <name> --show\|--hide [--pid N]` | 显示/隐藏运行中实例的控制台窗口，不重启进程；多实例缺省最新实例 | 0 / 1 |
 | `clictl stop <name>` | 全量终止该工具后台活实例（taskkill /T /F 树杀）并闭环记录 | 0 / 1 |
 | `clictl cp <name> <dest_dir> [--force]` | 复制已注册 exe 到目标目录（目录须已存在） | 0 / 1 |
 | `clictl serve [--port 0] [--open]` | 启动内置 WebUI + REST（与 GUI 同一 Handler；默认动态端口） | 阻塞 |
@@ -74,13 +80,15 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 | GET | `/api/preferences` | UI 偏好（视图 / 排序 / 当前分组） |
 | POST | `/api/preferences` | 保存 UI 偏好 `{view_mode,sort_mode,active_group}`；`view_mode` 取 `flat`/`tabs` |
 | GET | `/api/tools?status=&running=1` | 列表 / 仅运行中 |
-| POST | `/api/tools` | 注册 `{path,name,desc,meta}` |
-| GET | `/api/tools/{name}` | 详情 + 最近启动 + running |
+| POST | `/api/tools` | 注册 `{name,desc,meta,default_target,exe:{path}\|null,source:{program,workdir,args,type}\|null}`；兼容旧 `{path}` |
+| GET | `/api/tools/{name}` | 详情 + 最近启动 + running.instances + 双目标状态 |
+| PUT | `/api/tools/{name}` | 全量编辑；`exe:null`/`source:null` 删除对应目标 |
 | DELETE | `/api/tools/{name}` | 删除注册 |
 | PUT | `/api/tools/{name}/meta` | 替换 meta `{meta:{...}}` |
-| POST | `/api/tools/{name}/start` | 启动 `{args:[...],mode:"console"\|"detached"}`；mode 省略按 PE 子系统自动选择 |
+| POST | `/api/tools/{name}/start` | 启动 `{target:"exe"\|"source",args:[...],mode:"console"\|"hidden"\|"detached"}`；省略按目标自动选择 |
+| POST | `/api/tools/{name}/console` | 显示/隐藏控制台 `{visible:true\|false,pid?:N}`；不重启进程 |
 | POST | `/api/tools/{name}/stop` | 树杀全部后台实例 |
-| POST | `/api/tools/{name}/reveal` | 资源管理器定位 |
+| POST | `/api/tools/{name}/reveal` | 定位 `{target:"exe"\|"source"}`；source 打开工作目录 |
 | GET | `/api/fs?dir=` | 只读目录浏览（注册时选 exe） |
 
 包络与 CLI 一致（`ok/data` 或 `ok/error`），业务错误同时映射 HTTP 状态码。
@@ -129,4 +137,4 @@ uv run scripts/build.py --release   # release → bin/clictl-gui.exe + bin/clict
 - 窗口几何记忆：`<通道目录>\window.json`；诊断日志：`<通道目录>\clictl.log`
 - WebUI 视图偏好：`<通道目录>\ui_preferences.json`（视图 / 排序 / 当前分组；GUI 随机端口下 localStorage 不可靠，故服务端落盘）
 
-完整设计见 `PLAN.md` 与父仓 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md`；使用文档见父仓 `docs/projects/go_projects/clictl/clictl 使用指南.md`；表结构变更存档见父仓 `docs/projects/go_projects/clictl/migrations/`；其他 CLI 项目复用 JSON 输出模式见 `Go CLI JSON 输出模式参考.md`。
+完整设计见 `PLAN.md`、父仓 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md` 与 `plans/06-source-command-launch.md`；使用文档见父仓 `docs/projects/go_projects/clictl/clictl 使用指南.md`；表结构变更存档见父仓 `docs/projects/go_projects/clictl/migrations/`；其他 CLI 项目复用 JSON 输出模式见 `Go CLI JSON 输出模式参考.md`。

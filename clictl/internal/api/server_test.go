@@ -264,3 +264,116 @@ func TestMetaEndpoint(t *testing.T) {
 		t.Fatalf("meta 字段异常: %+v", meta)
 	}
 }
+
+func TestAddSourceCommandAndUpdateTargets(t *testing.T) {
+	h, _ := newTestServer(t)
+	exe := fakeExe(t)
+	work := t.TempDir()
+
+	rec, env := do(t, h, http.MethodPost, "/api/tools", map[string]any{
+		"name": "src-demo",
+		"source": map[string]any{
+			"program": exe,
+			"workdir": work,
+			"args":    []string{"run", "demo"},
+			"type":    "gui",
+		},
+	})
+	if rec.Code != http.StatusOK || !env.OK {
+		t.Fatalf("注册源码命令失败: HTTP %d, %s", rec.Code, rec.Body.String())
+	}
+	var tool struct {
+		Kind          string `json:"kind"`
+		DefaultTarget string `json:"default_target"`
+		Source        *struct {
+			Program string   `json:"program"`
+			Workdir string   `json:"workdir"`
+			Args    []string `json:"args"`
+			Type    string   `json:"type"`
+			Command string   `json:"command"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(env.Data, &tool); err != nil {
+		t.Fatal(err)
+	}
+	if tool.Kind != "source" || tool.DefaultTarget != "source" || tool.Source == nil {
+		t.Fatalf("源码卡片形状异常: %+v", tool)
+	}
+	if tool.Source.Command != filepath.Base(exe)+" run demo" {
+		t.Fatalf("command 展示异常: %q", tool.Source.Command)
+	}
+
+	// 附加 exe 并显式设默认 exe
+	rec, env = do(t, h, http.MethodPut, "/api/tools/src-demo", map[string]any{
+		"desc":           "双目标",
+		"default_target": "exe",
+		"exe":            map[string]any{"path": exe},
+		"source": map[string]any{
+			"program": exe,
+			"workdir": work,
+			"args":    []string{"run", "demo"},
+			"type":    "gui",
+		},
+	})
+	if rec.Code != http.StatusOK || !env.OK {
+		t.Fatalf("编辑双目标失败: HTTP %d, %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(env.Data, &tool); err != nil {
+		t.Fatal(err)
+	}
+	if tool.Kind != "both" || tool.DefaultTarget != "exe" {
+		t.Fatalf("双目标编辑异常: %+v", tool)
+	}
+
+	// 删除源码目标，只留 exe
+	rec, env = do(t, h, http.MethodPut, "/api/tools/src-demo", map[string]any{
+		"desc":           "仅 exe",
+		"default_target": "exe",
+		"exe":            map[string]any{"path": exe},
+		"source":         nil,
+	})
+	if rec.Code != http.StatusOK || !env.OK {
+		t.Fatalf("删除源码目标失败: HTTP %d, %s", rec.Code, rec.Body.String())
+	}
+	tool.Source = nil
+	if err := json.Unmarshal(env.Data, &tool); err != nil {
+		t.Fatal(err)
+	}
+	if tool.Kind != "exe" || tool.Source != nil {
+		t.Fatalf("删除源码目标后应为仅 exe: %+v", tool)
+	}
+}
+
+func TestAddSourceCommandRejectsMissingWorkdir(t *testing.T) {
+	h, _ := newTestServer(t)
+	exe := fakeExe(t)
+
+	rec, env := do(t, h, http.MethodPost, "/api/tools", map[string]any{
+		"name": "bad-src",
+		"source": map[string]any{
+			"program": exe,
+			"workdir": filepath.Join(t.TempDir(), "missing"),
+			"type":    "gui",
+		},
+	})
+	if rec.Code != http.StatusNotFound || env.OK {
+		t.Fatalf("缺失工作目录应 404，实际 HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	if env.Error == nil || env.Error.Code != "workdir_not_found" {
+		t.Fatalf("错误码 = %+v, want workdir_not_found", env.Error)
+	}
+}
+
+func TestConsoleEndpointWithoutRunning(t *testing.T) {
+	h, _ := newTestServer(t)
+	exe := fakeExe(t)
+	do(t, h, http.MethodPost, "/api/tools", map[string]any{"path": exe, "name": "demo"})
+
+	rec, env := do(t, h, http.MethodPost, "/api/tools/demo/console", map[string]any{"visible": true})
+	if rec.Code != http.StatusNotFound || env.OK {
+		t.Fatalf("无实例时 console 应 404，实际 HTTP %d: %s", rec.Code, rec.Body.String())
+	}
+	if env.Error == nil || env.Error.Code != "not_running" {
+		t.Fatalf("错误码 = %+v, want not_running", env.Error)
+	}
+}

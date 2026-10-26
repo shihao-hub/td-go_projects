@@ -22,36 +22,45 @@ import (
 
 // toolView store.Tool 的 MCP 视图：meta 从 RawMessage 展开为对象
 type toolView struct {
-	ID          int64          `json:"id"`
-	Name        string         `json:"name"`
-	Path        string         `json:"path"`
-	Description string         `json:"description"`
-	Status      string         `json:"status"`
-	Meta        map[string]any `json:"meta,omitempty"`
-	AddedAt     string         `json:"added_at"`
-	SizeBytes   int64          `json:"size_bytes"`
-	LaunchCount int64          `json:"launch_count"`
-	LastLaunch  string         `json:"last_launch,omitempty"`
+	ID            int64               `json:"id"`
+	Name          string              `json:"name"`
+	Path          string              `json:"path"`
+	Description   string              `json:"description"`
+	Status        string              `json:"status"`
+	Meta          map[string]any      `json:"meta,omitempty"`
+	AddedAt       string              `json:"added_at"`
+	DefaultTarget string              `json:"default_target"`
+	Kind          string              `json:"kind"`
+	Exe           *store.ExeTarget    `json:"exe,omitempty"`
+	Source        *store.SourceTarget `json:"source,omitempty"`
+	SizeBytes     int64               `json:"size_bytes"`
+	LaunchCount   int64               `json:"launch_count"`
+	LastLaunch    string              `json:"last_launch,omitempty"`
 }
 
 // runningToolView service.RunningTool 的 MCP 视图
 type runningToolView struct {
 	toolView
-	RunningPIDs []int  `json:"running_pids,omitempty"`
-	LastStartAt string `json:"last_start,omitempty"`
+	RunningPIDs []int                     `json:"running_pids,omitempty"`
+	Instances   []service.RunningInstance `json:"instances,omitempty"`
+	LastStartAt string                    `json:"last_start,omitempty"`
 }
 
 func toolToView(t store.Tool) toolView {
 	v := toolView{
-		ID:          t.ID,
-		Name:        t.Name,
-		Path:        t.Path,
-		Description: t.Description,
-		Status:      t.Status,
-		AddedAt:     t.AddedAt,
-		SizeBytes:   t.SizeBytes,
-		LaunchCount: t.LaunchCount,
-		LastLaunch:  t.LastLaunch,
+		ID:            t.ID,
+		Name:          t.Name,
+		Path:          t.Path,
+		Description:   t.Description,
+		Status:        t.Status,
+		AddedAt:       t.AddedAt,
+		DefaultTarget: t.DefaultTarget,
+		Kind:          t.Kind,
+		Exe:           t.Exe,
+		Source:        t.Source,
+		SizeBytes:     t.SizeBytes,
+		LaunchCount:   t.LaunchCount,
+		LastLaunch:    t.LastLaunch,
 	}
 	if len(t.Meta) > 0 {
 		var m map[string]any
@@ -66,6 +75,7 @@ func runningToView(r service.RunningTool) runningToolView {
 	return runningToolView{
 		toolView:    toolToView(r.Tool),
 		RunningPIDs: r.RunningPIDs,
+		Instances:   r.Instances,
 		LastStartAt: r.LastStartAt,
 	}
 }
@@ -92,10 +102,15 @@ type nameIn struct {
 }
 
 type addIn struct {
-	Path string         `json:"path" jsonschema:"exe 文件路径；须为 .exe 后缀且文件存在"`
-	Name string         `json:"name,omitempty" jsonschema:"调用名；缺省为文件名去 .exe 后小写化"`
-	Desc string         `json:"desc,omitempty" jsonschema:"描述"`
-	Meta map[string]any `json:"meta,omitempty" jsonschema:"扩展属性对象；仅允许 source、tags、group 三个 key，传 {} 等价于不设置"`
+	Path          string         `json:"path,omitempty" jsonschema:"exe 文件路径；与 program 至少填一项"`
+	Program       string         `json:"program,omitempty" jsonschema:"源码命令程序（如 uv 或 uv.exe 绝对路径）；与 path 至少填一项"`
+	Workdir       string         `json:"workdir,omitempty" jsonschema:"源码命令工作目录；填 program 时必填"`
+	Args          []string       `json:"args,omitempty" jsonschema:"源码命令固定前缀参数，如 [run, zedhub-gui]"`
+	Type          string         `json:"type,omitempty" jsonschema:"源码命令类型：gui（默认隐藏控制台）或 console（默认可见控制台）"`
+	DefaultTarget string         `json:"default_target,omitempty" jsonschema:"默认启动目标：exe 或 source；缺省 exe"`
+	Name          string         `json:"name,omitempty" jsonschema:"调用名；缺省为文件名或最后一个固定参数"`
+	Desc          string         `json:"desc,omitempty" jsonschema:"描述"`
+	Meta          map[string]any `json:"meta,omitempty" jsonschema:"扩展属性对象；仅允许 source、tags、group 三个 key，传 {} 等价于不设置"`
 }
 
 type setIn struct {
@@ -104,8 +119,10 @@ type setIn struct {
 }
 
 type startIn struct {
-	Name string   `json:"name" jsonschema:"工具调用名（大小写不敏感）"`
-	Args []string `json:"args,omitempty" jsonschema:"传给子进程的参数（数组直传，不经 shell 包裹）"`
+	Name   string   `json:"name" jsonschema:"工具调用名（大小写不敏感）"`
+	Target string   `json:"target,omitempty" jsonschema:"启动目标：exe 或 source；缺省使用卡片默认目标"`
+	Args   []string `json:"args,omitempty" jsonschema:"传给子进程的参数（数组直传，不经 shell 包裹）"`
+	Mode   string   `json:"mode,omitempty" jsonschema:"启动模式：console、hidden、detached；缺省按目标类型自动选择"`
 }
 
 type cpIn struct {
@@ -116,6 +133,7 @@ type cpIn struct {
 
 type runIn struct {
 	Name      string   `json:"name" jsonschema:"工具调用名（大小写不敏感）"`
+	Target    string   `json:"target,omitempty" jsonschema:"执行目标：exe 或 source；缺省使用卡片默认目标"`
 	Args      []string `json:"args,omitempty" jsonschema:"传给子进程的参数（数组直传，不经 shell 包裹）"`
 	TimeoutMs int64    `json:"timeout_ms,omitempty" jsonschema:"超时毫秒数，超时终止整棵进程树；缺省 60000；小于等于 0 按 60000 处理"`
 }
@@ -126,6 +144,7 @@ type infoOut struct {
 	FinishedCount   int64                `json:"finished_count"`
 	TotalDurationMs int64                `json:"total_duration_ms"`
 	Running         service.RunningState `json:"running"`
+	Console         bool                 `json:"console"`
 }
 
 type versionOut struct {
@@ -175,7 +194,7 @@ func registerTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "clictl.info",
-		Description: "查看单个工具详情：注册信息 + 最近 10 条启动记录 + 累计耗时 + 后台运行状态",
+		Description: "查看单个工具详情：exe/源码双目标、最近 10 条启动记录、累计耗时与后台运行状态",
 		Annotations: ro("工具详情"),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in nameIn) (*mcp.CallToolResult, *infoOut, error) {
 		svc, err := mustSvc()
@@ -192,12 +211,13 @@ func registerTools(s *mcp.Server) {
 			FinishedCount:   res.FinishedCount,
 			TotalDurationMs: res.TotalDurationMs,
 			Running:         res.Running,
+			Console:         res.Console,
 		}, nil
 	})
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "clictl.add",
-		Description: "注册一个 exe 工具；名字缺省取文件名去 .exe 小写化",
+		Description: "注册工具：exe、源码命令或双目标；path 与 program 至少填一项",
 		Annotations: &mcp.ToolAnnotations{Title: "注册工具", OpenWorldHint: boolPtr(false)},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in addIn) (*mcp.CallToolResult, toolView, error) {
 		svc, err := mustSvc()
@@ -208,7 +228,23 @@ func registerTools(s *mcp.Server) {
 		if err != nil {
 			return errResult(&service.Error{Code: "bad_args", Message: "meta 序列化失败: " + err.Error()}), toolView{}, nil
 		}
-		tool, err := svc.Add(in.Path, in.Name, in.Desc, raw)
+		var src *service.CommandInput
+		if in.Program != "" {
+			src = &service.CommandInput{
+				Program: in.Program,
+				Workdir: in.Workdir,
+				Args:    in.Args,
+				Type:    in.Type,
+			}
+		}
+		tool, err := svc.Create(service.CreateInput{
+			Name:          in.Name,
+			Description:   in.Desc,
+			Meta:          raw,
+			DefaultTarget: in.DefaultTarget,
+			ExePath:       in.Path,
+			Source:        src,
+		})
 		if err != nil {
 			return errResult(err), toolView{}, nil
 		}
@@ -253,14 +289,14 @@ func registerTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "clictl.start",
-		Description: "后台分离启动工具（DETACHED，点火即走），返回 pid；适合 GUI/托盘/服务类程序",
+		Description: "启动工具并返回 pid；target 可选 exe/source，mode 可选 console/hidden/detached；缺省按目标类型自动选择",
 		Annotations: &mcp.ToolAnnotations{Title: "后台启动", OpenWorldHint: boolPtr(true)},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in startIn) (*mcp.CallToolResult, runner.StartResult, error) {
 		svc, err := mustSvc()
 		if err != nil {
 			return errResult(err), runner.StartResult{}, nil
 		}
-		res, err := svc.Start(in.Name, in.Args)
+		res, err := svc.StartWithMode(in.Name, in.Target, in.Args, in.Mode)
 		if err != nil {
 			return errResult(err), runner.StartResult{}, nil
 		}
@@ -308,14 +344,14 @@ func registerTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "clictl.run",
-		Description: "非交互前台执行工具：收集 stdout/stderr 与退出码后返回（不透传 stdio）。超时或取消会终止整棵进程树。要看输出、等结果但不需要交互 stdin 的场景用它",
+		Description: "非交互前台执行工具：按 target 选择 exe/source，收集 stdout/stderr 与退出码后返回（不透传 stdio）。超时或取消会终止整棵进程树",
 		Annotations: &mcp.ToolAnnotations{Title: "前台执行", OpenWorldHint: boolPtr(true)},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in runIn) (*mcp.CallToolResult, runOut, error) {
 		svc, err := mustSvc()
 		if err != nil {
 			return errResult(err), runOut{}, nil
 		}
-		out, err := execTool(ctx, svc, in.Name, in.Args, in.TimeoutMs)
+		out, err := execTool(ctx, svc, in.Name, in.Target, in.Args, in.TimeoutMs)
 		if err != nil {
 			return errResult(err), runOut{}, nil
 		}

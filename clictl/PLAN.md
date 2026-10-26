@@ -239,6 +239,22 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - PowerShell `list | ConvertFrom-Json` 正常；`go test ./...` / `go vet ./...` 干净
 - release 门禁：无 tag / 脏工作区退出码 2，不产正式名
 
+### Phase 7：源码命令 + 隐藏控制台（v2.2.0）
+
+- [x] 26. 卡片双目标模型：`tools v3`（exe_path + source_program/source_workdir/source_args/source_type + default_target），partial unique indexes；launches 增加 `target`/`mode`；旧库自动重建迁移
+- [x] 27. 源码注册/编辑：`add-cmd`（附加或创建）、`edit`（全量）、`add` 附加 exe；API `POST/PUT /api/tools`；MCP add/info/start/run 双目标与 target/mode
+- [x] 28. 隐藏控制台：`StartHiddenConsole`（CREATE_NEW_CONSOLE + SW_HIDE，保留真实 TTY）；短命 `__console-ctl` helper `AttachConsole` + `ShowWindow`；`console --show/--hide` 与 API/WebUI 实例级显隐
+- [x] 29. WebUI：双目标注册/编辑、默认目标、源码启动/终端启动、控制台弹窗、运行实例、最近启动目标/模式
+- [x] 30. 测试与文档：store/runner/api 测试、CHANGELOG 2.2.0、迁移 SQL、README/父仓使用指南/MCP 文档
+
+验收标准：
+
+- 仅 exe / 仅源码 / exe + 源码 三种卡片可注册、启动、停止、编辑
+- `uv run zedhub-gui` 以 hidden 启动后可直接显示/隐藏控制台，PID 不变；`stop` 树杀
+- 默认目标固定 exe；`start --source` / `run --source` 可显式覆盖
+- exe 失效但源码有效时卡片仍可用；失效一侧按钮禁用
+- `go test ./...` / `go vet ./...` / `gofmt -l` / `uv run scripts/build.py` 通过
+
 ## 技术依赖
 
 | 依赖 | 用途 | 理由 |
@@ -278,6 +294,6 @@ func ValidateMeta(raw []byte) (json.RawMessage, error)
 - stop 的 taskkill /T 树杀依赖父子快照，极端竞态（PID 复用窗口）可能波及无关子进程——与 taskkill 本身行为一致，接受
 
 ---
-**最后更新：** 2026-10-21
+**最后更新：** 2026-10-26
 **作者：** Claude & User
-**版本：** v2.0（本次 = Wails v3 双通道桌面化：GUI + CLI + WebUI + dev/prod 隔离；上一版 v1.6 = --ascii + 补全编码固化）
+**版本：** v2.2（本次 = 源码命令双目标 + 隐藏控制台按需显隐；上一版 v2.1 = 分组/视图/排序，v2.0 = Wails v3 双通道桌面化）
