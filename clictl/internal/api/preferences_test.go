@@ -37,9 +37,10 @@ func TestPreferencesDefaults(t *testing.T) {
 func TestPreferencesPersistAndNormalize(t *testing.T) {
 	h, _ := newTestServer(t)
 	rec, env := do(t, h, http.MethodPost, "/api/preferences", map[string]any{
-		"view_mode":    "tabs",
-		"sort_mode":    "recent",
-		"active_group": "  dev  ",
+		"view_mode":        "tabs",
+		"sort_mode":        "recent",
+		"active_group":     "  dev  ",
+		"collapsed_groups": []string{" ops ", "", "ops", "dev"},
 	})
 	if rec.Code != http.StatusOK || !env.OK {
 		t.Fatalf("保存偏好失败: HTTP %d, %s", rec.Code, rec.Body.String())
@@ -51,17 +52,20 @@ func TestPreferencesPersistAndNormalize(t *testing.T) {
 	if prefs.ActiveGroup != "dev" {
 		t.Fatalf("分组名未裁剪空白: %q", prefs.ActiveGroup)
 	}
+	if len(prefs.CollapsedGroups) != 2 || prefs.CollapsedGroups[0] != "ops" || prefs.CollapsedGroups[1] != "dev" {
+		t.Fatalf("折叠分组未裁剪去重: %+v", prefs.CollapsedGroups)
+	}
 }
 
-// 旧版树状视图已由分组 tab 取代，读旧偏好时应静默迁移。
-func TestPreferencesLegacyTreeMigratesToTabs(t *testing.T) {
+// 树形视图与标签页视图共存，均属分组视图，读旧偏好应原样保留。
+func TestPreferencesTreeModeIsSupported(t *testing.T) {
 	h, _ := newTestServer(t)
 	_, env := do(t, h, http.MethodPost, "/api/preferences", map[string]any{"view_mode": "tree"})
 	if !env.OK {
 		t.Fatalf("保存偏好失败: %s", string(env.Data))
 	}
-	if prefs := getPrefs(t, h); prefs.ViewMode != "tabs" {
-		t.Fatalf("view_mode=tree 应迁移为 tabs: %+v", prefs)
+	if prefs := getPrefs(t, h); prefs.ViewMode != "tree" {
+		t.Fatalf("view_mode=tree 应原样保留: %+v", prefs)
 	}
 }
 

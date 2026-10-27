@@ -7,7 +7,7 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 - **桌面启动台（clictl-gui）**：托盘常驻，窗口内完成注册/搜索/启动/停止/定位/编辑 exe 与源码目标/查看启动记录；关闭窗口不退进程，再次打开精确恢复上次尺寸与位置
 - **双目标卡片**：一张卡片可同时持有 exe 与源码命令（如 `uv run zedhub-gui`），支持仅 exe / 仅源码 / 双目标；源码命令带工作目录与固定前缀参数，默认目标固定 exe
 - **按需控制台**：源码/命令行目标以隐藏控制台启动，详情页可随时显示/隐藏控制台窗口，不重启进程；`start --console` 仍直接打开可见控制台
-- **分组与视图**：`meta.group` 自定义分组；详情标题旁分组徽标点击即设，注册弹窗也可选已有分组；平铺（默认）/ 分组（标签页切换）两种视图，工具再多也只横向滚动标签栏，名称升序稳定排序，列表顺序不随启动次数跳动；视图、排序与当前分组服务端持久化
+- **分组与视图**：`meta.group` 自定义分组；详情标题旁分组徽标点击即设，注册弹窗也可选已有分组；平铺（默认）/ 分组两种视图，分组内可随时在标签页与树形折叠之间切换，标签栏只横向滚动，名称升序稳定排序，列表顺序不随启动次数跳动；视图、排序、当前分组与折叠状态服务端持久化
 - **双通道产物**：`bin/clictl-gui[-dev].exe` 只出窗口（带任何参数都不做 CLI），`bin/clictl-cli[-dev].exe` 是 console 子系统，prompt/管道/重定向全部合规；二者不可合并（原因见 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md`）
 - **同一 HTTP Handler**：GUI 与 `clictl serve` 托管完全相同的 WebUI + REST；WebUI 根路径永远是完整工作台，不存在「GUI 有页面、CLI 只有裸 API」的分裂
 - **管理命令永远输出 JSON**：`{"ok":true,"data":...}` / `{"ok":false,"error":{"code":"...","message":"..."}}`
@@ -78,7 +78,7 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 |---|---|---|
 | GET | `/api/meta` | 通道 / 版本 / 库路径 / 工具数 / 运行中数 |
 | GET | `/api/preferences` | UI 偏好（视图 / 排序 / 当前分组） |
-| POST | `/api/preferences` | 保存 UI 偏好 `{view_mode,sort_mode,active_group}`；`view_mode` 取 `flat`/`tabs` |
+| POST | `/api/preferences` | 保存 UI 偏好 `{view_mode,sort_mode,active_group,collapsed_groups}`；`view_mode` 取 `flat`/`tabs`/`tree` |
 | GET | `/api/tools?status=&running=1` | 列表 / 仅运行中 |
 | POST | `/api/tools` | 注册 `{name,desc,meta,default_target,exe:{path}\|null,source:{program,workdir,args,type}\|null}`；兼容旧 `{path}` |
 | GET | `/api/tools/{name}` | 详情 + 最近启动 + running.instances + 双目标状态 |
@@ -103,7 +103,7 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 
 - `source`：string，≤ 64 字节，来源标记
 - `tags`：[]string，≤ 8 项，每项 ≤ 32 字节，去重后小写存储
-- `group`：string，≤ 32 字节，首尾空白裁剪；WebUI 分组视图按它切标签页，空值归入「未分组」
+- `group`：string，≤ 32 字节，首尾空白裁剪；WebUI 分组视图按它切标签页或树形折叠，空值归入「未分组」
 
 ## 智能提示与补全
 
@@ -135,6 +135,6 @@ uv run scripts/build.py --release   # release → bin/clictl-gui.exe + bin/clict
 - `%APPDATA%\language_projects\clictl\prod\clictl.db`（release 产物）
 - 双通道改造前的旧库 `%APPDATA%\language_projects\clictl\clictl.db` 会在**每个通道首次启动时各复制一份**（含 `-wal`/`-shm`，旧文件保留），此后两通道数据独立演进
 - 窗口几何记忆：`<通道目录>\window.json`；诊断日志：`<通道目录>\clictl.log`
-- WebUI 视图偏好：`<通道目录>\ui_preferences.json`（视图 / 排序 / 当前分组；GUI 随机端口下 localStorage 不可靠，故服务端落盘）
+- WebUI 视图偏好：`<通道目录>\ui_preferences.json`（视图 / 排序 / 当前分组 / 折叠分组；GUI 随机端口下 localStorage 不可靠，故服务端落盘）
 
 完整设计见 `PLAN.md`、父仓 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md` 与 `plans/06-source-command-launch.md`；使用文档见父仓 `docs/projects/go_projects/clictl/clictl 使用指南.md`；表结构变更存档见父仓 `docs/projects/go_projects/clictl/migrations/`；其他 CLI 项目复用 JSON 输出模式见 `Go CLI JSON 输出模式参考.md`。

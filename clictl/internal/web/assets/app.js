@@ -15,8 +15,10 @@
     query: "",
     meta: null,
     viewMode: "flat",
+    groupLayout: "tabs",
     sortMode: "name",
     activeGroup: "",
+    collapsedGroups: new Set(),
     editingName: null,
     browseMode: "exe",
     startTarget: "",
@@ -208,10 +210,16 @@
     try {
       const prefs = await request("/api/preferences");
       if (prefs) {
-        const mode = prefs.view_mode === "tabs" || prefs.view_mode === "tree" ? "tabs" : "flat";
+        const mode = prefs.view_mode === "tabs" || prefs.view_mode === "tree" ? prefs.view_mode : "flat";
         state.viewMode = mode;
+        if (mode !== "flat") state.groupLayout = mode;
         state.sortMode = SORT_MODES.has(prefs.sort_mode) ? prefs.sort_mode : "name";
         state.activeGroup = typeof prefs.active_group === "string" ? prefs.active_group.trim() : "";
+        state.collapsedGroups = new Set(
+          Array.isArray(prefs.collapsed_groups)
+            ? prefs.collapsed_groups.filter((name) => typeof name === "string" && name.trim())
+            : []
+        );
       }
     } catch (err) {
       console.error(err);
@@ -227,6 +235,7 @@
           view_mode: state.viewMode,
           sort_mode: state.sortMode,
           active_group: state.activeGroup,
+          collapsed_groups: Array.from(state.collapsedGroups),
         });
       } catch (err) {
         console.error(err);
@@ -235,9 +244,17 @@
   }
 
   function updateViewControls() {
+    const grouped = state.viewMode !== "flat";
     el("viewToggle")
       .querySelectorAll(".view-btn")
-      .forEach((btn) => btn.classList.toggle("active", btn.dataset.view === state.viewMode));
+      .forEach((btn) =>
+        btn.classList.toggle("active", grouped ? btn.dataset.view === "grouped" : btn.dataset.view === "flat")
+      );
+    const layoutToggle = el("groupLayoutToggle");
+    layoutToggle.hidden = !grouped;
+    layoutToggle
+      .querySelectorAll(".view-btn")
+      .forEach((btn) => btn.classList.toggle("active", btn.dataset.layout === state.viewMode));
     el("sortSelect").value = state.sortMode;
   }
 
@@ -398,9 +415,13 @@
 
   function renderList() {
     const items = sortTools(filteredTools());
-    toolListEl.classList.toggle("grouped", state.viewMode === "tabs");
+    toolListEl.classList.toggle("grouped", state.viewMode !== "flat");
     if (state.viewMode === "tabs") {
       renderTabs(items);
+      return;
+    }
+    if (state.viewMode === "tree") {
+      renderTree(items);
       return;
     }
     el("groupTabs").hidden = true;
@@ -411,6 +432,66 @@
       return;
     }
     toolListEl.innerHTML = items.map(renderCard).join("");
+    bindCards();
+  }
+
+  // 分组树：按组垂直折叠，状态持久化到 collapsed_groups，与标签页共用同一套偏好。
+  function renderTree(items) {
+    el("groupTabs").hidden = true;
+    el("groupHint").hidden = true;
+
+    const groups = new Map();
+    for (const tool of items) {
+      const key = groupKey(tool);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(tool);
+    }
+    const keys = [...groups.keys()].sort((a, b) => {
+      if (a === UNGROUPED_KEY) return 1;
+      if (b === UNGROUPED_KEY) return -1;
+      return String(a).localeCompare(String(b), "zh-Hans-CN", { sensitivity: "base" });
+    });
+
+    countEl.textContent = `${items.length} 个`;
+    if (items.length === 0) {
+      toolListEl.innerHTML = `<div class="empty-hint">${state.tools.length === 0 ? "尚未注册任何工具" : "没有匹配的工具"}</div>`;
+      return;
+    }
+
+    toolListEl.innerHTML = keys
+      .map((key) => {
+        const groupItems = groups.get(key);
+        const label = key === UNGROUPED_KEY ? UNGROUPED : key;
+        const collapsed = state.collapsedGroups.has(key);
+        const runningCount = groupItems.filter((tool) => state.running.has(tool.name)).length;
+        return `
+          <div class="tree-group ${collapsed ? "collapsed" : ""}">
+            <div class="tree-group-header" data-group-toggle="${escapeHtml(key)}">
+              <span class="tree-arrow">▾</span>
+              <span class="tree-dot"></span>
+              <span class="tree-title">${escapeHtml(label)}</span>
+              ${runningCount ? `<span class="tree-running">${runningCount} 运行中</span>` : ""}
+              <span class="tree-count">${groupItems.length}</span>
+            </div>
+            <div class="tree-group-items">${groupItems.map(renderCard).join("")}</div>
+          </div>`;
+      })
+      .join("");
+
+    toolListEl.querySelectorAll("[data-group-toggle]").forEach((header) => {
+      header.addEventListener("click", () => {
+        const key = header.dataset.groupToggle;
+        const groupEl = header.closest(".tree-group");
+        if (state.collapsedGroups.has(key)) {
+          state.collapsedGroups.delete(key);
+          groupEl.classList.remove("collapsed");
+        } else {
+          state.collapsedGroups.add(key);
+          groupEl.classList.add("collapsed");
+        }
+        savePreferences();
+      });
+    });
     bindCards();
   }
 
@@ -1104,7 +1185,21 @@
     el("viewToggle").addEventListener("click", (event) => {
       const btn = event.target.closest(".view-btn");
       if (!btn) return;
-      state.viewMode = btn.dataset.view === "tabs" ? "tabs" : "flat";
+      const next = btn.dataset.view === "grouped" ? state.groupLayout : "flat";
+      if (next === state.viewMode) return;
+      state.viewMode = next;
+      updateViewControls();
+      renderList();
+      savePreferences();
+    });
+
+    el("groupLayoutToggle").addEventListener("click", (event) => {
+      const btn = event.target.closest(".view-btn");
+      if (!btn) return;
+      const next = btn.dataset.layout === "tree" ? "tree" : "tabs";
+      if (next === state.viewMode) return;
+      state.viewMode = next;
+      state.groupLayout = next;
       updateViewControls();
       renderList();
       savePreferences();

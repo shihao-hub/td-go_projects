@@ -46,9 +46,15 @@
           <span class="count" id="toolCount">0 个</span>
         </div>
         <div class="list-controls">
-          <div class="view-toggle" id="viewToggle">
-            <button type="button" class="view-btn active" data-view="flat" title="不分组平铺显示">平铺</button>
-            <button type="button" class="view-btn" data-view="tabs" title="按 meta.group 分组，以标签页切换">分组</button>
+          <div class="controls-left">
+            <div class="view-toggle" id="viewToggle">
+              <button type="button" class="view-btn active" data-view="flat" title="不分组平铺显示">平铺</button>
+              <button type="button" class="view-btn" data-view="grouped" title="按 meta.group 分组显示">分组</button>
+            </div>
+            <div class="view-toggle sub-toggle" id="groupLayoutToggle" hidden>
+              <button type="button" class="view-btn" data-layout="tabs" title="分组以标签页切换">标签</button>
+              <button type="button" class="view-btn" data-layout="tree" title="分组以树状折叠">树形</button>
+            </div>
           </div>
           <select id="sortSelect" class="sort-select" title="排序方式">
             <option value="name">名称</option>

@@ -212,6 +212,17 @@ body {
   border-radius: 6px;
 }
 
+.controls-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 分组视图下的二级布局开关（标签 / 树形） */
+.sub-toggle[hidden] { display: none; }
+.sub-toggle .view-btn { padding: 4px 8px; font-size: 11px; }
+
 .view-btn {
   padding: 4px 10px;
   font-size: 11.5px;
@@ -415,6 +426,68 @@ body {
 .group-hint[hidden] { display: none; }
 
 .tool-list.grouped .card-group { display: none; }
+
+/* ---------- 分组树形视图 ---------- */
+
+.tree-group { margin-bottom: 10px; }
+.tree-group:last-child { margin-bottom: 0; }
+
+.tree-group-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree-group-header:hover { background: var(--panel-2); }
+
+.tree-arrow {
+  color: var(--muted);
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+
+.tree-group.collapsed .tree-arrow { transform: rotate(-90deg); }
+
+.tree-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.tree-title {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-running {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  color: var(--live);
+}
+
+.tree-count {
+  margin-left: auto;
+  font: 11px var(--mono);
+  color: var(--muted);
+}
+
+.tree-group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 0 10px;
+}
+
+.tree-group.collapsed .tree-group-items { display: none; }
 
 
 .pulse {

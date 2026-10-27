@@ -15,25 +15,25 @@ const uiPreferencesFileName = "ui_preferences.json"
 
 // UIPreferences WebUI 视图偏好。
 type UIPreferences struct {
-	ViewMode    string `json:"view_mode"`    // flat | tabs，默认 flat；旧值 tree 归一化为 tabs
-	SortMode    string `json:"sort_mode"`    // name | recent | launches | added
-	ActiveGroup string `json:"active_group"` // tabs 视图当前选中的分组名，空串 = 全部
+	ViewMode        string   `json:"view_mode"`        // flat | tabs | tree，默认 flat；tabs/tree 均为分组视图
+	SortMode        string   `json:"sort_mode"`        // name | recent | launches | added
+	ActiveGroup     string   `json:"active_group"`     // tabs 视图当前选中的分组键，空串 = 全部
+	CollapsedGroups []string `json:"collapsed_groups"` // tree 视图折叠的分组键
 }
 
 func defaultUIPreferences() UIPreferences {
 	return UIPreferences{
-		ViewMode:    "flat",
-		SortMode:    "name",
-		ActiveGroup: "",
+		ViewMode:        "flat",
+		SortMode:        "name",
+		ActiveGroup:     "",
+		CollapsedGroups: []string{},
 	}
 }
 
 // normalizePreferences 收口非法值，保证前端拿到的永远是受支持枚举。
 func normalizePreferences(p UIPreferences) UIPreferences {
 	switch p.ViewMode {
-	case "tabs":
-	case "tree":
-		p.ViewMode = "tabs" // 旧版树状视图已由分组 tab 取代，静默迁移
+	case "tabs", "tree":
 	default:
 		p.ViewMode = "flat"
 	}
@@ -43,6 +43,20 @@ func normalizePreferences(p UIPreferences) UIPreferences {
 		p.SortMode = "name"
 	}
 	p.ActiveGroup = strings.TrimSpace(p.ActiveGroup)
+	groups := make([]string, 0, len(p.CollapsedGroups))
+	seen := make(map[string]struct{}, len(p.CollapsedGroups))
+	for _, g := range p.CollapsedGroups {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		if _, dup := seen[g]; dup {
+			continue
+		}
+		seen[g] = struct{}{}
+		groups = append(groups, g)
+	}
+	p.CollapsedGroups = groups
 	return p
 }
 
