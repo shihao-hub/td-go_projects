@@ -19,6 +19,7 @@
     sortMode: "name",
     activeGroup: "",
     collapsedGroups: new Set(),
+    groupDraft: new Set(),
     editingName: null,
     browseMode: "exe",
     startTarget: "",
@@ -260,14 +261,20 @@
 
   // ---------- 分组与排序 ----------
 
-  function groupOf(tool) {
-    const group = tool.meta && typeof tool.meta.group === "string" ? tool.meta.group.trim() : "";
-    return group || UNGROUPED;
+  function groupListOf(tool) {
+    const raw = tool.meta ? tool.meta.group : null;
+    const list = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+    return list
+      .filter((g) => typeof g === "string")
+      .map((g) => g.trim())
+      .filter((g) => g);
   }
 
-  function groupKey(tool) {
-    const group = groupOf(tool);
-    return group === UNGROUPED ? UNGROUPED_KEY : group;
+  // toolInGroup 判断工具是否归属某分组键；UNGROUPED_KEY 表示没有任何分组。
+  function toolInGroup(tool, key) {
+    const own = groupListOf(tool);
+    if (key === UNGROUPED_KEY) return own.length === 0;
+    return own.includes(key);
   }
 
   function compareName(a, b) {
@@ -365,9 +372,9 @@
     const running = state.running.has(tool.name);
     const active = state.current && state.current.tool.name === tool.name ? "active" : "";
     const invalid = tool.status === "invalid" ? "invalid" : "";
-    const group = groupOf(tool);
-    const groupTag =
-      group !== UNGROUPED ? `<span class="card-group" title="分组">${escapeHtml(group)}</span>` : "";
+    const groupTags = groupListOf(tool)
+      .map((group) => `<span class="card-group" title="分组">${escapeHtml(group)}</span>`)
+      .join("");
     const exeBadge = tool.exe ? '<span class="card-kind exe">exe</span>' : "";
     const sourceBadge = tool.source ? '<span class="card-kind source">源码</span>' : "";
     let warn = "";
@@ -390,7 +397,7 @@
           ${aliasTag}
           ${exeBadge}
           ${sourceBadge}
-          ${groupTag}
+          ${groupTags}
           ${warn}
           <button type="button" class="card-group-btn" data-group-for="${escapeHtml(tool.name)}" title="设置分组">分组</button>
         </div>
@@ -447,9 +454,12 @@
 
     const groups = new Map();
     for (const tool of items) {
-      const key = groupKey(tool);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(tool);
+      const own = groupListOf(tool);
+      const buckets = own.length ? own : [UNGROUPED_KEY];
+      for (const key of buckets) {
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(tool);
+      }
     }
     const keys = [...groups.keys()].sort((a, b) => {
       if (a === UNGROUPED_KEY) return 1;
@@ -511,9 +521,12 @@
     const counts = new Map();
     const runningGroups = new Set();
     for (const tool of items) {
-      const key = groupKey(tool);
-      counts.set(key, (counts.get(key) || 0) + 1);
-      if (state.running.has(tool.name)) runningGroups.add(key);
+      const own = groupListOf(tool);
+      const buckets = own.length ? own : [UNGROUPED_KEY];
+      for (const key of buckets) {
+        counts.set(key, (counts.get(key) || 0) + 1);
+        if (state.running.has(tool.name)) runningGroups.add(key);
+      }
     }
 
     const tabs = [{ key: "", label: "全部", count: items.length, running: runningGroups.has(UNGROUPED_KEY) }];
@@ -544,7 +557,7 @@
       .join("");
 
     const visible =
-      state.activeGroup === "" ? items : items.filter((tool) => groupKey(tool) === state.activeGroup);
+      state.activeGroup === "" ? items : items.filter((tool) => toolInGroup(tool, state.activeGroup));
     countEl.textContent = `${visible.length} 个`;
     toolListEl.innerHTML = visible.length
       ? visible.map(renderCard).join("")
@@ -648,10 +661,10 @@
     el("statPids").textContent = running && info.running.pids.length ? info.running.pids.join(", ") : "无";
 
     const groupChip = el("detailGroupChip");
-    const group = groupOf(tool);
-    groupChip.textContent = group === UNGROUPED ? "设置分组" : group;
-    groupChip.title = group === UNGROUPED ? "点击为该工具设置分组" : `当前分组「${group}」，点击修改`;
-    groupChip.classList.toggle("unset", group === UNGROUPED);
+    const groupList = groupListOf(tool);
+    groupChip.textContent = groupList.length ? groupList.join(" / ") : "设置分组";
+    groupChip.title = groupList.length ? `当前分组「${groupList.join(" / ")}」，点击修改` : "点击为该工具设置分组";
+    groupChip.classList.toggle("unset", groupList.length === 0);
 
     let metaText = "（无）";
     if (tool.meta && Object.keys(tool.meta).length > 0) {
@@ -851,39 +864,89 @@
   function existingGroups() {
     const groups = new Set();
     for (const tool of state.tools) {
-      const group = groupOf(tool);
-      if (group !== UNGROUPED && group !== UNGROUPED_KEY) groups.add(group);
+      for (const group of groupListOf(tool)) groups.add(group);
     }
     return [...groups].sort((a, b) => a.localeCompare(b, "zh-Hans-CN", { sensitivity: "base" }));
   }
 
+  // 分组多选：chips 反映 state.groupDraft 的归属，点击切换选中态。
   function renderGroupOptions() {
     const groups = existingGroups();
     el("groupOptions").innerHTML = groups
       .map((group) => `<option value="${escapeHtml(group)}"></option>`)
       .join("");
-    const chips = [`<button type="button" class="group-chip-option" data-group="">未分组</button>`].concat(
-      groups.map(
+    el("groupChips").innerHTML = groups
+      .map(
         (group) =>
-          `<button type="button" class="group-chip-option" data-group="${escapeHtml(group)}">${escapeHtml(group)}</button>`
+          `<button type="button" class="group-chip-option" data-group="${escapeHtml(group)}" aria-pressed="${
+            state.groupDraft.has(group) ? "true" : "false"
+          }">${escapeHtml(group)}</button>`
       )
-    );
-    el("groupChips").innerHTML = chips.join("");
+      .join("");
+    syncGroupChips();
     el("groupChips")
       .querySelectorAll(".group-chip-option")
       .forEach((chip) => {
         chip.addEventListener("click", () => {
-          el("groupDialogInput").value = chip.dataset.group || "";
-          el("groupDialogInput").focus();
+          toggleGroupDraft(chip.dataset.group);
         });
       });
   }
 
+  function syncGroupChips() {
+    el("groupChips")
+      .querySelectorAll(".group-chip-option")
+      .forEach((chip) => {
+        const selected = state.groupDraft.has(chip.dataset.group);
+        chip.classList.toggle("selected", selected);
+        chip.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+  }
+
+  // ensureGroupChip 保证分组名有对应 chip（新名字即时补一个）。
+  function ensureGroupChip(name) {
+    const chips = el("groupChips");
+    const exists = [...chips.querySelectorAll(".group-chip-option")].some(
+      (chip) => chip.dataset.group === name
+    );
+    if (exists) return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "group-chip-option";
+    chip.dataset.group = name;
+    chip.textContent = name;
+    chip.addEventListener("click", () => toggleGroupDraft(name));
+    chips.appendChild(chip);
+  }
+
+  // toggleGroupDraft 切换待保存的分组归属。
+  function toggleGroupDraft(group) {
+    const name = (group || "").trim();
+    if (!name) return;
+    if (state.groupDraft.has(name)) {
+      state.groupDraft.delete(name);
+    } else {
+      state.groupDraft.add(name);
+    }
+    syncGroupChips();
+  }
+
+  function addGroupFromInput() {
+    const input = el("groupDialogInput");
+    const name = input.value.trim();
+    if (!name) return;
+    state.groupDraft.add(name);
+    ensureGroupChip(name);
+    syncGroupChips();
+    input.value = "";
+    input.focus();
+  }
+
   function openGroupDialog() {
     if (!state.current) return;
+    state.groupDraft = new Set(groupListOf(state.current.tool));
     renderGroupOptions();
-    const group = groupOf(state.current.tool);
-    el("groupDialogInput").value = group === UNGROUPED ? "" : group;
+    el("groupDialogInput").value = "";
     el("groupDialog").showModal();
     el("groupDialogInput").focus();
   }
@@ -892,10 +955,10 @@
     event.preventDefault();
     if (!state.current) return;
     const name = state.current.tool.name;
-    const group = el("groupDialogInput").value.trim();
+    const groups = [...state.groupDraft].map((g) => g.trim()).filter((g) => g);
     const meta = Object.assign({}, state.current.tool.meta || {});
-    if (group) {
-      meta.group = group;
+    if (groups.length) {
+      meta.group = groups;
     } else {
       delete meta.group;
     }
@@ -903,7 +966,7 @@
       try {
         await put(`/api/tools/${encodeURIComponent(name)}/meta`, { meta });
         el("groupDialog").close();
-        toast(group ? `已归入分组「${group}」` : "已移出分组");
+        toast(groups.length ? `已归入分组「${groups.join(" / ")}」` : "已移出分组");
         await selectTool(name);
         await loadTools();
       } catch (err) {
@@ -976,7 +1039,8 @@
     el("addDesc").value = tool ? tool.description : "";
     const meta = tool && tool.meta ? tool.meta : null;
     el("addMeta").value = meta && Object.keys(meta).length ? JSON.stringify(meta) : "";
-    el("addGroup").value = meta && typeof meta.group === "string" ? meta.group : "";
+    // 分组多值：注册弹窗只做「追加」，留空即保持现有分组，避免编辑时静默清空多分组
+    el("addGroup").value = "";
 
     updateAddSections();
     renderGroupOptions();
@@ -1013,12 +1077,15 @@
         throw new Error("meta 不是合法 JSON");
       }
     }
-    const group = el("addGroup").value.trim();
-    if (group) {
+    const groupInput = el("addGroup").value.trim();
+    if (groupInput) {
       if (!meta || typeof meta !== "object" || Array.isArray(meta)) meta = {};
-      meta.group = group;
-    } else if (meta && typeof meta === "object" && !Array.isArray(meta)) {
-      delete meta.group;
+      const own = Array.isArray(meta.group)
+        ? meta.group
+        : typeof meta.group === "string"
+        ? [meta.group]
+        : [];
+      meta.group = [...own, groupInput];
     }
 
     const exePath = el("addPath").value.trim();
@@ -1230,9 +1297,9 @@
       renderList();
       toolListEl.scrollTop = 0;
       savePreferences();
-      const outside = next !== "" && (!state.current || groupKey(state.current.tool) !== next);
+      const outside = next !== "" && (!state.current || !toolInGroup(state.current.tool, next));
       const first = outside
-        ? sortTools(filteredTools()).find((tool) => groupKey(tool) === next)
+        ? sortTools(filteredTools()).find((tool) => toolInGroup(tool, next))
         : null;
       if (first) selectTool(first.name).catch(reportError);
     });
@@ -1247,6 +1314,12 @@
     el("detailGroupChip").addEventListener("click", openGroupDialog);
     el("groupCancel").addEventListener("click", () => el("groupDialog").close());
     el("groupForm").addEventListener("submit", submitGroup);
+    el("groupAddBtn").addEventListener("click", addGroupFromInput);
+    el("groupDialogInput").addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      addGroupFromInput();
+    });
 
     el("startBtn").addEventListener("click", (event) => {
       if (!state.current) return;

@@ -151,8 +151,41 @@ func TestMetaAcceptsGroup(t *testing.T) {
 	if err := json.Unmarshal(env.Data, &info); err != nil {
 		t.Fatalf("解析 info 失败: %v", err)
 	}
-	if info.Tool.Meta["group"] != "Dev" {
-		t.Fatalf("group 应裁剪空白后保存为 Dev，实际 %+v", info.Tool.Meta)
+	groups, ok := info.Tool.Meta["group"].([]any)
+	if !ok || len(groups) != 1 || groups[0] != "Dev" {
+		t.Fatalf("单字符串 group 应归一为 [\"Dev\"]，实际 %+v", info.Tool.Meta)
+	}
+}
+
+// 多分组：数组去重后存回数组，顺序稳定。
+func TestMetaAcceptsMultiGroup(t *testing.T) {
+	h, _ := newTestServer(t)
+	exe := fakeExe(t)
+	do(t, h, http.MethodPost, "/api/tools", map[string]any{
+		"path": exe,
+		"name": "demo",
+		"meta": map[string]any{"group": []any{"a", "a", "b"}},
+	})
+
+	_, env := do(t, h, http.MethodPut, "/api/tools/demo/meta", map[string]any{
+		"meta": map[string]any{"group": []any{"ops", "dev"}},
+	})
+	if env.Error != nil {
+		t.Fatalf("set 多分组失败: %+v", env.Error)
+	}
+
+	_, env = do(t, h, http.MethodGet, "/api/tools/demo", nil)
+	var info struct {
+		Tool struct {
+			Meta map[string]any `json:"meta"`
+		} `json:"tool"`
+	}
+	if err := json.Unmarshal(env.Data, &info); err != nil {
+		t.Fatalf("解析 info 失败: %v", err)
+	}
+	groups, ok := info.Tool.Meta["group"].([]any)
+	if !ok || len(groups) != 2 || groups[0] != "dev" || groups[1] != "ops" {
+		t.Fatalf("多分组应排序存为 [dev ops]，实际 %+v", info.Tool.Meta)
 	}
 }
 

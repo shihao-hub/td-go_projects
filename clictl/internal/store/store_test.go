@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -415,4 +416,68 @@ func TestAlias(t *testing.T) {
 	if _, err := st.SetAlias("demo", "a\x00b"); err == nil {
 		t.Fatal("含 NUL 的别名应被拒绝")
 	}
+}
+
+// TestGroupRoundTrip 多分组元数据经 Add/Get、SetMeta 往返保形（数组）。
+func TestGroupRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	exe := fakeExe(t, dir, "demo.exe")
+
+	st, err := OpenAt(filepath.Join(dir, "clictl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	tool, err := st.AddTool(AddSpec{
+		Name: "demo",
+		Meta: json.RawMessage(`{"group":["ops","dev"]}`),
+		Exe:  &ExeSpec{Path: exe},
+	})
+	if err != nil {
+		t.Fatalf("AddTool 失败: %v", err)
+	}
+	if got := metaGroups(t, tool); strings.Join(got, ",") != "dev,ops" {
+		t.Fatalf("AddTool 后 group 应为 [dev ops]: %v", got)
+	}
+
+	got, err := st.GetTool("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals := metaGroups(t, got); strings.Join(vals, ",") != "dev,ops" {
+		t.Fatalf("GetTool 后 group 往返不符: %v", vals)
+	}
+
+	if _, err := st.SetMeta("demo", json.RawMessage(`{"group":"solo"}`)); err != nil {
+		t.Fatalf("SetMeta 失败: %v", err)
+	}
+	got, err = st.GetTool("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals := metaGroups(t, got); strings.Join(vals, ",") != "solo" {
+		t.Fatalf("单字符串写入应归一为 [solo]: %v", vals)
+	}
+}
+
+// metaGroups 读取工具 meta 里的 group 数组。
+func metaGroups(t *testing.T, tool Tool) []string {
+	t.Helper()
+	if tool.Meta == nil {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(tool.Meta, &obj); err != nil {
+		t.Fatalf("解析 meta 失败: %v", err)
+	}
+	val, ok := obj["group"]
+	if !ok {
+		return nil
+	}
+	var groups []string
+	if err := json.Unmarshal(val, &groups); err != nil {
+		t.Fatalf("group 应为数组: %s", val)
+	}
+	return groups
 }

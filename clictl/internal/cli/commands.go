@@ -180,11 +180,11 @@ func EmitHelp() {
 			{"flag": "--ascii", "desc": "非 ASCII 转义为 \\uXXXX（PS 5.1 管道等编码不可靠环境用，下游 JSON.parse 自动还原）；位置规则同 --pretty，run 透传段除外"},
 		},
 		"commands": []map[string]string{
-			{"cmd": "add <path> [--name N] [--alias A] [--desc D] [--meta JSON]", "desc": "注册 exe；同名卡片无 exe 时附加；name 默认=文件名去 .exe 小写化；alias 为显示用别名"},
-			{"cmd": "add-cmd --name N --program P --dir D --type gui|console [--arg A ...]", "desc": "注册/附加源码命令目标；同名卡片无源码目标时附加，否则创建仅源码卡片"},
-			{"cmd": "edit <name> [--alias A] [--desc D] [--default exe|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui|console] [--source-arg A ...] [--no-source] [--meta JSON]", "desc": "全量编辑卡片：别名、exe、源码、默认目标、描述、meta"},
+			{"cmd": "add <path> [--name N] [--alias A] [--desc D] [--meta JSON] [--group G ...]", "desc": "注册 exe；同名卡片无 exe 时附加；name 默认=文件名去 .exe 小写化；alias 为显示用别名；--group 可重复，设置多个分组"},
+			{"cmd": "add-cmd --name N --program P --dir D --type gui|console [--arg A ...] [--group G ...]", "desc": "注册/附加源码命令目标；同名卡片无源码目标时附加，否则创建仅源码卡片；--group 可重复"},
+			{"cmd": "edit <name> [--alias A] [--desc D] [--default exe|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui|console] [--source-arg A ...] [--no-source] [--meta JSON] [--group G ...]", "desc": "全量编辑卡片：别名、exe、源码、默认目标、描述、meta、分组（--group 可重复，空串=清除）"},
 			{"cmd": "rm <name>", "desc": "删除注册（级联删其 launches）"},
-			{"cmd": "set <name> --meta JSON", "desc": "整体替换 meta（传 {} 清空）"},
+			{"cmd": "set <name> --meta JSON", "desc": "整体替换 meta（传 {} 清空）；多分组请传数组：{\"group\":[\"dev\",\"ops\"]}"},
 			{"cmd": "list [--status active|invalid] [--running]", "desc": "全部工具，名称升序；--running 只看后台活实例"},
 			{"cmd": "info <name>", "desc": "详情 + 最近 10 条启动 + 累计耗时 + 后台运行状态 + 双目标状态"},
 			{"cmd": "run [--exe|--source] <name> [args...]", "desc": "前台透传启动（要看输出、等结果的用它）；缺省走卡片默认目标；退出码=子进程码，未注册/失效=127"},
@@ -210,15 +210,17 @@ func cmdAdd(args []string) int {
 	alias := fs.String("alias", "", "别名，可选；与原名同时显示")
 	desc := fs.String("desc", "", "描述")
 	meta := fs.String("meta", "", `扩展属性 JSON，如 {"source":"cargo","tags":["dev"]}`)
-	flags, positional := splitFlags(args, map[string]bool{"name": true, "alias": true, "desc": true, "meta": true})
+	var groupFlag []string
+	fs.Var((*stringList)(&groupFlag), "group", "分组名，可重复；空串=清除分组")
+	flags, positional := splitFlags(args, map[string]bool{"name": true, "alias": true, "desc": true, "meta": true, "group": true})
 	if !parseFlags(fs, flags) {
 		return 0
 	}
 	if len(positional) != 1 {
-		Fail("bad_args", "用法: clictl add <path> [--name N] [--alias A] [--desc D] [--meta JSON]")
+		Fail("bad_args", "用法: clictl add <path> [--name N] [--alias A] [--desc D] [--meta JSON] [--group G ...]")
 		return 1
 	}
-	tool, err := mustService().Add(positional[0], *name, *desc, *alias, json.RawMessage(*meta))
+	tool, err := mustService().Add(positional[0], *name, *desc, *alias, mergeGroupFlag(json.RawMessage(*meta), groupFlag))
 	if err != nil {
 		failService(err, false)
 		return 1
@@ -237,6 +239,48 @@ func (s *stringList) Set(v string) error {
 	return nil
 }
 
+// mergeGroupFlag 把 --group 合并进 meta JSON：覆盖 meta 对象中的 group key；
+// 仅给空串项时删除 group key（= 清除分组）；未给 flag 时原样返回。
+// meta 本身非法时不再改写，交给下游 ValidateMeta 报 meta_invalid。
+func mergeGroupFlag(metaRaw json.RawMessage, groups []string) json.RawMessage {
+	if len(groups) == 0 {
+		return metaRaw
+	}
+	meta := map[string]json.RawMessage{}
+	if trimmed := strings.TrimSpace(string(metaRaw)); trimmed != "" {
+		if err := json.Unmarshal(metaRaw, &meta); err != nil {
+			return metaRaw
+		}
+	}
+	vals := make([]string, 0, len(groups))
+	cleared := false
+	for _, g := range groups {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			cleared = true
+			continue
+		}
+		vals = append(vals, g)
+	}
+	if len(vals) == 0 {
+		if !cleared {
+			return metaRaw
+		}
+		delete(meta, "group")
+	} else {
+		raw, err := json.Marshal(vals)
+		if err != nil {
+			return metaRaw
+		}
+		meta["group"] = raw
+	}
+	out, err := json.Marshal(meta)
+	if err != nil {
+		return metaRaw
+	}
+	return out
+}
+
 // cmdAddCmd 注册/附加源码命令目标。
 // 同名卡片没有源码目标时附加；没有同名卡片时创建仅源码卡片。
 func cmdAddCmd(args []string) int {
@@ -249,9 +293,11 @@ func cmdAddCmd(args []string) int {
 	meta := fs.String("meta", "", "扩展属性 JSON")
 	var fixed []string
 	fs.Var((*stringList)(&fixed), "arg", "固定前缀参数，可重复")
+	var groupFlag []string
+	fs.Var((*stringList)(&groupFlag), "group", "分组名，可重复；空串=清除分组")
 	flags, positional := splitFlags(args, map[string]bool{
 		"name": true, "program": true, "dir": true, "type": true,
-		"desc": true, "meta": true, "arg": true,
+		"desc": true, "meta": true, "arg": true, "group": true,
 	})
 	if !parseFlags(fs, flags) {
 		return 0
@@ -267,7 +313,7 @@ func cmdAddCmd(args []string) int {
 		Args:    fixed,
 		Type:    *typ,
 		Desc:    *desc,
-		Meta:    json.RawMessage(*meta),
+		Meta:    mergeGroupFlag(json.RawMessage(*meta), groupFlag),
 	})
 	if err != nil {
 		failService(err, false)
@@ -303,16 +349,18 @@ func cmdEdit(args []string) int {
 	var srcArgs []string
 	fs.Var((*stringList)(&srcArgs), "source-arg", "替换源码固定参数，可重复")
 	meta := fs.String("meta", "", "整体替换 meta JSON")
+	var groupFlag []string
+	fs.Var((*stringList)(&groupFlag), "group", "分组名，可重复；空串=清除分组")
 	flags, positional := splitFlags(rest, map[string]bool{
 		"alias": true, "desc": true, "default": true, "exe": true,
 		"source-program": true, "source-dir": true, "source-type": true,
-		"source-arg": true, "meta": true,
+		"source-arg": true, "meta": true, "group": true,
 	})
 	if !parseFlags(fs, flags) {
 		return 0
 	}
 	if len(positional) != 1 {
-		Fail("bad_args", "用法: clictl edit <name> [--alias A] [--desc D] [--default exe|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui|console] [--source-arg A ...] [--no-source] [--meta JSON]")
+		Fail("bad_args", "用法: clictl edit <name> [--alias A] [--desc D] [--default exe|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui|console] [--source-arg A ...] [--no-source] [--meta JSON] [--group G ...]")
 		return 1
 	}
 
@@ -389,6 +437,9 @@ func cmdEdit(args []string) int {
 		metaRaw = json.RawMessage(*meta)
 	} else {
 		metaRaw = current.Meta
+	}
+	if set["group"] {
+		metaRaw = mergeGroupFlag(metaRaw, groupFlag)
 	}
 
 	tool, err := mustService().Update(service.UpdateInput{

@@ -706,6 +706,17 @@ body {
   border-color: var(--line-strong);
 }
 
+/* 分组多选：选中态表示该工具当前归属此分组 */
+.group-chip-option.selected {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: rgba(240, 160, 40, 0.45);
+}
+
+/* 分组输入行：输入框 + 「添加」按钮 */
+.group-input-row { display: flex; gap: 8px; }
+.group-input-row input { flex: 1; }
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

@@ -113,12 +113,12 @@ type addIn struct {
 	Name          string         `json:"name,omitempty" jsonschema:"调用名；缺省为文件名或最后一个固定参数"`
 	Alias         string         `json:"alias,omitempty" jsonschema:"显示用别名（仅 WebUI 展示与搜索，不影响调用名）"`
 	Desc          string         `json:"desc,omitempty" jsonschema:"描述"`
-	Meta          map[string]any `json:"meta,omitempty" jsonschema:"扩展属性对象；仅允许 source、tags、group 三个 key，传 {} 等价于不设置"`
+	Meta          map[string]any `json:"meta,omitempty" jsonschema:"扩展属性对象；仅允许 source、tags、group 三个 key，传 {} 等价于不设置。group 可为字符串或字符串数组（≤8 项、单项 ≤32 字节），存为数组"`
 }
 
 type setIn struct {
 	Name string         `json:"name" jsonschema:"工具调用名（大小写不敏感）"`
-	Meta map[string]any `json:"meta" jsonschema:"整体替换后的扩展属性对象；传 {} 清空；仅允许 source、tags、group"`
+	Meta map[string]any `json:"meta" jsonschema:"整体替换后的扩展属性对象；传 {} 清空；仅允许 source、tags、group（group 可为字符串或字符串数组：≤8 项、单项 ≤32 字节，存为数组）"`
 }
 
 type startIn struct {
@@ -257,7 +257,7 @@ func registerTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "clictl.set",
-		Description: "整体替换工具的扩展属性 meta（传 {} 清空）；仅允许 source、tags、group 三个 key",
+		Description: "整体替换工具的扩展属性 meta（传 {} 清空）；仅允许 source、tags、group 三个 key；group 可为字符串或字符串数组（≤8 项、单项 ≤32 字节），存为数组",
 		Annotations: &mcp.ToolAnnotations{Title: "更新 meta", DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in setIn) (*mcp.CallToolResult, toolView, error) {
 		svc, err := mustSvc()

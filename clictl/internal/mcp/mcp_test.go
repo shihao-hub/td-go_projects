@@ -207,6 +207,51 @@ func TestCrudFlow(t *testing.T) {
 	}
 }
 
+// TestGroupMetaRoundTrip 多分组 meta 经 MCP add/set 往返保形（存为数组）。
+func TestGroupMetaRoundTrip(t *testing.T) {
+	cs := newTestSession(t)
+	exe := fakeExe(t, "mcpgroup.exe")
+
+	addRes, tool := call[toolView](t, cs, "clictl.add", map[string]any{
+		"path": exe,
+		"name": "mcpgroup",
+		"meta": map[string]any{"group": []any{"ops", "dev"}},
+	})
+	if addRes.IsError {
+		t.Fatalf("add 失败: %s", errText(t, addRes))
+	}
+	if groups, ok := tool.Meta["group"].([]any); !ok || len(groups) != 2 || groups[0] != "dev" || groups[1] != "ops" {
+		t.Fatalf("add 后 group 应为 [dev ops]，实际 %+v", tool.Meta)
+	}
+
+	setRes, updated := call[toolView](t, cs, "clictl.set", map[string]any{
+		"name": "mcpgroup",
+		"meta": map[string]any{"group": "solo"},
+	})
+	if setRes.IsError {
+		t.Fatalf("set 失败: %s", errText(t, setRes))
+	}
+	if groups, ok := updated.Meta["group"].([]any); !ok || len(groups) != 1 || groups[0] != "solo" {
+		t.Fatalf("单字符串 group 应归一为 [solo]，实际 %+v", updated.Meta)
+	}
+
+	// 清空分组 = 剔除 key
+	clearRes, cleared := call[toolView](t, cs, "clictl.set", map[string]any{
+		"name": "mcpgroup",
+		"meta": map[string]any{"group": []any{}},
+	})
+	if clearRes.IsError {
+		t.Fatalf("清空 group 失败: %s", errText(t, clearRes))
+	}
+	if cleared.Meta != nil {
+		t.Fatalf("空数组应剔除整个 meta，实际 %+v", cleared.Meta)
+	}
+
+	if rmRes, _ := call[toolView](t, cs, "clictl.rm", map[string]any{"name": "mcpgroup"}); rmRes.IsError {
+		t.Fatalf("rm 失败: %s", errText(t, rmRes))
+	}
+}
+
 func TestRunToolExitCodes(t *testing.T) {
 	cs := newTestSession(t)
 	// 注册真 cmd.exe 用于执行语义验证

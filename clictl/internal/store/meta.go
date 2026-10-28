@@ -10,11 +10,12 @@ import (
 
 // meta 约束常量（应用层强制，单点收口在 ValidateMeta）
 const (
-	metaMaxBytes     = 4096 // 序列化后总字节数硬限
-	metaSourceMaxLen = 64   // source 最大字节数
-	metaTagsMaxCount = 8    // tags 最多项数
-	metaTagMaxLen    = 32   // 单个 tag 最大字节数
-	metaGroupMaxLen  = 32   // 分组名最大字节数
+	metaMaxBytes      = 4096 // 序列化后总字节数硬限
+	metaSourceMaxLen  = 64   // source 最大字节数
+	metaTagsMaxCount  = 8    // tags 最多项数
+	metaTagMaxLen     = 32   // 单个 tag 最大字节数
+	metaGroupMaxCount = 8    // group 最多项数
+	metaGroupMaxLen   = 32   // 单个分组名最大字节数
 )
 
 // MetaError meta 校验错误，Code 即 JSON 错误码：
@@ -30,9 +31,10 @@ func (e *MetaError) Error() string { return e.Message }
 // 规则：
 //   - 空串 / null / {} → 存储 NULL（返回 nil）
 //   - 必须是 JSON 对象；key 白名单：source（string ≤64B）、tags（[]string ≤8 项、每项 ≤32B）、
-//     group（string ≤32B，首尾空白裁剪）
+//     group（string 或 []string，≤8 项、每项 ≤32B，首尾空白裁剪）
 //   - 未知 key → meta_unknown_key；类型/长度不符 → meta_invalid；规范化后 >4KB → meta_too_large
 //   - tags 去重后小写存储并排序，保证同输入同存储
+//   - group 写入时统一归一化为数组：去重（大小写敏感）后排序；空值/空数组剔除整个 key
 func ValidateMeta(raw []byte) (json.RawMessage, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
@@ -81,18 +83,17 @@ func ValidateMeta(raw []byte) (json.RawMessage, error) {
 				out["tags"] = dedup
 			}
 		case "group":
-			var s string
-			if err := json.Unmarshal(val, &s); err != nil {
-				return nil, &MetaError{Code: "meta_invalid", Message: "group 必须是字符串"}
+			groups, err := parseGroups(val)
+			if err != nil {
+				return nil, err
 			}
-			s = strings.TrimSpace(s)
-			if s == "" {
-				continue
+			norm, err := normalizeGroups(groups)
+			if err != nil {
+				return nil, err
 			}
-			if len(s) > metaGroupMaxLen {
-				return nil, &MetaError{Code: "meta_invalid", Message: fmt.Sprintf("group 超长（≤%d 字节）", metaGroupMaxLen)}
+			if len(norm) > 0 {
+				out["group"] = norm
 			}
-			out["group"] = s
 		default:
 			return nil, &MetaError{Code: "meta_unknown_key", Message: fmt.Sprintf("未知的 meta key: %q（白名单: source, tags, group）", key)}
 		}
@@ -109,4 +110,43 @@ func ValidateMeta(raw []byte) (json.RawMessage, error) {
 		return nil, &MetaError{Code: "meta_too_large", Message: fmt.Sprintf("meta 序列化后超过 %d 字节", metaMaxBytes)}
 	}
 	return norm, nil
+}
+
+// parseGroups 解析 group 原值：兼容单字符串（旧数据/旧调用）与字符串数组。
+func parseGroups(raw json.RawMessage) ([]string, error) {
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		return []string{single}, nil
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, &MetaError{Code: "meta_invalid", Message: "group 必须是字符串或字符串数组"}
+	}
+	return list, nil
+}
+
+// normalizeGroups 规范化分组数组：trim → 剔空 → 单项长度 → 精确去重 → 排序 → 数量上限。
+// 去重大小写敏感（保留存量分组名如 "Dev" 的原样语义）。
+func normalizeGroups(groups []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(groups))
+	out := make([]string, 0, len(groups))
+	for _, raw := range groups {
+		g := strings.TrimSpace(raw)
+		if g == "" {
+			continue
+		}
+		if len(g) > metaGroupMaxLen {
+			return nil, &MetaError{Code: "meta_invalid", Message: fmt.Sprintf("group 超长（≤%d 字节）", metaGroupMaxLen)}
+		}
+		if _, dup := seen[g]; dup {
+			continue
+		}
+		seen[g] = struct{}{}
+		out = append(out, g)
+	}
+	if len(out) > metaGroupMaxCount {
+		return nil, &MetaError{Code: "meta_invalid", Message: fmt.Sprintf("group 数量超限（≤%d 个）", metaGroupMaxCount)}
+	}
+	sort.Strings(out)
+	return out, nil
 }

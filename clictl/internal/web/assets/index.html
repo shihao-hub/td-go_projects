@@ -284,8 +284,8 @@
       </div>
 
       <label class="field">
-        <span>分组（可选）</span>
-        <input id="addGroup" type="text" maxlength="32" list="groupOptions" placeholder="例如 dev、release、工作；留空 = 未分组" spellcheck="false">
+        <span>追加分组（可选）</span>
+        <input id="addGroup" type="text" maxlength="32" list="groupOptions" placeholder="留空保持现有分组；多分组请用详情页分组徽标" spellcheck="false">
       </label>
 
       <label class="field">
@@ -320,7 +320,7 @@
   <dialog id="metaDialog" class="dialog">
     <form method="dialog" class="dialog-form" id="metaForm">
       <h2>编辑 meta</h2>
-      <p class="muted">仅允许 source（字符串）、tags（字符串数组）与 group（字符串），传 <code>{}</code> 表示清空。</p>
+      <p class="muted">仅允许 source（字符串）、tags（字符串数组）与 group（字符串或字符串数组），传 <code>{}</code> 表示清空。</p>
       <label class="field">
         <span>JSON</span>
         <textarea id="metaInput" rows="8" spellcheck="false"></textarea>
@@ -336,10 +336,13 @@
   <dialog id="groupDialog" class="dialog">
     <form method="dialog" class="dialog-form" id="groupForm">
       <h2>设置分组</h2>
-      <p class="muted">输入新分组名或从已有分组选择；留空表示未分组。</p>
+      <p class="muted">可多选；点击已有分组切换归属，输入新分组名后点「添加」。全部取消 = 未分组。</p>
       <label class="field">
         <span>分组名称</span>
-        <input id="groupDialogInput" type="text" maxlength="32" list="groupOptions" placeholder="例如 dev、release、工作" spellcheck="false">
+        <div class="group-input-row">
+          <input id="groupDialogInput" type="text" maxlength="32" list="groupOptions" placeholder="例如 dev、release、工作" spellcheck="false">
+          <button type="button" class="btn" id="groupAddBtn">添加</button>
+        </div>
         <datalist id="groupOptions"></datalist>
       </label>
       <div class="group-chips" id="groupChips"></div>
