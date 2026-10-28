@@ -180,9 +180,9 @@ func EmitHelp() {
 			{"flag": "--ascii", "desc": "非 ASCII 转义为 \\uXXXX（PS 5.1 管道等编码不可靠环境用，下游 JSON.parse 自动还原）；位置规则同 --pretty，run 透传段除外"},
 		},
 		"commands": []map[string]string{
-			{"cmd": "add <path> [--name N] [--desc D] [--meta JSON]", "desc": "注册 exe；同名卡片无 exe 时附加；name 默认=文件名去 .exe 小写化"},
+			{"cmd": "add <path> [--name N] [--alias A] [--desc D] [--meta JSON]", "desc": "注册 exe；同名卡片无 exe 时附加；name 默认=文件名去 .exe 小写化；alias 为显示用别名"},
 			{"cmd": "add-cmd --name N --program P --dir D --type gui|console [--arg A ...]", "desc": "注册/附加源码命令目标；同名卡片无源码目标时附加，否则创建仅源码卡片"},
-			{"cmd": "edit <name> [--desc D] [--default exe|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui|console] [--source-arg A ...] [--no-source] [--meta JSON]", "desc": "全量编辑卡片：exe、源码、默认目标、描述、meta"},
+			{"cmd": "edit <name> [--alias A] [--desc D] [--default exe|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui|console] [--source-arg A ...] [--no-source] [--meta JSON]", "desc": "全量编辑卡片：别名、exe、源码、默认目标、描述、meta"},
 			{"cmd": "rm <name>", "desc": "删除注册（级联删其 launches）"},
 			{"cmd": "set <name> --meta JSON", "desc": "整体替换 meta（传 {} 清空）"},
 			{"cmd": "list [--status active|invalid] [--running]", "desc": "全部工具，名称升序；--running 只看后台活实例"},
@@ -207,17 +207,18 @@ func EmitHelp() {
 func cmdAdd(args []string) int {
 	fs := newFlagSet("add")
 	name := fs.String("name", "", "调用名，默认=文件名去 .exe 后小写")
+	alias := fs.String("alias", "", "别名，可选；与原名同时显示")
 	desc := fs.String("desc", "", "描述")
 	meta := fs.String("meta", "", `扩展属性 JSON，如 {"source":"cargo","tags":["dev"]}`)
-	flags, positional := splitFlags(args, map[string]bool{"name": true, "desc": true, "meta": true})
+	flags, positional := splitFlags(args, map[string]bool{"name": true, "alias": true, "desc": true, "meta": true})
 	if !parseFlags(fs, flags) {
 		return 0
 	}
 	if len(positional) != 1 {
-		Fail("bad_args", "用法: clictl add <path> [--name N] [--desc D] [--meta JSON]")
+		Fail("bad_args", "用法: clictl add <path> [--name N] [--alias A] [--desc D] [--meta JSON]")
 		return 1
 	}
-	tool, err := mustService().Add(positional[0], *name, *desc, json.RawMessage(*meta))
+	tool, err := mustService().Add(positional[0], *name, *desc, *alias, json.RawMessage(*meta))
 	if err != nil {
 		failService(err, false)
 		return 1
@@ -276,7 +277,7 @@ func cmdAddCmd(args []string) int {
 	return 0
 }
 
-// cmdEdit 全量编辑卡片：描述、默认目标、exe、源码、meta。
+// cmdEdit 全量编辑卡片：别名、描述、默认目标、exe、源码、meta。
 func cmdEdit(args []string) int {
 	noExe, noSource := false, false
 	rest := make([]string, 0, len(args))
@@ -292,6 +293,7 @@ func cmdEdit(args []string) int {
 	}
 
 	fs := newFlagSet("edit")
+	aliasFlag := fs.String("alias", "", "别名；空串=清除")
 	desc := fs.String("desc", "", "描述")
 	def := fs.String("default", "", "默认目标: exe | source")
 	exe := fs.String("exe", "", "替换 exe 路径")
@@ -302,7 +304,7 @@ func cmdEdit(args []string) int {
 	fs.Var((*stringList)(&srcArgs), "source-arg", "替换源码固定参数，可重复")
 	meta := fs.String("meta", "", "整体替换 meta JSON")
 	flags, positional := splitFlags(rest, map[string]bool{
-		"desc": true, "default": true, "exe": true,
+		"alias": true, "desc": true, "default": true, "exe": true,
 		"source-program": true, "source-dir": true, "source-type": true,
 		"source-arg": true, "meta": true,
 	})
@@ -310,7 +312,7 @@ func cmdEdit(args []string) int {
 		return 0
 	}
 	if len(positional) != 1 {
-		Fail("bad_args", "用法: clictl edit <name> [--desc D] [--default exe|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui|console] [--source-arg A ...] [--no-source] [--meta JSON]")
+		Fail("bad_args", "用法: clictl edit <name> [--alias A] [--desc D] [--default exe|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui|console] [--source-arg A ...] [--no-source] [--meta JSON]")
 		return 1
 	}
 
@@ -324,6 +326,10 @@ func cmdEdit(args []string) int {
 	}
 	current := info.Tool
 
+	alias := current.Alias
+	if set["alias"] {
+		alias = *aliasFlag
+	}
 	description := current.Description
 	if set["desc"] {
 		description = *desc
@@ -387,6 +393,7 @@ func cmdEdit(args []string) int {
 
 	tool, err := mustService().Update(service.UpdateInput{
 		Name:          positional[0],
+		Alias:         alias,
 		Description:   description,
 		Meta:          metaRaw,
 		DefaultTarget: defaultTarget,

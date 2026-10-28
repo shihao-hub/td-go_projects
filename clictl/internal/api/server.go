@@ -162,6 +162,7 @@ type sourceInput struct {
 type addRequest struct {
 	Path          string          `json:"path"` // 兼容旧字段：等价于 exe.path
 	Name          string          `json:"name"`
+	Alias         string          `json:"alias"`
 	Desc          string          `json:"desc"`
 	Meta          json.RawMessage `json:"meta"`
 	DefaultTarget string          `json:"default_target"`
@@ -193,6 +194,7 @@ func (s *Server) handleAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	tool, err := s.svc.Create(service.CreateInput{
 		Name:          req.Name,
+		Alias:         req.Alias,
 		Description:   req.Desc,
 		Meta:          req.Meta,
 		DefaultTarget: req.DefaultTarget,
@@ -207,6 +209,7 @@ func (s *Server) handleAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRequest struct {
+	Alias         string          `json:"alias"`
 	Desc          string          `json:"desc"`
 	Meta          json.RawMessage `json:"meta"`
 	DefaultTarget string          `json:"default_target"`
@@ -236,6 +239,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	tool, err := s.svc.Update(service.UpdateInput{
 		Name:          r.PathValue("name"),
+		Alias:         req.Alias,
 		Description:   req.Desc,
 		Meta:          req.Meta,
 		DefaultTarget: req.DefaultTarget,

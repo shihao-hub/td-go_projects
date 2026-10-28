@@ -47,9 +47,9 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 
 | 命令 | 说明 | 退出码 |
 |---|---|---|
-| `clictl add <path> [--name N] [--desc D] [--meta JSON]` | 注册/附加 exe；name 默认=文件名去 `.exe` 小写化 | 0 / 1 |
+| `clictl add <path> [--name N] [--alias A] [--desc D] [--meta JSON]` | 注册/附加 exe；name 默认=文件名去 `.exe` 小写化；alias 为显示用别名（≤64 字节） | 0 / 1 |
 | `clictl add-cmd --name N --program P --dir D --type gui\|console [--arg A ...]` | 注册/附加源码命令；同名卡片无源码目标时附加，否则创建仅源码卡片 | 0 / 1 |
-| `clictl edit <name> [--desc D] [--default exe\|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui\|console] [--source-arg A ...] [--no-source] [--meta JSON]` | 全量编辑 exe/源码/默认目标/描述/meta | 0 / 1 |
+| `clictl edit <name> [--alias A] [--desc D] [--default exe\|source] [--exe PATH] [--no-exe] [--source-program P] [--source-dir D] [--source-type gui\|console] [--source-arg A ...] [--no-source] [--meta JSON]` | 全量编辑别名/exe/源码/默认目标/描述/meta（未给出的字段保持现值；`--alias ""` 清除别名） | 0 / 1 |
 | `clictl rm <name>` | 删除注册（级联删其 launches） | 0 / 1(not_found) |
 | `clictl set <name> --meta JSON` | 整体替换 meta（传 `{}` 清空） | 0 / 1 |
 | `clictl list [--status active\|invalid] [--running]` | 全部工具，名称升序；`--running` 只看后台活实例 | 0 |
@@ -80,9 +80,9 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 | GET | `/api/preferences` | UI 偏好（视图 / 排序 / 当前分组） |
 | POST | `/api/preferences` | 保存 UI 偏好 `{view_mode,sort_mode,active_group,collapsed_groups}`；`view_mode` 取 `flat`/`tabs`/`tree` |
 | GET | `/api/tools?status=&running=1` | 列表 / 仅运行中 |
-| POST | `/api/tools` | 注册 `{name,desc,meta,default_target,exe:{path}\|null,source:{program,workdir,args,type}\|null}`；兼容旧 `{path}` |
+| POST | `/api/tools` | 注册 `{name,alias,desc,meta,default_target,exe:{path}\|null,source:{program,workdir,args,type}\|null}`；兼容旧 `{path}` |
 | GET | `/api/tools/{name}` | 详情 + 最近启动 + running.instances + 双目标状态 |
-| PUT | `/api/tools/{name}` | 全量编辑；`exe:null`/`source:null` 删除对应目标 |
+| PUT | `/api/tools/{name}` | 全量编辑 `{alias,desc,meta,default_target,exe,source}`；`exe:null`/`source:null` 删除对应目标 |
 | DELETE | `/api/tools/{name}` | 删除注册 |
 | PUT | `/api/tools/{name}/meta` | 替换 meta `{meta:{...}}` |
 | POST | `/api/tools/{name}/start` | 启动 `{target:"exe"\|"source",args:[...],mode:"console"\|"hidden"\|"detached"}`；省略按目标自动选择 |

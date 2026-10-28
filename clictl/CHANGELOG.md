@@ -6,6 +6,9 @@
 
 ### Added
 
+- 工具别名（alias）：注册/编辑可配置可选显示别名，WebUI 列表卡片与详情标题在原名旁以强调色徽章并列显示，顶部搜索可命中别名
+- 别名全通道配置：CLI `add --alias` / `edit --alias`（未给保持现值，传空串清除）、REST `POST`/`PUT /api/tools` 的 `alias` 字段、MCP `clictl.add` 的 `alias` 参数与输出视图 `alias`
+- 数据迁移：tools 表存量化补 `alias` 列（`TEXT NOT NULL DEFAULT ''`，旧库自动 ALTER，存量行为空）；父仓 `migrations/003_v2.3.0_tool_alias.sql` 存档
 - WebUI 分组视图恢复树形折叠，与标签页并存：一级开关选「平铺 / 分组」，分组内二级开关随时切换「标签 / 树形」
 - UI 偏好重新收录 `collapsed_groups`，树形折叠状态与标签页当前分组各自独立记忆；`view_mode` 合法值恢复为 `flat`/`tabs`/`tree`
 

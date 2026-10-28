@@ -24,6 +24,7 @@ import (
 type toolView struct {
 	ID            int64               `json:"id"`
 	Name          string              `json:"name"`
+	Alias         string              `json:"alias,omitempty"`
 	Path          string              `json:"path"`
 	Description   string              `json:"description"`
 	Status        string              `json:"status"`
@@ -50,6 +51,7 @@ func toolToView(t store.Tool) toolView {
 	v := toolView{
 		ID:            t.ID,
 		Name:          t.Name,
+		Alias:         t.Alias,
 		Path:          t.Path,
 		Description:   t.Description,
 		Status:        t.Status,
@@ -109,6 +111,7 @@ type addIn struct {
 	Type          string         `json:"type,omitempty" jsonschema:"源码命令类型：gui（默认隐藏控制台）或 console（默认可见控制台）"`
 	DefaultTarget string         `json:"default_target,omitempty" jsonschema:"默认启动目标：exe 或 source；缺省 exe"`
 	Name          string         `json:"name,omitempty" jsonschema:"调用名；缺省为文件名或最后一个固定参数"`
+	Alias         string         `json:"alias,omitempty" jsonschema:"显示用别名（仅 WebUI 展示与搜索，不影响调用名）"`
 	Desc          string         `json:"desc,omitempty" jsonschema:"描述"`
 	Meta          map[string]any `json:"meta,omitempty" jsonschema:"扩展属性对象；仅允许 source、tags、group 三个 key，传 {} 等价于不设置"`
 }
@@ -239,6 +242,7 @@ func registerTools(s *mcp.Server) {
 		}
 		tool, err := svc.Create(service.CreateInput{
 			Name:          in.Name,
+			Alias:         in.Alias,
 			Description:   in.Desc,
 			Meta:          raw,
 			DefaultTarget: in.DefaultTarget,

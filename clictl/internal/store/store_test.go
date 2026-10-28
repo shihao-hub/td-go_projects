@@ -2,8 +2,10 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +77,9 @@ CREATE INDEX idx_launches_tool ON launches(tool_id, started_at DESC);
 	}
 	if tool.Source != nil {
 		t.Fatalf("旧行不应有源码目标: %+v", tool.Source)
+	}
+	if tool.Alias != "" {
+		t.Fatalf("迁移后别名应为空: %q", tool.Alias)
 	}
 	if string(tool.Meta) != `{"group":"dev"}` {
 		t.Fatalf("meta 丢失: %s", tool.Meta)
@@ -341,5 +346,73 @@ func TestLaunchTargetMode(t *testing.T) {
 	unfinished, err = st.UnfinishedStarts(tool.ID)
 	if err != nil || len(unfinished) != 0 {
 		t.Fatalf("闭环后不应再出现在 UnfinishedStarts: %+v, %v", unfinished, err)
+	}
+}
+
+// TestAlias 别名的写入/清除/校验/迁移兜底。
+func TestAlias(t *testing.T) {
+	dir := t.TempDir()
+	exe := fakeExe(t, dir, "demo.exe")
+
+	st, err := OpenAt(filepath.Join(dir, "clictl.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	// 新建时写入别名：TrimSpace 生效
+	tool, err := st.AddTool(AddSpec{Name: "demo", Alias: "  任务栏守卫  ", Exe: &ExeSpec{Path: exe}})
+	if err != nil {
+		t.Fatalf("AddTool 失败: %v", err)
+	}
+	if tool.Alias != "任务栏守卫" {
+		t.Fatalf("别名应 TrimSpace 存储: %q", tool.Alias)
+	}
+	got, err := st.GetTool("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Alias != "任务栏守卫" {
+		t.Fatalf("GetTool 别名丢失: %q", got.Alias)
+	}
+
+	// 全量编辑：改名 + 传空串清除
+	if _, err := st.UpdateTool("demo", UpdateSpec{Alias: "新别名", Exe: &ExeSpec{Path: exe}}); err != nil {
+		t.Fatalf("UpdateTool 别名失败: %v", err)
+	}
+	if got, _ = st.GetTool("demo"); got.Alias != "新别名" {
+		t.Fatalf("编辑后别名应为 新别名: %q", got.Alias)
+	}
+	if _, err := st.UpdateTool("demo", UpdateSpec{Exe: &ExeSpec{Path: exe}}); err != nil {
+		t.Fatalf("UpdateTool 清除别名失败: %v", err)
+	}
+	if got, _ = st.GetTool("demo"); got.Alias != "" {
+		t.Fatalf("空串应清除别名: %q", got.Alias)
+	}
+
+	// SetAlias 独立更新与清除
+	if _, err := st.SetAlias("demo", "守卫"); err != nil {
+		t.Fatalf("SetAlias 失败: %v", err)
+	}
+	if got, _ = st.GetTool("demo"); got.Alias != "守卫" {
+		t.Fatalf("SetAlias 未生效: %q", got.Alias)
+	}
+	if _, err := st.SetAlias("demo", ""); err != nil {
+		t.Fatalf("SetAlias 清除失败: %v", err)
+	}
+	if got, _ = st.GetTool("demo"); got.Alias != "" {
+		t.Fatalf("SetAlias 空串未清除: %q", got.Alias)
+	}
+	if _, err := st.SetAlias("missing", "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetAlias 未命中应 ErrNotFound: %v", err)
+	}
+
+	// 非法输入：超长（按字节计，中文 22 字 = 66 字节 > 64）与 NUL
+	long := strings.Repeat("任", 22)
+	if _, err := st.SetAlias("demo", long); err == nil {
+		t.Fatal("超长别名应被拒绝")
+	}
+	if _, err := st.SetAlias("demo", "a\x00b"); err == nil {
+		t.Fatal("含 NUL 的别名应被拒绝")
 	}
 }

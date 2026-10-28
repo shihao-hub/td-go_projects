@@ -80,6 +80,7 @@
             <div>
               <div class="detail-title-row">
                 <h2 id="detailName">--</h2>
+                <span class="detail-alias" id="detailAlias" hidden></span>
                 <span class="status-dot" id="detailStatusDot"></span>
                 <span class="status-text" id="detailStatus">--</span>
                 <span class="type-badge" id="detailType">--</span>
@@ -271,6 +272,10 @@
         <label class="field">
           <span>名称（可选）</span>
           <input id="addName" type="text" placeholder="app" spellcheck="false">
+        </label>
+        <label class="field">
+          <span>别名（可选，与原名同时显示）</span>
+          <input id="addAlias" type="text" maxlength="64" placeholder="例如：任务栏守卫" spellcheck="false">
         </label>
         <label class="field">
           <span>描述（可选）</span>

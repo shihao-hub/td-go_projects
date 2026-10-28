@@ -81,6 +81,7 @@ type ConsoleResult struct {
 // CommandInput 源码命令输入
 type CommandInput struct {
 	Name    string          `json:"name,omitempty"`
+	Alias   string          `json:"alias,omitempty"`
 	Program string          `json:"program"`
 	Workdir string          `json:"workdir"`
 	Args    []string        `json:"args,omitempty"`
@@ -92,6 +93,7 @@ type CommandInput struct {
 // CreateInput API 注册弹窗输入：exe 与源码可同时存在
 type CreateInput struct {
 	Name          string
+	Alias         string
 	Description   string
 	Meta          json.RawMessage
 	DefaultTarget string
@@ -102,6 +104,7 @@ type CreateInput struct {
 // UpdateInput 全量编辑；Exe/Source 为 nil 表示删除该目标
 type UpdateInput struct {
 	Name          string
+	Alias         string
 	Description   string
 	Meta          json.RawMessage
 	DefaultTarget string
@@ -192,8 +195,8 @@ func (s *Service) Info(name string) (*InfoResult, error) {
 }
 
 // Add 注册 exe：校验 .exe 后缀、路径存在性、名字合法性。
-// 同名卡片已有源码目标但没有 exe 时，把 exe 附加到该卡片。
-func (s *Service) Add(path, name, desc string, meta json.RawMessage) (store.Tool, error) {
+// 同名卡片已有源码目标但没有 exe 时，把 exe 附加到该卡片；附加时若给了别名则一并写入。
+func (s *Service) Add(path, name, desc, alias string, meta json.RawMessage) (store.Tool, error) {
 	abs, err := validateExePath(path)
 	if err != nil {
 		return store.Tool{}, err
@@ -217,6 +220,12 @@ func (s *Service) Add(path, name, desc string, meta json.RawMessage) (store.Tool
 		if err != nil {
 			return store.Tool{}, wrapErr("add", err)
 		}
+		if alias != "" {
+			tool, err = s.st.SetAlias(finalName, alias)
+			if err != nil {
+				return store.Tool{}, wrapErr("add", err)
+			}
+		}
 		fillToolConsole(&tool)
 		return tool, nil
 	}
@@ -230,6 +239,7 @@ func (s *Service) Add(path, name, desc string, meta json.RawMessage) (store.Tool
 	}
 	tool, err := s.st.AddTool(store.AddSpec{
 		Name:        finalName,
+		Alias:       alias,
 		Description: desc,
 		Meta:        metaRaw,
 		Exe:         &store.ExeSpec{Path: abs},
@@ -264,6 +274,12 @@ func (s *Service) AddCommand(in CommandInput) (store.Tool, error) {
 		if err != nil {
 			return store.Tool{}, wrapErr("add-cmd", err)
 		}
+		if in.Alias != "" {
+			tool, err = s.st.SetAlias(name, in.Alias)
+			if err != nil {
+				return store.Tool{}, wrapErr("add-cmd", err)
+			}
+		}
 		fillToolConsole(&tool)
 		return tool, nil
 	}
@@ -277,6 +293,7 @@ func (s *Service) AddCommand(in CommandInput) (store.Tool, error) {
 	}
 	tool, err := s.st.AddTool(store.AddSpec{
 		Name:        name,
+		Alias:       in.Alias,
 		Description: in.Desc,
 		Meta:        metaRaw,
 		Source:      source,
@@ -296,6 +313,7 @@ func (s *Service) Create(in CreateInput) (store.Tool, error) {
 	if in.ExePath == "" {
 		src := *in.Source
 		src.Name = in.Name
+		src.Alias = in.Alias
 		src.Desc = in.Description
 		src.Meta = in.Meta
 		return s.AddCommand(src)
@@ -306,7 +324,7 @@ func (s *Service) Create(in CreateInput) (store.Tool, error) {
 		return store.Tool{}, err
 	}
 	if in.Source == nil {
-		return s.Add(abs, in.Name, in.Description, in.Meta)
+		return s.Add(abs, in.Name, in.Description, in.Alias, in.Meta)
 	}
 
 	source, err := s.normalizeSource(*in.Source)
@@ -327,6 +345,7 @@ func (s *Service) Create(in CreateInput) (store.Tool, error) {
 	}
 	tool, err := s.st.AddTool(store.AddSpec{
 		Name:          name,
+		Alias:         in.Alias,
 		Description:   in.Description,
 		Meta:          metaRaw,
 		DefaultTarget: in.DefaultTarget,
@@ -361,6 +380,7 @@ func (s *Service) Update(in UpdateInput) (store.Tool, error) {
 		source = src
 	}
 	tool, err := s.st.UpdateTool(store.NormalizeName(in.Name), store.UpdateSpec{
+		Alias:         in.Alias,
 		Description:   in.Description,
 		Meta:          in.Meta,
 		DefaultTarget: in.DefaultTarget,

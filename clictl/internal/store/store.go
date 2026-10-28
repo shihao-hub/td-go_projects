@@ -76,6 +76,7 @@ type SourceTarget struct {
 type Tool struct {
 	ID            int64           `json:"id"`
 	Name          string          `json:"name"`
+	Alias         string          `json:"alias,omitempty"` // 显示用别名：仅展示与搜索，不参与定位
 	Description   string          `json:"description"`
 	Status        string          `json:"status"` // active / invalid，输出前现场校验
 	Meta          json.RawMessage `json:"meta,omitempty"`
@@ -138,6 +139,7 @@ type SourceSpec struct {
 // AddSpec 新建卡片（exe 与 source 至少一个）
 type AddSpec struct {
 	Name          string
+	Alias         string
 	Description   string
 	Meta          json.RawMessage
 	DefaultTarget string
@@ -147,6 +149,7 @@ type AddSpec struct {
 
 // UpdateSpec 全量编辑卡片；Exe/Source 为 nil 表示删除该目标
 type UpdateSpec struct {
+	Alias         string
 	Description   string
 	Meta          json.RawMessage
 	DefaultTarget string
@@ -157,6 +160,7 @@ type UpdateSpec struct {
 const toolsV3Columns = `
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   name            TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  alias           TEXT NOT NULL DEFAULT '',
   description     TEXT NOT NULL DEFAULT '',
   status          TEXT NOT NULL DEFAULT 'active'
                   CHECK (status IN ('active','invalid')),
@@ -197,7 +201,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tools_source
   WHERE source_program <> '';
 `
 
-const toolSelect = `SELECT t.id, t.name, t.description, t.status, t.meta, t.added_at,
+const toolSelect = `SELECT t.id, t.name, t.alias, t.description, t.status, t.meta, t.added_at,
        t.default_target, t.exe_path, t.source_program, t.source_workdir,
        t.source_args, t.source_type,
        (SELECT COUNT(*) FROM launches l WHERE l.tool_id = t.id)          AS launch_count,
@@ -242,9 +246,13 @@ func OpenAt(path string) (*Store, error) {
 
 // migrate 存量库迁移：
 //  1. v2.x → v3：tools 增加 default_target/exe_path/source_*，path 搬进 exe_path；
-//  2. launches 补 pid（v1.2.0）、target/mode（v2.2.0）。
+//  2. tools 补 alias 列（v2.3.0）；
+//  3. launches 补 pid（v1.2.0）、target/mode（v2.2.0）。
 func migrate(db *sql.DB) error {
 	if err := migrateToolsV3(db); err != nil {
+		return err
+	}
+	if err := migrateToolsAlias(db); err != nil {
 		return err
 	}
 	return migrateLaunches(db)
@@ -307,6 +315,19 @@ func migrateToolsV3(db *sql.DB) error {
 	return tx.Commit()
 }
 
+// migrateToolsAlias 存量库补 alias 列（工具有别名，v2.3.0）
+func migrateToolsAlias(db *sql.DB) error {
+	cols, err := tableColumns(db, "tools")
+	if err != nil {
+		return err
+	}
+	if cols["alias"] {
+		return nil
+	}
+	_, err = db.Exec(`ALTER TABLE tools ADD COLUMN alias TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 func migrateLaunches(db *sql.DB) error {
 	cols, err := tableColumns(db, "launches")
 	if err != nil {
@@ -363,6 +384,10 @@ func (s *Store) AddTool(spec AddSpec) (Tool, error) {
 	if name == "" {
 		return Tool{}, &ValidationError{Code: "bad_args", Message: "name 不能为空"}
 	}
+	alias, err := normalizeAlias(spec.Alias)
+	if err != nil {
+		return Tool{}, err
+	}
 	meta, exe, source, def, err := normalizeSpec(spec.Name, spec.Meta, spec.DefaultTarget, spec.Exe, spec.Source)
 	if err != nil {
 		return Tool{}, err
@@ -385,10 +410,10 @@ func (s *Store) AddTool(spec AddSpec) (Tool, error) {
 
 	_, err = s.db.Exec(
 		`INSERT INTO tools
-		   (name, description, status, meta, added_at, default_target,
+		   (name, alias, description, status, meta, added_at, default_target,
 		    exe_path, source_program, source_workdir, source_args, source_type)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		name, spec.Description, StatusActive, nullMeta(meta), time.Now().UTC().Format(TimeFmt),
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		name, alias, spec.Description, StatusActive, nullMeta(meta), time.Now().UTC().Format(TimeFmt),
 		def, exePath(exe), sourceProgram(source), sourceWorkdir(source), srcArgs, sourceType(source),
 	)
 	if err != nil {
@@ -462,6 +487,10 @@ func (s *Store) UpdateTool(name string, spec UpdateSpec) (Tool, error) {
 	if err != nil {
 		return Tool{}, err
 	}
+	alias, err := normalizeAlias(spec.Alias)
+	if err != nil {
+		return Tool{}, err
+	}
 	meta, exe, source, def, err := normalizeSpec(name, spec.Meta, spec.DefaultTarget, spec.Exe, spec.Source)
 	if err != nil {
 		return Tool{}, err
@@ -480,15 +509,31 @@ func (s *Store) UpdateTool(name string, spec UpdateSpec) (Tool, error) {
 	}
 	if _, err := s.db.Exec(
 		`UPDATE tools
-		 SET description = ?, meta = ?, default_target = ?,
+		 SET alias = ?, description = ?, meta = ?, default_target = ?,
 		     exe_path = ?, source_program = ?, source_workdir = ?,
 		     source_args = ?, source_type = ?
 		 WHERE id = ?`,
-		spec.Description, nullMeta(meta), def,
+		alias, spec.Description, nullMeta(meta), def,
 		exePath(exe), sourceProgram(source), sourceWorkdir(source),
 		srcArgs, sourceType(source), tool.ID,
 	); err != nil {
 		return Tool{}, mapConflict(err)
+	}
+	return s.GetTool(name)
+}
+
+// SetAlias 更新工具别名；空串 = 清除
+func (s *Store) SetAlias(name, alias string) (Tool, error) {
+	a, err := normalizeAlias(alias)
+	if err != nil {
+		return Tool{}, err
+	}
+	res, err := s.db.Exec(`UPDATE tools SET alias = ? WHERE name = ?`, a, NormalizeName(name))
+	if err != nil {
+		return Tool{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Tool{}, ErrNotFound
 	}
 	return s.GetTool(name)
 }
@@ -748,7 +793,7 @@ func scanTool(sc scanner) (Tool, error) {
 		srcArgs    string
 		srcType    string
 	)
-	err := sc.Scan(&t.ID, &t.Name, &t.Description, &t.Status, &meta, &t.AddedAt,
+	err := sc.Scan(&t.ID, &t.Name, &t.Alias, &t.Description, &t.Status, &meta, &t.AddedAt,
 		&defTarget, &exePath, &srcProgram, &srcWorkdir, &srcArgs, &srcType,
 		&t.LaunchCount, &lastLaunch)
 	if err != nil {
@@ -841,6 +886,24 @@ func dirExists(path string) bool {
 	}
 	fi, err := os.Stat(path)
 	return err == nil && fi.IsDir()
+}
+
+// aliasMaxLen 别名最大字节数
+const aliasMaxLen = 64
+
+// normalizeAlias 校验/规范化别名：TrimSpace；空串 = 无别名；拒绝 NUL 与超长
+func normalizeAlias(raw string) (string, error) {
+	a := strings.TrimSpace(raw)
+	if a == "" {
+		return "", nil
+	}
+	if strings.ContainsRune(a, 0) {
+		return "", &ValidationError{Code: "bad_args", Message: "别名不能包含 NUL 字符"}
+	}
+	if len(a) > aliasMaxLen {
+		return "", &ValidationError{Code: "bad_args", Message: fmt.Sprintf("别名超长（≤%d 字节）", aliasMaxLen)}
+	}
+	return a, nil
 }
 
 // normalizeSpec 统一校验/规范化 Add/Update 输入

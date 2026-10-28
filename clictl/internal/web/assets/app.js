@@ -348,6 +348,7 @@
       const q = state.query.toLowerCase();
       const hay = [
         tool.name,
+        tool.alias || "",
         tool.path,
         tool.description,
         tool.exe ? tool.exe.path : "",
@@ -378,11 +379,15 @@
       warn = '<span class="tag-warn">源码失效</span>';
     }
     const pathText = tool.exe ? tool.exe.path : tool.source ? tool.source.command : tool.path;
+    const aliasTag = tool.alias
+      ? `<span class="card-alias" title="别名">${escapeHtml(tool.alias)}</span>`
+      : "";
     return `
       <div class="tool-card ${active} ${invalid}" data-name="${escapeHtml(tool.name)}">
         <div class="card-top">
           ${running ? '<span class="pulse" title="后台运行中"></span>' : ""}
           <span class="card-name">${escapeHtml(tool.name)}</span>
+          ${aliasTag}
           ${exeBadge}
           ${sourceBadge}
           ${groupTag}
@@ -572,6 +577,15 @@
     const def = defaultTarget(tool);
     const running = info.running && info.running.alive;
     el("detailName").textContent = tool.name;
+    const aliasEl = el("detailAlias");
+    if (tool.alias) {
+      aliasEl.textContent = tool.alias;
+      aliasEl.title = "别名";
+      aliasEl.hidden = false;
+    } else {
+      aliasEl.textContent = "";
+      aliasEl.hidden = true;
+    }
     const instances = (info.running && info.running.instances) || [];
 
     let typeText = "窗口程序";
@@ -958,6 +972,7 @@
     el("addSourceType").value = tool && tool.source ? tool.source.type : "gui";
     el("addDefaultTarget").value = tool ? defaultTarget(tool) : "exe";
     el("addName").value = tool ? tool.name : "";
+    el("addAlias").value = tool ? tool.alias || "" : "";
     el("addDesc").value = tool ? tool.description : "";
     const meta = tool && tool.meta ? tool.meta : null;
     el("addMeta").value = meta && Object.keys(meta).length ? JSON.stringify(meta) : "";
@@ -1019,6 +1034,7 @@
 
     return {
       name: el("addName").value.trim(),
+      alias: el("addAlias").value.trim(),
       desc: el("addDesc").value.trim(),
       meta,
       default_target: exeOn && srcOn ? el("addDefaultTarget").value : exeOn ? "exe" : "source",
