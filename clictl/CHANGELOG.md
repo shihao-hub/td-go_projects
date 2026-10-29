@@ -2,13 +2,26 @@
 
 本文件记录 clictl 的版本变更。格式参考 Keep a Changelog，版本号遵循语义化版本。
 
-## [2.3.0] - 2026-10-28
+## [2.4.0] - 2026-10-30
 
 ### Added
 
 - 工具别名（alias）：注册/编辑可配置可选显示别名，WebUI 列表卡片与详情标题在原名旁以强调色徽章并列显示，顶部搜索可命中别名
 - 别名全通道配置：CLI `add --alias` / `edit --alias`（未给保持现值，传空串清除）、REST `POST`/`PUT /api/tools` 的 `alias` 字段、MCP `clictl.add` 的 `alias` 参数与输出视图 `alias`
-- 数据迁移：tools 表存量化补 `alias` 列（`TEXT NOT NULL DEFAULT ''`，旧库自动 ALTER，存量行为空）；父仓 `migrations/003_v2.3.0_tool_alias.sql` 存档
+- 数据迁移：tools 表存量补 `alias` 列（`TEXT NOT NULL DEFAULT ''`，旧库自动 ALTER，存量行为空）；父仓 `migrations/003_v2.3.0_tool_alias.sql` 存档
+- 工具多分组：`meta.group` 接受字符串或字符串数组（≤8 项、单项 ≤32 字节），写入统一归一化为有序数组；WebUI 树形/标签页按多桶渲染（同一工具出现在所有所属分组，计数重复计入），卡片与详情平铺全部所属分组
+- 分组对话框改多选：点击已有分组切换归属，可输入新名点「添加」，全部取消即未分组
+- CLI `--group`：`add` / `add-cmd` / `edit` 可重复传（空串=清除），显式给出时覆盖 meta 中的 group；`set` 仍走 `--meta` 数组
+- Chrome 应用模式：GUI 通道新增 `--chrome`，以 `--app` 模式拉起共享 profile（chrome-apps）窗口，定位失败自动回退默认浏览器
+
+### Changed
+
+- 注册/编辑弹窗的分组输入改为「追加」语义：留空保持现有分组，避免编辑多分组工具时静默清空
+
+## [2.3.0] - 2026-10-28
+
+### Added
+
 - WebUI 分组视图恢复树形折叠，与标签页并存：一级开关选「平铺 / 分组」，分组内二级开关随时切换「标签 / 树形」
 - UI 偏好重新收录 `collapsed_groups`，树形折叠状态与标签页当前分组各自独立记忆；`view_mode` 合法值恢复为 `flat`/`tabs`/`tree`
 
