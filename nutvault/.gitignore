@@ -1,0 +1,4 @@
+bin/
+*.exe
+*.syso
+winres/.tmp-winres.json

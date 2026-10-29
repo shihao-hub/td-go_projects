@@ -1,0 +1,14 @@
+{
+	"fixed": {
+		"file_version": "1.0.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "1.0.0",
+			"CompanyName": "NutVault",
+			"FileDescription": "NutVault - 坚果云轻量文件版本备份时光机",
+			"LegalCopyright": "© 2026 NutVault",
+			"ProductName": "nutvault"
+		}
+	}
+}
