@@ -1,0 +1,11 @@
+# 构建生成物（由 scripts/build.py 自动生成，不入库）
+/bin/
+/cmd/deepseeksearch/rsrc_windows_amd64.syso
+/winres/.tmp-*
+
+# 编译与测试中间产物
+*.exe
+*.test
+*.out
+__pycache__/
+*.pyc

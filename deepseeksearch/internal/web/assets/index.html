@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeepSeek Search Studio</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- 顶部状态栏 -->
+    <header class="top-nav">
+      <div class="brand">
+        <svg class="brand-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <span class="brand-title">DeepSeek Search Studio</span>
+        <span class="channel-badge" id="channelBadge">dev</span>
+      </div>
+
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-tab="searchTab">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          搜索工作台
+        </button>
+        <button class="nav-tab" data-tab="fetchTab">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          网页萃取 (Fetch)
+        </button>
+        <button class="nav-tab" data-tab="historyTab">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          历史记录
+        </button>
+      </nav>
+
+      <div class="nav-right">
+        <div class="api-key-indicator" id="apiKeyIndicator" title="点击设置 API Key">
+          <span class="dot"></span>
+          <span class="status-text">检查中...</span>
+        </div>
+        <button class="icon-btn" id="openSettingsBtn" title="系统设置">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 主体内容 -->
+    <main class="main-content">
+      <!-- 搜索 Tab -->
+      <section class="tab-panel active" id="searchTab">
+        <div class="search-hero">
+          <form id="searchForm" class="search-form">
+            <div class="search-input-wrapper">
+              <svg class="search-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input type="text" id="searchInput" placeholder="搜索关键词（支持 site:、-site:、双引号精确匹配等）..." autofocus autocomplete="off">
+              <button type="submit" class="btn btn-primary" id="searchSubmitBtn">搜索</button>
+            </div>
+
+            <div class="search-options-toggle" id="toggleOptionsBtn">
+              <span>高级搜索参数</span>
+              <svg class="chevron-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </div>
+
+            <div class="search-options-panel" id="optionsPanel">
+              <div class="option-grid">
+                <div class="option-item">
+                  <label for="searchCount">返回结果条数 (1~50)</label>
+                  <input type="number" id="searchCount" min="1" max="50" value="10">
+                </div>
+                <div class="option-item">
+                  <label for="oriQuestion">原始意图 / 上下文问题 (ori_question)</label>
+                  <input type="text" id="oriQuestion" placeholder="提供上下文以提高意图重排准确度">
+                </div>
+                <div class="option-item checkbox-item">
+                  <label class="checkbox-label">
+                    <input type="checkbox" id="needContent">
+                    <span>直接包含网页抓取全文 (need_content)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div class="search-results-section" id="resultsSection">
+          <div class="results-header" id="resultsHeader" style="display: none;">
+            <div class="results-meta">
+              共找到 <span id="resultsCount">0</span> 条结果
+            </div>
+            <div class="results-actions">
+              <button class="btn btn-sm btn-outline" id="exportMarkdownBtn">复制为 Markdown 列表</button>
+              <button class="btn btn-sm btn-outline" id="exportJsonBtn">下载 JSON</button>
+            </div>
+          </div>
+
+          <div class="results-list" id="resultsList">
+            <div class="empty-state">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <p>输入关键词并按下回车，开始 DeepSeek 网页精准检索</p>
+              <small class="text-muted">基于官方 POST /v1/tools/search 独立引擎</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 网页萃取 Fetch Tab -->
+      <section class="tab-panel" id="fetchTab">
+        <div class="fetch-toolbar">
+          <div class="fetch-input-wrapper">
+            <input type="url" id="fetchUrlInput" placeholder="输入任意网页 URL（例如 https://...）提取干净 Markdown...">
+            <button class="btn btn-primary" id="fetchSubmitBtn">提取正文</button>
+          </div>
+        </div>
+
+        <div class="fetch-result-container" id="fetchResultContainer">
+          <div class="fetch-meta-bar" id="fetchMetaBar" style="display: none;">
+            <div class="fetch-title-wrapper">
+              <h2 id="fetchTitle" class="fetch-title"></h2>
+              <a id="fetchSourceLink" href="#" target="_blank" class="fetch-source-link">原网页 ↗</a>
+            </div>
+            <div class="fetch-actions">
+              <div class="view-switch">
+                <button class="view-btn active" data-view="rendered">排版视图</button>
+                <button class="view-btn" data-view="raw">Markdown 原文</button>
+              </div>
+              <button class="btn btn-sm btn-outline" id="copyMarkdownBtn">复制 Markdown</button>
+              <button class="btn btn-sm btn-outline" id="saveMarkdownBtn">下载 .md 文件</button>
+            </div>
+          </div>
+
+          <div class="fetch-content-area" id="fetchContentArea">
+            <div class="empty-state">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              <p>输入网页链接，调用 DeepSeek Fetch API 提取去噪后的纯净 Markdown</p>
+              <small class="text-muted">官方端点 POST /v1/tools/fetch</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 历史记录 Tab -->
+      <section class="tab-panel" id="historyTab">
+        <div class="history-grid">
+          <div class="history-card">
+            <h3>最近搜索</h3>
+            <ul class="history-list" id="searchHistoryList">
+              <li class="history-empty">暂无搜索历史</li>
+            </ul>
+          </div>
+          <div class="history-card">
+            <h3>最近提取的网页</h3>
+            <ul class="history-list" id="fetchHistoryList">
+              <li class="history-empty">暂无抓取记录</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 设置弹窗 -->
+    <div class="modal-backdrop" id="settingsModal">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3>系统与 API 设置</h3>
+          <button class="close-btn" id="closeSettingsBtn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="cfgApiKey">DeepSeek API Key <span class="required">*</span></label>
+            <div class="password-input-wrapper">
+              <input type="password" id="cfgApiKey" placeholder="sk-..." autocomplete="off">
+              <button type="button" class="toggle-pwd-btn" id="togglePwdBtn">显示</button>
+            </div>
+            <small class="field-hint">用于调用 DeepSeek Search 与 Fetch 接口，密钥仅保存在本地用户数据目录。</small>
+          </div>
+
+          <div class="form-group">
+            <label for="cfgBaseUrl">API Base URL</label>
+            <input type="text" id="cfgBaseUrl" value="https://api.deepseek.com">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col">
+              <label for="cfgDefaultCount">默认返回条数</label>
+              <input type="number" id="cfgDefaultCount" value="10" min="1" max="50">
+            </div>
+            <div class="form-group col checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="cfgNeedContent">
+                <span>搜索时默认附带正文</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="test-feedback" id="testFeedback"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="testAuthBtn">连通性测试</button>
+          <button class="btn btn-primary" id="saveConfigBtn">保存配置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

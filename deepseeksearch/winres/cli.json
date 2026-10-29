@@ -1,0 +1,34 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": "__ICON__"
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": "__MANIFEST__"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "__FIXED_VERSION__",
+          "product_version": "__FIXED_VERSION__"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "DeepSeek Search",
+            "FileDescription": "DeepSeek Search Studio CLI - 终端搜索与抓取工具",
+            "FileVersion": "__VERSION__",
+            "InternalName": "deepseeksearch-cli",
+            "LegalCopyright": "© 2026 DeepSeek Search",
+            "OriginalFilename": "__ORIGINAL_NAME__",
+            "ProductName": "deepseeksearch",
+            "ProductVersion": "__VERSION__"
+          }
+        }
+      }
+    }
+  }
+}
