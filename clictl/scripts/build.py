@@ -11,7 +11,8 @@
 
 双通道（为何不单产物双模）：
   - GUI 通道 -H windowsgui 构建，双击零黑框；不承担 CLI 语义，
-    唯一语义参数是 --hidden（开机自启的静默托盘），其余参数一律忽略；
+    语义参数只有 --hidden（开机自启的静默托盘）与 --chrome（Chrome 应用模式窗口），
+    其余参数一律忽略；
   - Console 通道是 console 子系统，parent shell 正常等待，管道/重定向合规，
     终端、脚本与 Agent 一律用它。PowerShell 对 GUI 子系统进程不等待，
     单产物 AttachConsole 会把输出顶到 prompt 上且管道路径丢输出。

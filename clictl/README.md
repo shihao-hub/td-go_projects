@@ -6,6 +6,7 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 
 - **桌面启动台（clictl-gui）**：托盘常驻，窗口内完成注册/搜索/启动/停止/定位/编辑 exe 与源码目标/查看启动记录；关闭窗口不退进程，再次打开精确恢复上次尺寸与位置
 - **双目标卡片**：一张卡片可同时持有 exe 与源码命令（如 `uv run zedhub-gui`），支持仅 exe / 仅源码 / 双目标；源码命令带工作目录与固定前缀参数，默认目标固定 exe
+- **Chrome 应用模式（`--chrome`）**：主界面改走共享专用 profile 的 Chrome `--app` 窗口，多开只新增渲染进程；托盘常驻与单实例语义不变，失败自动回退默认浏览器
 - **按需控制台**：源码/命令行目标以隐藏控制台启动，详情页可随时显示/隐藏控制台窗口，不重启进程；`start --console` 仍直接打开可见控制台
 - **分组与视图**：`meta.group` 自定义分组；详情标题旁分组徽标点击即设，注册弹窗也可选已有分组；平铺（默认）/ 分组两种视图，分组内可随时在标签页与树形折叠之间切换，标签栏只横向滚动，名称升序稳定排序，列表顺序不随启动次数跳动；视图、排序、当前分组与折叠状态服务端持久化
 - **双通道产物**：`bin/clictl-gui[-dev].exe` 只出窗口（带任何参数都不做 CLI），`bin/clictl-cli[-dev].exe` 是 console 子系统，prompt/管道/重定向全部合规；二者不可合并（原因见 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md`）
@@ -25,11 +26,12 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 
 | 产物 | 子系统 | 用途 |
 |---|---|---|
-| `bin/clictl-gui.exe` / `bin/clictl-gui-dev.exe` | Windows GUI | 双击零黑框；只开桌面启动台，忽略除 `--hidden`/`--tray` 外的参数 |
+| `bin/clictl-gui.exe` / `bin/clictl-gui-dev.exe` | Windows GUI | 双击零黑框；只开桌面启动台，仅识别 `--hidden`/`--tray`/`--chrome` 三个参数 |
 | `bin/clictl-cli.exe` / `bin/clictl-cli-dev.exe` | Console | 终端、脚本、Agent；全部子命令只在这里 |
 
 - dev 与 release 在**产物名、版本号、数据目录、单实例 ID、图标**五个维度完全隔离，可同时运行互不唤醒。
 - GUI 通道适配：`--hidden` / `--tray` 启动静默托盘（开机自启使用）；CLI 通道下它们退化为无窗口 `serve`。
+- `--chrome`：主界面改用 Chrome 应用模式（共享专用 profile 的 `--app` 窗口），关窗不退进程、托盘照旧；`--chrome --hidden` 静默托盘、不建任何窗口。Chrome 定位顺序：`CLICTL_CHROME_PATH` → 注册表 App Paths → 常见安装路径；任一环节失败都会落盘日志并回退默认浏览器（同「在默认浏览器中打开」）。
 
 ## run vs start
 
@@ -136,5 +138,6 @@ uv run scripts/build.py --release   # release → bin/clictl-gui.exe + bin/clict
 - 双通道改造前的旧库 `%APPDATA%\language_projects\clictl\clictl.db` 会在**每个通道首次启动时各复制一份**（含 `-wal`/`-shm`，旧文件保留），此后两通道数据独立演进
 - 窗口几何记忆：`<通道目录>\window.json`；诊断日志：`<通道目录>\clictl.log`
 - WebUI 视图偏好：`<通道目录>\ui_preferences.json`（视图 / 排序 / 当前分组 / 折叠分组；GUI 随机端口下 localStorage 不可靠，故服务端落盘）
+- Chrome 应用模式共享 profile：`%LOCALAPPDATA%\language_projects\chrome-apps\<dev|prod>`（回退 `~/.language_projects/chrome-apps/<通道>`）。它**不属于**上面按项目分目录的运行时数据：profile 存放大量浏览器缓存且不漫游，故按「共享型例外」放在 LocalAppData，且路径**不含项目名**——所有 go_projects 的 Wails 应用都要逐字共用同一路径，否则多开会裂成多个浏览器进程，方案失效。dev/prod 仍分层隔离。
 
 完整设计见 `PLAN.md`、父仓 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md` 与 `plans/06-source-command-launch.md`；使用文档见父仓 `docs/projects/go_projects/clictl/clictl 使用指南.md`；表结构变更存档见父仓 `docs/projects/go_projects/clictl/migrations/`；其他 CLI 项目复用 JSON 输出模式见 `Go CLI JSON 输出模式参考.md`。

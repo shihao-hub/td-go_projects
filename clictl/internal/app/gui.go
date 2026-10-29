@@ -27,6 +27,10 @@ type App struct {
 	serverURL string
 	svc       *service.Service
 
+	// chromeMode 为 true 时主界面走 Chrome --app 窗口（共享浏览器进程），
+	// 永不创建 Wails 窗口；托盘常驻与退出逻辑保持不变。
+	chromeMode bool
+
 	winMu sync.Mutex
 	win   *application.WebviewWindow
 
@@ -42,7 +46,8 @@ type App struct {
 
 // LaunchGUI 启动 WebUI + Wails 桌面壳。port 传 0 时由系统动态探测可用端口
 // （默认行为，dev 与 release 实例可并行运行而互不冲突）。
-func LaunchGUI(dbPath string, port int, hidden bool) error {
+// chrome 为 true 时主界面改走 Chrome 应用模式（共享浏览器进程），不创建 Wails 窗口。
+func LaunchGUI(dbPath string, port int, hidden bool, chrome bool) error {
 	if dbPath == "" {
 		dbPath = appinfo.DefaultDBPath()
 	}
@@ -93,21 +98,27 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 			ExitCode: 0,
 			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
 				if appInstance != nil {
-					appInstance.ensureMainWindow()
+					appInstance.openMainChannel(wantsChromeWindow(data.Args))
 				}
 			},
 		},
 	})
 
 	appInstance = &App{
-		app:       wailsApp,
-		serverURL: serverURL,
-		svc:       svc,
-		winState:  loadWindowState(),
+		app:        wailsApp,
+		serverURL:  serverURL,
+		svc:        svc,
+		chromeMode: chrome,
+		winState:   loadWindowState(),
 	}
 
 	appInstance.buildTray()
-	if !hidden {
+	switch {
+	case hidden:
+		// 静默托盘：不预建任何窗口（chrome 模式同样静默，等用户从托盘唤起）。
+	case chrome:
+		appInstance.openMainChannel(true)
+	default:
 		appInstance.ensureMainWindow()
 	}
 
@@ -309,6 +320,31 @@ func (a *App) ensureMainWindow() {
 	go a.showMainWindow()
 }
 
+// openMainChannel 按渠道打开主界面：chrome 走 --app 窗口（可多开、共享浏览器进程），
+// 否则恢复 / 懒建 Wails 窗口。两者共用同一 HTTP 服务，可随时混用。
+func (a *App) openMainChannel(chrome bool) {
+	if chrome {
+		go openChromeAppWindow(a.serverURL)
+		return
+	}
+	a.ensureMainWindow()
+}
+
+// wantsChromeWindow 判断第二实例是否要求拉起 Chrome 应用模式窗口：
+// 带 --chrome 且未带 --hidden/--tray。静默优先，避免自启或脚本化调用意外弹窗。
+func wantsChromeWindow(args []string) bool {
+	chrome, silent := false, false
+	for _, arg := range args {
+		switch arg {
+		case "--chrome":
+			chrome = true
+		case "--hidden", "--tray":
+			silent = true
+		}
+	}
+	return chrome && !silent
+}
+
 func (a *App) showMainWindow() {
 	a.ensureMu.Lock()
 	defer a.ensureMu.Unlock()
@@ -350,12 +386,12 @@ func (a *App) buildTray() {
 	}
 	a.tray.SetTooltip("clictl — 工具注册与启动台")
 
-	a.tray.OnClick(a.ensureMainWindow)
-	a.tray.OnDoubleClick(a.ensureMainWindow)
+	a.tray.OnClick(func() { a.openMainChannel(a.chromeMode) })
+	a.tray.OnDoubleClick(func() { a.openMainChannel(a.chromeMode) })
 
 	menu := a.app.NewMenu()
 	menu.Add("打开启动台").OnClick(func(*application.Context) {
-		a.ensureMainWindow()
+		a.openMainChannel(a.chromeMode)
 	})
 	menu.Add("在默认浏览器中打开").OnClick(func(*application.Context) {
 		_ = api.OpenBrowser(a.serverURL)
