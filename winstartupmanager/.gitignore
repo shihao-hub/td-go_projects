@@ -1,6 +1,7 @@
 # 前端构建与依赖
 frontend/node_modules/
-frontend/dist/
+frontend/dist/*
+!frontend/dist/.gitkeep
 frontend/bindings/
 
 # 构建产物

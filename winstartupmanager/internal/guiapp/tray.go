@@ -3,6 +3,7 @@ package guiapp
 import (
 	"winstartupmanager/internal/engine"
 	"winstartupmanager/internal/env"
+	"winstartupmanager/internal/logx"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -26,6 +27,23 @@ func (a *App) buildTray() {
 		menu.Add("以管理员身份重启").OnClick(func(ctx *application.Context) {
 			_ = engine.RestartAsAdmin()
 		})
+	}
+
+	// 开机自启：dev 通道置灰，避免污染注册表；release 走 Wails Autostart（HKCU Run）。
+	if env.AutostartAllowed() {
+		autostartItem := menu.AddCheckbox("开机自启", a.autostartEnabled())
+		autostartItem.OnClick(func(ctx *application.Context) {
+			enabled := a.autostartEnabled()
+			if err := a.setAutostart(!enabled); err != nil {
+				logx.Errorf("设置开机自启失败: %v", err)
+				return
+			}
+			autostartItem.SetChecked(!enabled)
+			logx.Infof("开机自启已切换为 %v", !enabled)
+		})
+	} else {
+		disabledItem := menu.AddCheckbox("开机自启 (开发版已禁用)", false)
+		disabledItem.SetEnabled(false)
 	}
 
 	menu.AddSeparator()

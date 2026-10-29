@@ -13,10 +13,13 @@
 
 模式约定（与 go_projects 构建规范一致）：
     dev     产物名 winstartupmanager-dev.exe，版本号附 -dev 后缀，工作区不干净再附
-            -dirty；保留控制台窗口便于看日志；-tags dev 切换 dev 图标与通道标识。
+            -dirty；-tags dev 切换 dev 图标与通道标识；同样是 windowsgui 子系统，
+            双击零黑框，排障看 <数据目录>/winstartupmanager.log。
     release 产物名 winstartupmanager.exe（严禁任何 dev 标识）；仅当 HEAD 严格命中
             项目 tag `winstartupmanager/v*` 且工作区干净时允许；
-            -trimpath + -H windowsgui 隐藏控制台。
+            -trimpath + -s -w + -H windowsgui。
+    调试需要控制台时，用 `go run .`（console 子系统）或 `wails3 dev`，不要为 dev
+    单独放开控制台：GUI 产物一旦是 console 子系统，终端启动会阻塞、双击会闪现黑框。
 
 构建流程：
     1) 前置检查（node/npm、wails3 CLI、go-winres）
@@ -24,7 +27,7 @@
     3) 前端构建（npm run build，dev 模式用 build:dev 不压缩便于调试）
     4) 图标检查（release 用 build/icon.ico，dev 用 build/icon_dev.ico，缺失时调
        scripts/render_icon.py 生成）
-    5) go-winres 生成 PE 资源（图标 + VERSIONINFO），go build 后即删除
+    5) go-winres 生成 PE 资源（图标 + manifest + VERSIONINFO），go build 后即删除
     6) go build 注入 internal/env.{Version,Commit,BuildMode}
 
 每次变更本脚本时必须同步更新本使用说明。
@@ -116,7 +119,22 @@ def ensure_frontend() -> None:
     run(["wails3", "generate", "bindings"], cwd=PROJECT_ROOT)
 
 
+def clean_dist() -> None:
+    """清空前端产物，但保留 .gitkeep（go:embed 需要有文件存在才能编译）。"""
+    dist = FRONTEND_DIR / "dist"
+    if not dist.is_dir():
+        return
+    for child in dist.iterdir():
+        if child.name == ".gitkeep":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
 def build_frontend(mode: str) -> None:
+    clean_dist()
     script = "build:dev" if mode == "dev" else "build"
     run(["npm", "run", script], cwd=FRONTEND_DIR)
 
@@ -147,6 +165,7 @@ def make_syso(mode: str, version: str) -> tuple[Path, Path]:
 
     winres = {
         "RT_GROUP_ICON": {"APP": {"0000": ico_rel}},
+        "RT_MANIFEST": {"#1": {"0409": "wails.exe.manifest"}},
         "RT_VERSION": {
             "#1": {
                 "0000": {
@@ -187,7 +206,7 @@ def go_build(mode: str, version: str) -> Path:
     if mode == "release":
         cmd += ["-ldflags", f"-s -w -H windowsgui {ld}"]
     else:
-        cmd += ["-tags", "dev", "-ldflags", ld]
+        cmd += ["-tags", "dev", "-ldflags", f"-H windowsgui {ld}"]
     cmd += ["-o", str(out), "."]
     run(cmd, cwd=PROJECT_ROOT)
     return out

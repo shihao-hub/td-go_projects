@@ -26,10 +26,11 @@
 - **极简低内存常驻架构（手记 071 实战标准）**：
   - Chromium 启动参数剪枝（砍掉独立 GPU 与网络进程）。
   - 关窗彻底销毁 WebView2，异步调用 GC 与 FreeOSMemory 归还系统堆内存。
-  - 托盘双击毫秒级按需重建窗口；开机自启 `--hidden` 零 Chromium 纯 Go 实例运行（常驻物理内存 ~20MB）。
+  - 托盘双击毫秒级按需重建窗口；`--hidden` 静默进托盘（主窗口隐藏，WebView2 仍会初始化，用于避免重建死锁）。
 - **窗口几何记忆**：
   - 尺寸、位置、最大化状态落 `window.json`，移窗/缩放 700ms 防抖保存，关窗同步落盘。
   - 外接屏拔出后旧坐标不可见时自动拉回主屏居中。
+- **开机自启**：托盘菜单「开机自启」写入 `HKCU\...\Run`（值名 `WinStartupManager`，携带 `--hidden`），可随时取消；dev 通道置灰并拒绝写注册表，临时构建路径同样拒绝。
 - **通道隔离**：dev / release 使用不同数据目录、单实例 ID、图标（dev 为灰蓝 DEV 图标）与版本号。
 - **形态说明**：本项目为**仅 Wails 窗口，无浏览器入口**——前后端走 Wails bindings 数据通道，不提供 HTTP 端口 / `serve` 命令 / 浏览器访问。
 
@@ -47,6 +48,8 @@
 uv run build.py --dev
 ```
 产物输出至 `build/winstartupmanager-dev.exe`（`-tags dev`，灰蓝 DEV 图标）。
+dev 与 release 同为 windowsgui 子系统，双击零黑框、不弹控制台；需要实时控制台时用
+`go run .` 或 `wails3 dev`，正式排障一律看数据目录下的日志文件。
 
 ### 正式打包 (release)
 ```bash
@@ -71,11 +74,11 @@ uv run build.py --release
   - `window.json`：窗口尺寸/位置/最大化状态
   - `winstartupmanager.log`：运行日志
 
-## 生产排障（release 无控制台）
+## 生产排障（无控制台）
 
-release 产物使用 `-H windowsgui`，没有控制台窗口，排障只依赖落盘日志：
+dev 与 release 产物都使用 `-H windowsgui`，没有控制台窗口，排障只依赖落盘日志：
 
-- dev 与 release **都**双写 `stderr + <数据目录>/winstartupmanager.log`，dev 只是额外能看到控制台。
+- 两个通道**都**双写 `stderr + <数据目录>/winstartupmanager.log`；GUI 子系统下 stderr 不可见，但不影响文件写入。
 - 单文件上限 2 MB，超限后下次启动轮转为 `winstartupmanager.log.1`（只保留一份）。
 - 启动横幅记录 `version / commit / mode`；Wails 内部日志（WebView2、AssetServer）与前端 JS 异常（`[FE]` 前缀，同消息 1 分钟去重）一并写入。
 - 安全约定：日志不记录启动项命令行原文与注册表值内容，只记来源、名称与错误。

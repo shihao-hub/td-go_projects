@@ -29,7 +29,7 @@ var (
 var systemNoisePrefixes = []string{"[AssetFileServerFS] Handling request"}
 
 // Init 初始化日志：始终双写 stderr + <dataDir>/winstartupmanager.log。
-// dataDir 为空或不可写时退化为仅 stderr（dev 可见，release 无控制台则丢弃）。
+// dataDir 为空或不可写时退化为仅 stderr（go run / wails3 dev 可见，GUI 子系统下丢弃）。
 // 幂等：重复调用返回同一实例。
 func Init(dataDir string) *slog.Logger {
 	mu.Lock()

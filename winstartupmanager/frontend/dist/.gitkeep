@@ -1,0 +1,2 @@
+# 占位文件：保证 //go:embed all:frontend/dist 在未执行前端构建时也能编译通过。
+# vite 配置了 emptyOutDir=false，构建脚本会先清理 dist（保留本文件）再产出前端。
