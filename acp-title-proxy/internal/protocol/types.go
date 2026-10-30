@@ -102,10 +102,26 @@ func RewritePrompt(raw json.RawMessage, newPromptText string) (json.RawMessage, 
 	return json.Marshal(newPromptText)
 }
 
+// NativeAugmentedCommands contains high-value Antigravity native commands that work via model prompt protocols.
+var NativeAugmentedCommands = []CommandItem{
+	{
+		Name:        "grill-me",
+		Description: "对齐需求与交互式方案盘问：在出方案前让 AI 主动提问对齐设计决策",
+	},
+	{
+		Name:        "goal",
+		Description: "深度攻坚长任务：保持极致彻底性，反复自检直到目标彻底达成",
+	},
+	{
+		Name:        "compact",
+		Description: "立即压缩提炼当前会话历史以释放上下文窗口",
+	},
+}
+
 // MergeAvailableCommands 将额外命令合并进 rawResult 的 availableCommands 数组，
 // 保留 rawResult 中的全部既有字段并避免重复。
 func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (json.RawMessage, error) {
-	if len(rawResult) == 0 || len(extra) == 0 {
+	if len(rawResult) == 0 {
 		return rawResult, nil
 	}
 
@@ -124,12 +140,25 @@ func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (jso
 
 	for _, c := range existing {
 		lower := strings.ToLower(c.Name)
+		if lower == "skill" {
+			continue // 过滤通用无用裸 skill 命令
+		}
 		if !seen[lower] {
 			seen[lower] = true
 			merged = append(merged, c)
 		}
 	}
 
+	// 注入解封的官方思维命令
+	for _, c := range NativeAugmentedCommands {
+		lower := strings.ToLower(c.Name)
+		if !seen[lower] {
+			seen[lower] = true
+			merged = append(merged, c)
+		}
+	}
+
+	// 注入自定义技能命令
 	for _, c := range extra {
 		lower := strings.ToLower(c.Name)
 		if !seen[lower] {
@@ -150,7 +179,7 @@ func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (jso
 // MergeCommandsUpdateNotification 判断 rawParams 是否为 available_commands_update 通知，
 // 若是则将额外命令合并进去。
 func MergeCommandsUpdateNotification(rawParams json.RawMessage, extra []CommandItem) (json.RawMessage, bool, error) {
-	if len(rawParams) == 0 || len(extra) == 0 {
+	if len(rawParams) == 0 {
 		return rawParams, false, nil
 	}
 
@@ -188,12 +217,25 @@ func MergeCommandsUpdateNotification(rawParams json.RawMessage, extra []CommandI
 
 	for _, c := range existing {
 		lower := strings.ToLower(c.Name)
+		if lower == "skill" {
+			continue // 过滤通用裸 skill 命令
+		}
 		if !seen[lower] {
 			seen[lower] = true
 			merged = append(merged, c)
 		}
 	}
 
+	// 注入解封的官方思维命令
+	for _, c := range NativeAugmentedCommands {
+		lower := strings.ToLower(c.Name)
+		if !seen[lower] {
+			seen[lower] = true
+			merged = append(merged, c)
+		}
+	}
+
+	// 注入自定义技能命令
 	for _, c := range extra {
 		lower := strings.ToLower(c.Name)
 		if !seen[lower] {

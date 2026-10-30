@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -49,7 +48,8 @@ func TestMergeAvailableCommands(t *testing.T) {
 		"sessionId": "sess_123",
 		"availableCommands": [
 			{"name": "plan", "description": "plan task"},
-			{"name": "logout", "description": "logout"}
+			{"name": "logout", "description": "logout"},
+			{"name": "skill", "description": "generic skill placeholder"}
 		],
 		"customField": 42
 	}`)
@@ -77,14 +77,23 @@ func TestMergeAvailableCommands(t *testing.T) {
 		t.Fatalf("fields not preserved: %+v", res)
 	}
 
-	if len(res.AvailableCommands) != 3 {
-		t.Fatalf("expected 3 commands (plan, logout, sh-pocock-workflow), got %d", len(res.AvailableCommands))
+	// 原生 2 (plan, logout; skill 排除) + 官方思维 3 (grill-me, goal, compact) + 自定义 1 (sh-pocock-workflow) = 6
+	if len(res.AvailableCommands) != 6 {
+		t.Fatalf("expected 6 commands, got %d", len(res.AvailableCommands))
 	}
 
-	names := []string{res.AvailableCommands[0].Name, res.AvailableCommands[1].Name, res.AvailableCommands[2].Name}
-	joined := strings.Join(names, ",")
-	if !strings.Contains(joined, "plan") || !strings.Contains(joined, "logout") || !strings.Contains(joined, "sh-pocock-workflow") {
-		t.Fatalf("unexpected commands: %s", joined)
+	cmdMap := make(map[string]bool)
+	for _, c := range res.AvailableCommands {
+		cmdMap[c.Name] = true
+	}
+
+	if cmdMap["skill"] {
+		t.Fatal("unexpected generic 'skill' command found in list")
+	}
+	for _, expected := range []string{"plan", "logout", "grill-me", "goal", "compact", "sh-pocock-workflow"} {
+		if !cmdMap[expected] {
+			t.Fatalf("missing expected command: %s", expected)
+		}
 	}
 }
 
@@ -94,7 +103,8 @@ func TestMergeCommandsUpdateNotification(t *testing.T) {
 		"update": {
 			"sessionUpdate": "available_commands_update",
 			"availableCommands": [
-				{"name": "usage", "description": "usage"}
+				{"name": "usage", "description": "usage"},
+				{"name": "skill", "description": "generic skill placeholder"}
 			]
 		}
 	}`)
@@ -122,7 +132,17 @@ func TestMergeCommandsUpdateNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(params.Update.AvailableCommands) != 2 {
-		t.Fatalf("expected 2 commands, got %d", len(params.Update.AvailableCommands))
+	cmdMap := make(map[string]bool)
+	for _, c := range params.Update.AvailableCommands {
+		cmdMap[c.Name] = true
+	}
+
+	if cmdMap["skill"] {
+		t.Fatal("generic 'skill' placeholder should have been removed")
+	}
+	for _, expected := range []string{"usage", "grill-me", "goal", "compact", "anatomy"} {
+		if !cmdMap[expected] {
+			t.Fatalf("missing expected command: %s", expected)
+		}
 	}
 }

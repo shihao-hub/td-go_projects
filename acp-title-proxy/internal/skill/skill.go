@@ -139,13 +139,7 @@ func (m *Manager) GetCommandItems() []protocol.CommandItem {
 		return nil
 	}
 
-	items := make([]protocol.CommandItem, 0, len(m.skillsList)+1)
-
-	// 追加通用 /skill 命令
-	items = append(items, protocol.CommandItem{
-		Name:        "skill",
-		Description: "指定并激活特定技能 (用法: /skill <name> [任务说明])",
-	})
+	items := make([]protocol.CommandItem, 0, len(m.skillsList))
 
 	for _, s := range m.skillsList {
 		items = append(items, protocol.CommandItem{

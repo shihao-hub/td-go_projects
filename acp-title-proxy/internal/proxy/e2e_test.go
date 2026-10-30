@@ -118,6 +118,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 
 	foundPlan := false
 	foundSkill := false
+	foundGrill := false
 	for _, c := range zedResult.AvailableCommands {
 		if c.Name == "plan" {
 			foundPlan = true
@@ -125,12 +126,18 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		if c.Name == "skill" {
 			foundSkill = true
 		}
+		if c.Name == "grill-me" {
+			foundGrill = true
+		}
 	}
 	if !foundPlan {
 		t.Fatal("native 'plan' command lost!")
 	}
-	if !foundSkill {
-		t.Fatal("generic 'skill' command not injected!")
+	if foundSkill {
+		t.Fatal("generic 'skill' command should have been removed!")
+	}
+	if !foundGrill {
+		t.Fatal("native augmented 'grill-me' command not injected!")
 	}
 
 	// 2. 入向测试：用户通过带前缀的 /skill:name 调用技能

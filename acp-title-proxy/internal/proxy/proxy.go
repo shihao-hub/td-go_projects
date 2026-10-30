@@ -278,17 +278,16 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 				r.Titler.OnSessionNew(res.SessionID)
 			}
 
-			// 将自定义技能合并进 availableCommands
+			// 将官方思维命令与自定义技能合并进 availableCommands，并过滤裸 skill
+			var skills []protocol.CommandItem
 			if r.SkillMgr != nil {
-				skills := r.SkillMgr.GetCommandItems()
-				if len(skills) > 0 {
-					if mergedResult, err := protocol.MergeAvailableCommands(msg.Result, skills); err == nil {
-						msg.Result = mergedResult
-						if newLine, err := json.Marshal(msg); err == nil {
-							newLine = append(newLine, '\n')
-							return newLine
-						}
-					}
+				skills = r.SkillMgr.GetCommandItems()
+			}
+			if mergedResult, err := protocol.MergeAvailableCommands(msg.Result, skills); err == nil {
+				msg.Result = mergedResult
+				if newLine, err := json.Marshal(msg); err == nil {
+					newLine = append(newLine, '\n')
+					return newLine
 				}
 			}
 		}
@@ -296,16 +295,15 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 
 	// 2. 识别 session/update 通知：available_commands_update
 	if msg.Method == "session/update" && len(msg.Params) > 0 {
+		var skills []protocol.CommandItem
 		if r.SkillMgr != nil {
-			skills := r.SkillMgr.GetCommandItems()
-			if len(skills) > 0 {
-				if mergedParams, matched, err := protocol.MergeCommandsUpdateNotification(msg.Params, skills); err == nil && matched {
-					msg.Params = mergedParams
-					if newLine, err := json.Marshal(msg); err == nil {
-						newLine = append(newLine, '\n')
-						return newLine
-					}
-				}
+			skills = r.SkillMgr.GetCommandItems()
+		}
+		if mergedParams, matched, err := protocol.MergeCommandsUpdateNotification(msg.Params, skills); err == nil && matched {
+			msg.Params = mergedParams
+			if newLine, err := json.Marshal(msg); err == nil {
+				newLine = append(newLine, '\n')
+				return newLine
 			}
 		}
 	}

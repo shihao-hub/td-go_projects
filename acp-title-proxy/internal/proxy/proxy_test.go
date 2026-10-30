@@ -70,11 +70,17 @@ func TestProcessOutboundMergeCommands(t *testing.T) {
 		t.Fatalf("expected titler session_1, got %s", titler.lastSessionID)
 	}
 
-	if len(res.AvailableCommands) != 2 {
-		t.Fatalf("expected 2 commands, got %d", len(res.AvailableCommands))
+	if len(res.AvailableCommands) != 5 {
+		t.Fatalf("expected 5 commands (plan, grill-me, goal, compact, my-skill), got %d", len(res.AvailableCommands))
 	}
-	if res.AvailableCommands[0].Name != "plan" || res.AvailableCommands[1].Name != "my-skill" {
-		t.Fatalf("unexpected commands: %+v", res.AvailableCommands)
+	cmdMap := make(map[string]bool)
+	for _, c := range res.AvailableCommands {
+		cmdMap[c.Name] = true
+	}
+	for _, expected := range []string{"plan", "grill-me", "goal", "compact", "my-skill"} {
+		if !cmdMap[expected] {
+			t.Fatalf("missing expected command: %s", expected)
+		}
 	}
 }
 

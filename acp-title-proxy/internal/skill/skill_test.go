@@ -62,8 +62,11 @@ description: 这是一个测试技能
 
 	mgr := NewManager(cfg)
 	commands := mgr.GetCommandItems()
-	if len(commands) < 2 { // "skill" 与 "skill:my-test-skill" 两条命令
-		t.Fatalf("expected at least 2 commands, got %d", len(commands))
+	if len(commands) != 1 {
+		t.Fatalf("expected exactly 1 command (skill:my-test-skill), got %d", len(commands))
+	}
+	if commands[0].Name == "skill" {
+		t.Fatal("unexpected generic 'skill' command found in list")
 	}
 
 	found := false
