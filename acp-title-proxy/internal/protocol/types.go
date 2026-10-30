@@ -142,23 +142,85 @@ type SetConfigOptionParams struct {
 	Value     string `json:"value"`
 }
 
+// SetModeParams represents params for session/set_mode request.
+type SetModeParams struct {
+	SessionID string `json:"sessionId"`
+	ModeID    string `json:"modeId"`
+}
+
+// SessionModeItem represents an available mode in ACP.
+type SessionModeItem struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// SessionModes represents the modes payload in session/new and session/load responses.
+type SessionModes struct {
+	CurrentModeID  string            `json:"currentModeId"`
+	AvailableModes []SessionModeItem `json:"availableModes"`
+}
+
+// DefaultWorkflowModes defines the Normal vs Plan modes for Zed.
+var DefaultWorkflowModes = []SessionModeItem{
+	{
+		ID:          "normal",
+		Name:        "Normal",
+		Description: "Normal direct execution mode",
+	},
+	{
+		ID:          "plan",
+		Name:        "Plan",
+		Description: "Plan handbrake mode (read-only planning, switch to Normal to execute)",
+	},
+}
+
+// ReplaceModesInResult replaces the top-level modes in rawResult with Workflow modes (Normal/Plan).
+func ReplaceModesInResult(rawResult json.RawMessage, currentMode string) (json.RawMessage, error) {
+	if len(rawResult) == 0 {
+		return rawResult, nil
+	}
+
+	var resultMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+		return rawResult, err
+	}
+
+	if currentMode == "" {
+		currentMode = "normal"
+	}
+
+	modes := SessionModes{
+		CurrentModeID:  currentMode,
+		AvailableModes: DefaultWorkflowModes,
+	}
+
+	modesBytes, err := json.Marshal(modes)
+	if err != nil {
+		return rawResult, err
+	}
+
+	resultMap["modes"] = modesBytes
+	return json.Marshal(resultMap)
+}
+
 // DefaultWorkflowConfigOption defines the independent Workflow selector (Normal vs Plan).
 var DefaultWorkflowConfigOption = ConfigOption{
 	ID:           "workflow",
 	Name:         "Workflow",
-	Category:     "workflow",
+	Category:     "", // 必须为空：避免未知 category 破坏 Zed 客户端严格枚举反序列化
 	Type:         "select",
 	CurrentValue: "normal",
 	Options: []ConfigOptionItem{
 		{
 			Value:       "normal",
 			Name:        "Normal",
-			Description: "普通对话/直接执行模式（不自动注入 /plan）",
+			Description: "Normal conversation and direct execution mode",
 		},
 		{
 			Value:       "plan",
 			Name:        "Plan",
-			Description: "自动规划模式（自动前置 /plan，先出方案经批准后再动手）",
+			Description: "Automatic planning mode (auto-prepends /plan)",
 		},
 	},
 }
@@ -282,12 +344,14 @@ func MergeCommandsUpdateNotification(rawParams json.RawMessage, extra []CommandI
 		_ = json.Unmarshal(rawSU, &sessionUpdate)
 	}
 
-	if sessionUpdate != "available_commands_update" {
+	rawCmds, hasCommands := updateMap["availableCommands"]
+	// 满足显式 sessionUpdate 类型或者直接包含 availableCommands 数组字段
+	if sessionUpdate != "available_commands_update" && (!hasCommands || len(rawCmds) == 0) {
 		return rawParams, false, nil
 	}
 
 	var existing []CommandItem
-	if rawCmds, ok := updateMap["availableCommands"]; ok && len(rawCmds) > 0 {
+	if hasCommands && len(rawCmds) > 0 {
 		_ = json.Unmarshal(rawCmds, &existing)
 	}
 
@@ -302,6 +366,16 @@ func MergeCommandsUpdateNotification(rawParams json.RawMessage, extra []CommandI
 		}
 	}
 
+	// 合并解封的官方思维命令 (grill-me, goal, compact)
+	for _, c := range NativeAugmentedCommands {
+		lower := strings.ToLower(c.Name)
+		if !seen[lower] {
+			seen[lower] = true
+			merged = append(merged, c)
+		}
+	}
+
+	// 合并本地技能命令
 	for _, c := range extra {
 		lower := strings.ToLower(c.Name)
 		if !seen[lower] {

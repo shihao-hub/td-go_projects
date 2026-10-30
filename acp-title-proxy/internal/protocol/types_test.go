@@ -128,8 +128,9 @@ func TestMergeCommandsUpdateNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(params.Update.AvailableCommands) != 2 {
-		t.Fatalf("expected 2 commands, got %d", len(params.Update.AvailableCommands))
+	// 原有 1 个(usage) + 3 个官方思维增强命令 + 1 个技能 = 5
+	if len(params.Update.AvailableCommands) != 5 {
+		t.Fatalf("expected 5 commands, got %d", len(params.Update.AvailableCommands))
 	}
 }
 
@@ -160,3 +161,43 @@ func TestMergeConfigOptions(t *testing.T) {
 		t.Fatalf("expected second option to be workflow, got %s", res.ConfigOptions[1].ID)
 	}
 }
+
+func TestReplaceModesInResult(t *testing.T) {
+	rawResult := json.RawMessage(`{
+		"sessionId": "sess_123",
+		"modes": {
+			"currentModeId": "yolo",
+			"availableModes": [
+				{"id": "default", "name": "Default"},
+				{"id": "yolo", "name": "YOLO"}
+			]
+		}
+	}`)
+
+	replaced, err := ReplaceModesInResult(rawResult, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var res struct {
+		SessionID string       `json:"sessionId"`
+		Modes     SessionModes `json:"modes"`
+	}
+	if err := json.Unmarshal(replaced, &res); err != nil {
+		t.Fatal(err)
+	}
+
+	if res.SessionID != "sess_123" {
+		t.Fatalf("expected sessionId sess_123, got %s", res.SessionID)
+	}
+	if res.Modes.CurrentModeID != "plan" {
+		t.Fatalf("expected currentModeId plan, got %s", res.Modes.CurrentModeID)
+	}
+	if len(res.Modes.AvailableModes) != 2 {
+		t.Fatalf("expected 2 modes (normal, plan), got %d", len(res.Modes.AvailableModes))
+	}
+	if res.Modes.AvailableModes[0].ID != "normal" || res.Modes.AvailableModes[1].ID != "plan" {
+		t.Fatalf("unexpected availableModes: %+v", res.Modes.AvailableModes)
+	}
+}
+

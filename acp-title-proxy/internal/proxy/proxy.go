@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -24,20 +25,59 @@ type SkillManager interface {
 	MatchAndRewrite(rawPrompt string) (bool, string, string, *skill.Skill)
 }
 
+// PlanModeInstruction 是处于 Plan 模式时强制注入的安全手刹约束，模拟 OpenCode 的严格规划与切回提示。
+const PlanModeInstruction = "【系统约束：当前处于 Plan 规划模式（只读分析阶段）。严禁调用任何具有修改文件、创建文件、写入代码或产生系统副作用的工具；仅允许使用只读工具（如读取文件、搜索代码）进行分析，并输出严谨的实施方案。若用户要求直接动手执行或编写代码，请务必明确提示用户：“当前处于 Plan 规划模式，请先在底部状态栏将 Workflow 切换为 Normal 后，我再立即为您执行代码修改。”】\n\n"
+
 type sessionWorkflowState struct {
-	mode             string // "normal" or "plan"
-	awaitingApproval bool   // 方案已生成，正等待用户审批放行
-	lastPlanReqID    string // 上一轮触发 plan 的请求 ID
+	mode              string // "normal" or "plan"
+	lastConfigOptions []protocol.ConfigOption
 }
 
 type Runner struct {
-	ExePath       string
-	Args          []string
-	Titler        Titler
-	SkillMgr      SkillManager
-	Stdin         io.Reader
-	workflowMu    sync.Mutex
-	sessionStates map[string]*sessionWorkflowState
+	ExePath                string
+	Args                   []string
+	Titler                 Titler
+	SkillMgr               SkillManager
+	Stdin                  io.Reader
+	workflowMu             sync.Mutex
+	sessionStates          map[string]*sessionWorkflowState
+	lastKnownConfigOptions []protocol.ConfigOption
+}
+
+func (r *Runner) buildUpdatedConfigOptions(sessionID, newWorkflowValue string) []protocol.ConfigOption {
+	r.workflowMu.Lock()
+	defer r.workflowMu.Unlock()
+
+	var baseOpts []protocol.ConfigOption
+	if st, ok := r.sessionStates[sessionID]; ok && len(st.lastConfigOptions) > 0 {
+		baseOpts = make([]protocol.ConfigOption, len(st.lastConfigOptions))
+		copy(baseOpts, st.lastConfigOptions)
+	} else if len(r.lastKnownConfigOptions) > 0 {
+		baseOpts = make([]protocol.ConfigOption, len(r.lastKnownConfigOptions))
+		copy(baseOpts, r.lastKnownConfigOptions)
+	}
+
+	found := false
+	for i := range baseOpts {
+		if strings.EqualFold(baseOpts[i].ID, "workflow") {
+			baseOpts[i].CurrentValue = newWorkflowValue
+			found = true
+			break
+		}
+	}
+	if !found {
+		opt := protocol.DefaultWorkflowConfigOption
+		opt.CurrentValue = newWorkflowValue
+		baseOpts = append(baseOpts, opt)
+	}
+
+	// 缓存回状态
+	if st, ok := r.sessionStates[sessionID]; ok {
+		st.lastConfigOptions = baseOpts
+	}
+	r.lastKnownConfigOptions = baseOpts
+
+	return baseOpts
 }
 
 func (r *Runner) getStdin() io.Reader {
@@ -253,32 +293,87 @@ func (r *Runner) processInbound(line []byte, inj *Injector) []byte {
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return line
 	}
+	if msg.Method != "" {
+		log.Printf("[Proxy IN] method=%s id=%v", msg.Method, msg.ID)
+	}
 
-	// 1. 拦截 Zed 切换下拉框配置 (session/set_config_option)
+	// 1. 拦截 Zed 切换 Mode (session/set_mode，由 Shift+Tab 快捷键或点击 Mode 下拉框触发)
+	if msg.Method == "session/set_mode" && len(msg.Params) > 0 {
+		var setModeParams protocol.SetModeParams
+		if err := json.Unmarshal(msg.Params, &setModeParams); err == nil && setModeParams.SessionID != "" {
+			val := strings.ToLower(strings.TrimSpace(setModeParams.ModeID))
+			mappedMode := "normal"
+			if val == "plan" {
+				mappedMode = "plan"
+			}
+
+			state := r.getWorkflowState(setModeParams.SessionID)
+			r.workflowMu.Lock()
+			state.mode = mappedMode
+			r.workflowMu.Unlock()
+
+			// 向 Zed 直接回复成功结果，拦截不透传给底层（底层保持 YOLO）
+			if inj != nil && msg.ID != nil {
+				resp := map[string]interface{}{
+					"jsonrpc": "2.0",
+					"id":      msg.ID,
+					"result":  map[string]interface{}{},
+				}
+				if respData, err := json.Marshal(resp); err == nil {
+					respData = append(respData, '\n')
+					_, _ = inj.WriteRaw(respData)
+					log.Printf("[Proxy IN] Intercepted set_mode=%s (mapped=%s) for session=%s", val, mappedMode, setModeParams.SessionID)
+				}
+			}
+			return nil
+		}
+	}
+
+	// 2. 兼容拦截 Zed 切换下拉框配置 (session/set_config_option)
 	if msg.Method == "session/set_config_option" && len(msg.Params) > 0 {
 		var setParams protocol.SetConfigOptionParams
 		if err := json.Unmarshal(msg.Params, &setParams); err == nil && setParams.SessionID != "" {
-			if strings.EqualFold(setParams.ConfigID, "workflow") {
+			if strings.EqualFold(setParams.ConfigID, "workflow") || strings.EqualFold(setParams.ConfigID, "mode") {
+				val := strings.ToLower(strings.TrimSpace(setParams.Value))
+				mappedMode := "normal"
+				if val == "plan" {
+					mappedMode = "plan"
+				}
+
 				state := r.getWorkflowState(setParams.SessionID)
 				r.workflowMu.Lock()
-				state.mode = strings.ToLower(setParams.Value)
-				state.awaitingApproval = false // 切换模式时重置等待状态
+				state.mode = mappedMode
 				r.workflowMu.Unlock()
 
-				// 向 Zed 假装回复成功，拦截不发往底层 child
+				updatedOpts := r.buildUpdatedConfigOptions(setParams.SessionID, mappedMode)
+
+				// 向 Zed 回复包含全量 configOptions 的成功结果，确保客户端状态更新与 UI 联动
 				if inj != nil && msg.ID != nil {
 					resp := map[string]interface{}{
 						"jsonrpc": "2.0",
 						"id":      msg.ID,
-						"result":  map[string]interface{}{},
+						"result": map[string]interface{}{
+							"configOptions": updatedOpts,
+						},
 					}
 					if respData, err := json.Marshal(resp); err == nil {
 						respData = append(respData, '\n')
 						_, _ = inj.WriteRaw(respData)
+						log.Printf("[Proxy IN] Responded to set_config_option %s=%s (mapped=%s)", setParams.ConfigID, val, mappedMode)
 					}
 				}
 				return nil
 			}
+		}
+	}
+
+	// 感知 session/load 请求，为恢复的历史会话预先初始化状态
+	if msg.Method == "session/load" && len(msg.Params) > 0 {
+		var loadParams struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := json.Unmarshal(msg.Params, &loadParams); err == nil && loadParams.SessionID != "" {
+			_ = r.getWorkflowState(loadParams.SessionID)
 		}
 	}
 
@@ -293,7 +388,6 @@ func (r *Runner) processInbound(line []byte, inj *Injector) []byte {
 			state := r.getWorkflowState(params.SessionID)
 			r.workflowMu.Lock()
 			currentMode := state.mode
-			isAwaitingApproval := state.awaitingApproval
 			r.workflowMu.Unlock()
 
 			// A. 技能匹配与注入
@@ -307,38 +401,14 @@ func (r *Runner) processInbound(line []byte, inj *Injector) []byte {
 				}
 			}
 
-			// B. Plan 模式与生命周期状态机处理
-			shouldInjectPlan := false
+			// B. Plan 模式：OpenCode 安全手刹机制
+			planInjected := false
 			if currentMode == "plan" {
-				if isAwaitingApproval {
-					// 方案 A 核心点：处于等审批状态，说明用户正在反馈或批准刚才的方案！
-					// 坚决不注入 /plan，直接放行让其进入执行期！
-					r.workflowMu.Lock()
-					state.awaitingApproval = false
-					r.workflowMu.Unlock()
-				} else {
-					// 首次提需求，若未显式带有 /plan 则自动戴上 /plan 帽子
-					trimmedEffective := strings.TrimSpace(effectivePrompt)
-					if !strings.HasPrefix(trimmedEffective, "/plan") {
-						shouldInjectPlan = true
-					}
-				}
-			}
-
-			if shouldInjectPlan {
-				effectivePrompt = "/plan " + effectivePrompt
-				if msg.ID != nil {
-					r.workflowMu.Lock()
-					state.lastPlanReqID = string(*msg.ID)
-					r.workflowMu.Unlock()
-				}
-			} else {
-				// 如果用户自己手敲了 /plan，也记录一下，以便监听其 plan 完成
-				if strings.HasPrefix(strings.TrimSpace(promptText), "/plan") && msg.ID != nil {
-					r.workflowMu.Lock()
-					state.lastPlanReqID = string(*msg.ID)
-					r.workflowMu.Unlock()
-				}
+				planInjected = true
+				trimmed := strings.TrimSpace(effectivePrompt)
+				userContent := strings.TrimPrefix(trimmed, "/plan")
+				userContent = strings.TrimSpace(userContent)
+				effectivePrompt = "/plan " + PlanModeInstruction + userContent
 			}
 
 			// C. 更新 Titler（使用干净的用户任务描述，不带 /plan 与技能模版前缀）
@@ -350,8 +420,8 @@ func (r *Runner) processInbound(line []byte, inj *Injector) []byte {
 				}
 			}
 
-			// D. 如果发生改写（技能或 /plan 注入），替换并重组 JSON-RPC
-			if skillMatched || shouldInjectPlan {
+			// D. 如果发生改写（技能或 Plan 手刹注入），替换并重组 JSON-RPC
+			if skillMatched || planInjected {
 				if newPromptRaw, err := protocol.RewritePrompt(params.Prompt, effectivePrompt); err == nil {
 					params.Prompt = newPromptRaw
 					if newParamsRaw, err := json.Marshal(params); err == nil {
@@ -370,68 +440,105 @@ func (r *Runner) processInbound(line []byte, inj *Injector) []byte {
 }
 
 func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
+	log.Printf("[Proxy OUT] %s", string(line[:min(len(line), 250)]))
 	var msg protocol.JSONRPCMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return line
 	}
 
-	// 1. 识别 session/new 响应：合并 availableCommands 与注入 workflow 独立下拉框
+	// 1. 识别 session/new 与 session/load 响应：合并 availableCommands 与注入 workflow 独立下拉框
 	if msg.ID != nil && len(msg.Result) > 0 {
-		var res protocol.SessionNewResult
-		if err := json.Unmarshal(msg.Result, &res); err == nil && res.SessionID != "" {
-			if r.Titler != nil {
-				r.Titler.OnSessionNew(res.SessionID)
+		var resMap map[string]json.RawMessage
+		if err := json.Unmarshal(msg.Result, &resMap); err == nil {
+			modified := false
+
+			// 如果有 sessionId，触发 Titler
+			if rawSID, ok := resMap["sessionId"]; ok {
+				var sid string
+				if err := json.Unmarshal(rawSID, &sid); err == nil && sid != "" && r.Titler != nil {
+					r.Titler.OnSessionNew(sid)
+				}
 			}
 
-			// A. 合并命令列表（包含官方解封命令 + 本地技能族）
-			var skills []protocol.CommandItem
-			if r.SkillMgr != nil {
-				skills = r.SkillMgr.GetCommandItems()
-			}
-			if mergedCmds, err := protocol.MergeAvailableCommands(msg.Result, skills); err == nil {
-				msg.Result = mergedCmds
-			}
-
-			// B. 注入独立下拉框 (Workflow: Normal / Plan)
-			if mergedOpts, err := protocol.MergeConfigOptions(msg.Result, protocol.DefaultWorkflowConfigOption); err == nil {
-				msg.Result = mergedOpts
+			// 如果包含 availableCommands，合并官方思维命令与技能族
+			if _, ok := resMap["availableCommands"]; ok {
+				var skills []protocol.CommandItem
+				if r.SkillMgr != nil {
+					skills = r.SkillMgr.GetCommandItems()
+				}
+				if mergedCmds, err := protocol.MergeAvailableCommands(msg.Result, skills); err == nil {
+					msg.Result = mergedCmds
+					modified = true
+				}
 			}
 
-			if newLine, err := json.Marshal(msg); err == nil {
-				newLine = append(newLine, '\n')
-				return newLine
-			}
-		}
-	}
+			_, hasSID := resMap["sessionId"]
+			_, hasModes := resMap["modes"]
 
-	// 2. 识别 session/update 通知：合并 available_commands_update
-	if msg.Method == "session/update" && len(msg.Params) > 0 {
-		if r.SkillMgr != nil {
-			skills := r.SkillMgr.GetCommandItems()
-			if len(skills) > 0 {
-				if mergedParams, matched, err := protocol.MergeCommandsUpdateNotification(msg.Params, skills); err == nil && matched {
-					msg.Params = mergedParams
-					if newLine, err := json.Marshal(msg); err == nil {
-						newLine = append(newLine, '\n')
-						return newLine
+			// 2. 将 modes 替换为 Workflow 模式（Normal / Plan），实现 Shift+Tab 原生一键切换
+			if hasModes || hasSID {
+				var targetSID string
+				if rawSID, ok := resMap["sessionId"]; ok {
+					_ = json.Unmarshal(rawSID, &targetSID)
+				}
+				currentMode := "normal"
+				if targetSID != "" {
+					st := r.getWorkflowState(targetSID)
+					r.workflowMu.Lock()
+					if st.mode != "" {
+						currentMode = st.mode
 					}
+					r.workflowMu.Unlock()
+				}
+				if replaced, err := protocol.ReplaceModesInResult(msg.Result, currentMode); err == nil {
+					msg.Result = replaced
+					modified = true
+				}
+			}
+
+			// 3. 记录已知的 configOptions 供后续状态更新回显
+			if rawOpts, ok := resMap["configOptions"]; ok && len(rawOpts) > 0 {
+				var existingOpts []protocol.ConfigOption
+				if err := json.Unmarshal(rawOpts, &existingOpts); err == nil && len(existingOpts) > 0 {
+					var targetSID string
+					if rawSID, ok := resMap["sessionId"]; ok {
+						_ = json.Unmarshal(rawSID, &targetSID)
+					}
+					r.workflowMu.Lock()
+					r.lastKnownConfigOptions = existingOpts
+					if targetSID != "" {
+						if st, ok := r.sessionStates[targetSID]; ok {
+							st.lastConfigOptions = existingOpts
+						}
+					}
+					r.workflowMu.Unlock()
+				}
+			}
+
+			if modified {
+				if newLine, err := json.Marshal(msg); err == nil {
+					newLine = append(newLine, '\n')
+					log.Printf("[Proxy OUT] Injected workflow/commands into response id=%v", msg.ID)
+					return newLine
 				}
 			}
 		}
 	}
 
-	// 3. 监听 prompt 请求完成：进入 awaitingApproval 状态
-	if msg.ID != nil && len(msg.Result) > 0 {
-		idStr := string(*msg.ID)
-		r.workflowMu.Lock()
-		for _, st := range r.sessionStates {
-			if st.lastPlanReqID != "" && st.lastPlanReqID == idStr {
-				st.awaitingApproval = true // 规划输出完毕，正式进入等待用户审批状态！
-				st.lastPlanReqID = ""
-				break
+	// 2. 识别 session/update 通知：合并 availableCommands (session/load 会推送此通知)
+	if msg.Method == "session/update" && len(msg.Params) > 0 {
+		var skills []protocol.CommandItem
+		if r.SkillMgr != nil {
+			skills = r.SkillMgr.GetCommandItems()
+		}
+		if mergedParams, matched, err := protocol.MergeCommandsUpdateNotification(msg.Params, skills); err == nil && matched {
+			msg.Params = mergedParams
+			if newLine, err := json.Marshal(msg); err == nil {
+				newLine = append(newLine, '\n')
+				log.Printf("[Proxy OUT] Injected skills/commands into session/update notification")
+				return newLine
 			}
 		}
-		r.workflowMu.Unlock()
 	}
 
 	return line

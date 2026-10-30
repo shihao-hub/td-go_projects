@@ -103,6 +103,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		SessionID         string                  `json:"sessionId"`
 		AvailableCommands []protocol.CommandItem  `json:"availableCommands"`
 		ConfigOptions     []protocol.ConfigOption `json:"configOptions"`
+		Modes             protocol.SessionModes   `json:"modes"`
 	}
 	if err := json.Unmarshal(zedNewResp.Result, &zedResult); err != nil {
 		t.Fatalf("failed to parse zed availableCommands: %v", err)
@@ -146,18 +147,12 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatal("unexpected generic 'skill' command found in list!")
 	}
 
-	// 验证 Workflow 下拉框配置注入
-	foundWorkflow := false
-	for _, opt := range zedResult.ConfigOptions {
-		if opt.ID == "workflow" {
-			foundWorkflow = true
-			if len(opt.Options) != 2 || opt.Options[1].Value != "plan" {
-				t.Fatalf("unexpected workflow options: %+v", opt.Options)
-			}
-		}
+	// 验证 Modes 接管为 Normal / Plan 模式（支持 Shift+Tab 循环切换）
+	if zedResult.Modes.CurrentModeID != "normal" {
+		t.Fatalf("expected currentModeId normal, got %s", zedResult.Modes.CurrentModeID)
 	}
-	if !foundWorkflow {
-		t.Fatal("expected workflow config option injected into Zed session/new response")
+	if len(zedResult.Modes.AvailableModes) != 2 || zedResult.Modes.AvailableModes[1].ID != "plan" {
+		t.Fatalf("unexpected availableModes: %+v", zedResult.Modes.AvailableModes)
 	}
 
 	// 2. 入向测试：用户通过带前缀的 /skill:name 调用技能

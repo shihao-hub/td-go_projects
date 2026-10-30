@@ -77,22 +77,22 @@ func TestProcessOutboundMergeCommandsAndWorkflowOption(t *testing.T) {
 		t.Fatalf("expected 5 commands, got %d: %+v", len(res.AvailableCommands), res.AvailableCommands)
 	}
 
-	// Verify Workflow config option is injected
-	foundWorkflow := false
-	for _, opt := range res.ConfigOptions {
-		if opt.ID == "workflow" {
-			foundWorkflow = true
-			if len(opt.Options) != 2 || opt.Options[1].Value != "plan" {
-				t.Fatalf("unexpected workflow options: %+v", opt.Options)
-			}
-		}
+	// Verify modes is replaced with Workflow modes (Normal / Plan)
+	var modesRes struct {
+		Modes protocol.SessionModes `json:"modes"`
 	}
-	if !foundWorkflow {
-		t.Fatal("workflow config option not injected into result")
+	if err := json.Unmarshal(msg.Result, &modesRes); err != nil {
+		t.Fatal(err)
+	}
+	if modesRes.Modes.CurrentModeID != "normal" {
+		t.Fatalf("expected currentModeId normal, got %s", modesRes.Modes.CurrentModeID)
+	}
+	if len(modesRes.Modes.AvailableModes) != 2 || modesRes.Modes.AvailableModes[1].ID != "plan" {
+		t.Fatalf("unexpected availableModes: %+v", modesRes.Modes.AvailableModes)
 	}
 }
 
-func TestProcessInboundWorkflowPlanLifecycle(t *testing.T) {
+func TestProcessInboundWorkflowPlanHandbrake(t *testing.T) {
 	titler := &mockTitler{}
 	skillMgr := &mockSkillMgr{}
 	runner := NewRunner("", nil, titler, skillMgr)
@@ -100,19 +100,19 @@ func TestProcessInboundWorkflowPlanLifecycle(t *testing.T) {
 	var zedStdout bytes.Buffer
 	inj := NewInjector(&zedStdout)
 
-	// 1. Zed sets workflow = plan
-	setReq := []byte(`{"jsonrpc":"2.0","id":10,"method":"session/set_config_option","params":{"sessionId":"sess_1","configId":"workflow","value":"plan"}}` + "\n")
+	// 1. Zed sets mode = plan (via Shift+Tab / session/set_mode)
+	setReq := []byte(`{"jsonrpc":"2.0","id":10,"method":"session/set_mode","params":{"sessionId":"sess_1","modeId":"plan"}}` + "\n")
 	outSet := runner.processInbound(setReq, inj)
 	if outSet != nil {
-		t.Fatal("expected set_config_option to be intercepted (returned nil)")
+		t.Fatal("expected set_mode to be intercepted (returned nil)")
 	}
 
-	// Verify response written to Zed
-	if !strings.Contains(zedStdout.String(), `"id":10`) {
-		t.Fatalf("expected response for id 10, got: %s", zedStdout.String())
+	// Verify empty success result written to Zed
+	if !strings.Contains(zedStdout.String(), `"id":10`) || !strings.Contains(zedStdout.String(), `"result":{}`) {
+		t.Fatalf("expected success response, got: %s", zedStdout.String())
 	}
 
-	// 2. User sends normal prompt in Plan mode -> should auto-inject /plan
+	// 2. User sends normal prompt in Plan mode -> should inject /plan and PlanModeInstruction
 	promptReq1 := []byte(`{"jsonrpc":"2.0","id":11,"method":"session/prompt","params":{"sessionId":"sess_1","prompt":[{"type":"text","text":"设计用户登录模块"}]}}` + "\n")
 	outPrompt1 := runner.processInbound(promptReq1, inj)
 
@@ -122,15 +122,11 @@ func TestProcessInboundWorkflowPlanLifecycle(t *testing.T) {
 	_ = json.Unmarshal(msg1.Params, &params1)
 	text1 := protocol.ExtractPromptText(params1.Prompt)
 
-	if !strings.HasPrefix(text1, "/plan 设计用户登录模块") {
-		t.Fatalf("expected /plan injection, got: %s", text1)
+	if !strings.HasPrefix(text1, "/plan ") || !strings.Contains(text1, "【系统约束：当前处于 Plan 规划模式（只读分析阶段）") {
+		t.Fatalf("expected /plan and handbrake instruction, got: %s", text1)
 	}
 
-	// 3. Child responds to prompt 11 (plan generated and finished streaming)
-	planResp := []byte(`{"jsonrpc":"2.0","id":11,"result":{}}` + "\n")
-	runner.processOutbound(planResp, inj)
-
-	// 4. User replies with approval ("好的，开始动手！") -> should NOT inject /plan!
+	// 3. User urges execution while still in Plan mode -> Handbrake stays on!
 	promptReq2 := []byte(`{"jsonrpc":"2.0","id":12,"method":"session/prompt","params":{"sessionId":"sess_1","prompt":[{"type":"text","text":"好的，开始动手！"}]}}` + "\n")
 	outPrompt2 := runner.processInbound(promptReq2, inj)
 
@@ -140,10 +136,32 @@ func TestProcessInboundWorkflowPlanLifecycle(t *testing.T) {
 	_ = json.Unmarshal(msg2.Params, &params2)
 	text2 := protocol.ExtractPromptText(params2.Prompt)
 
-	if strings.Contains(text2, "/plan") {
-		t.Fatalf("approval message should NOT have /plan, got: %s", text2)
+	if !strings.Contains(text2, "【系统约束：当前处于 Plan 规划模式（只读分析阶段）") {
+		t.Fatalf("handbrake must stay active while in Plan mode, got: %s", text2)
 	}
-	if text2 != "好的，开始动手！" {
-		t.Fatalf("expected raw approval text, got: %s", text2)
+
+	// 4. User releases handbrake by pressing Shift+Tab (session/set_mode -> normal)
+	zedStdout.Reset()
+	setNormalReq := []byte(`{"jsonrpc":"2.0","id":13,"method":"session/set_mode","params":{"sessionId":"sess_1","modeId":"normal"}}` + "\n")
+	_ = runner.processInbound(setNormalReq, inj)
+	if !strings.Contains(zedStdout.String(), `"id":13`) {
+		t.Fatalf("expected success response for id 13, got: %s", zedStdout.String())
+	}
+
+	// 5. User sends command in Normal mode -> Completely unrestricted!
+	promptReq3 := []byte(`{"jsonrpc":"2.0","id":14,"method":"session/prompt","params":{"sessionId":"sess_1","prompt":[{"type":"text","text":"好的，开始动手！"}]}}` + "\n")
+	outPrompt3 := runner.processInbound(promptReq3, inj)
+
+	var msg3 protocol.JSONRPCMessage
+	_ = json.Unmarshal(outPrompt3, &msg3)
+	var params3 protocol.SessionPromptParams
+	_ = json.Unmarshal(msg3.Params, &params3)
+	text3 := protocol.ExtractPromptText(params3.Prompt)
+
+	if strings.Contains(text3, "【系统约束") || strings.Contains(text3, "/plan") {
+		t.Fatalf("normal mode should not have plan constraints, got: %s", text3)
+	}
+	if text3 != "好的，开始动手！" {
+		t.Fatalf("expected original text, got: %s", text3)
 	}
 }
