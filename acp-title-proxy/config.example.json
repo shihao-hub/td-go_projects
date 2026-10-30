@@ -1,0 +1,28 @@
+{
+  "opencode": {
+    "db_path": "%USERPROFILE%/.local/share/opencode/opencode.db",
+    "poll_interval_ms": 1500,
+    "max_polls": 8
+  },
+  "agy": {
+    "providers": [
+      {
+        "name": "opencode-go",
+        "enabled": true,
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "api_key": "auto",
+        "model": "deepseek-v4.1-flash",
+        "reasoning_effort": "none",
+        "timeout_ms": 4000
+      },
+      {
+        "name": "deepseek-official",
+        "enabled": true,
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "YOUR_DEEPSEEK_API_KEY",
+        "model": "deepseek-chat",
+        "timeout_ms": 4000
+      }
+    ]
+  }
+}
