@@ -88,7 +88,7 @@ func (r *Runner) Run(inj *Injector) error {
 	defer abort()
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(2)
 
 	// 1. 直接转发 Stderr
 	go func() {
@@ -97,8 +97,9 @@ func (r *Runner) Run(inj *Injector) error {
 	}()
 
 	// 2. 入向：Zed Stdin -> 子进程 Stdin
+	// 不纳入 WaitGroup：客户端不关闭 stdin 时该 goroutine 会永久阻塞在 Read 上，
+	// 若等待它，代理进程在会话重建后会残留为僵尸进程。
 	go func() {
-		defer wg.Done()
 		defer abort() // Zed Stdin 关闭 -> 立即终止子进程
 
 		reader := bufio.NewReaderSize(r.getStdin(), 1024*1024)
@@ -161,11 +162,12 @@ func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 	defer abort()
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
 	// 1. 入向：Zed Stdin -> 双工流
+	// 不纳入 WaitGroup：客户端不关闭 stdin 时该 goroutine 会永久阻塞在 Read 上，
+	// 若等待它，代理进程在会话重建后会残留为僵尸进程。
 	go func() {
-		defer wg.Done()
 		defer abort() // Zed Stdin 关闭 -> 关闭双工流并中止
 
 		reader := bufio.NewReaderSize(r.getStdin(), 1024*1024)
