@@ -52,6 +52,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 
 	proxyChildStream := &duplexPipe{reader: childToProxyR, writer: proxyToChildW}
 	mockChildStream := &duplexPipe{reader: proxyToChildR, writer: childToProxyW}
+	go func() { _, _ = io.Copy(io.Discard, mockChildStream) }()
 
 	// 创建写入模拟 Zed Stdout 的 Injector
 	var zedStdout bytes.Buffer
