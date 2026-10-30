@@ -204,6 +204,84 @@ func ReplaceModesInResult(rawResult json.RawMessage, currentMode string) (json.R
 	return json.Marshal(resultMap)
 }
 
+// RewriteModeConfigOption ensures the "mode" config option exists and has Normal and Plan choices.
+func RewriteModeConfigOption(opts []ConfigOption, currentMode string) []ConfigOption {
+	if currentMode == "" {
+		currentMode = "normal"
+	}
+
+	modeChoices := []ConfigOptionItem{
+		{
+			Value:       "normal",
+			Name:        "Normal",
+			Description: "Normal conversation and direct execution mode",
+		},
+		{
+			Value:       "plan",
+			Name:        "Plan",
+			Description: "Plan handbrake mode (read-only planning)",
+		},
+	}
+
+	// 过滤掉旧的 workflow 选项，避免重复
+	var cleaned []ConfigOption
+	foundMode := false
+	for _, opt := range opts {
+		if strings.EqualFold(opt.ID, "workflow") {
+			continue
+		}
+		if strings.EqualFold(opt.ID, "mode") || strings.EqualFold(opt.Category, "mode") {
+			opt.ID = "mode"
+			opt.Name = "Mode"
+			opt.Category = "mode"
+			opt.Type = "select"
+			opt.CurrentValue = currentMode
+			opt.Options = modeChoices
+			foundMode = true
+		}
+		cleaned = append(cleaned, opt)
+	}
+
+	if !foundMode {
+		cleaned = append(cleaned, ConfigOption{
+			ID:           "mode",
+			Name:         "Mode",
+			Category:     "mode",
+			Type:         "select",
+			CurrentValue: currentMode,
+			Options:      modeChoices,
+		})
+	}
+
+	return cleaned
+}
+
+// RewriteConfigOptionsInResult rewrites or injects the mode config option in rawResult.
+func RewriteConfigOptionsInResult(rawResult json.RawMessage, currentMode string) (json.RawMessage, error) {
+	if len(rawResult) == 0 {
+		return rawResult, nil
+	}
+
+	var resultMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+		return rawResult, err
+	}
+
+	var existing []ConfigOption
+	if rawOpts, ok := resultMap["configOptions"]; ok && len(rawOpts) > 0 {
+		_ = json.Unmarshal(rawOpts, &existing)
+	}
+
+	updated := RewriteModeConfigOption(existing, currentMode)
+	updatedBytes, err := json.Marshal(updated)
+	if err != nil {
+		return rawResult, err
+	}
+
+	resultMap["configOptions"] = updatedBytes
+	return json.Marshal(resultMap)
+}
+
 // DefaultWorkflowConfigOption defines the independent Workflow selector (Normal vs Plan).
 var DefaultWorkflowConfigOption = ConfigOption{
 	ID:           "workflow",

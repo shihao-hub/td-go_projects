@@ -201,3 +201,37 @@ func TestReplaceModesInResult(t *testing.T) {
 	}
 }
 
+func TestRewriteConfigOptionsInResult(t *testing.T) {
+	rawResult := json.RawMessage(`{
+		"sessionId": "sess_123",
+		"configOptions": [
+			{"id": "model", "name": "Model", "currentValue": "flash"},
+			{"id": "mode", "name": "Mode", "category": "mode", "currentValue": "yolo", "options": [{"value": "default", "name": "Default"}, {"value": "yolo", "name": "YOLO"}]}
+		]
+	}`)
+
+	rewritten, err := RewriteConfigOptionsInResult(rawResult, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var res struct {
+		ConfigOptions []ConfigOption `json:"configOptions"`
+	}
+	if err := json.Unmarshal(rewritten, &res); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(res.ConfigOptions) != 2 {
+		t.Fatalf("expected 2 options, got %d", len(res.ConfigOptions))
+	}
+	modeOpt := res.ConfigOptions[1]
+	if modeOpt.ID != "mode" || modeOpt.CurrentValue != "plan" {
+		t.Fatalf("unexpected mode opt: %+v", modeOpt)
+	}
+	if len(modeOpt.Options) != 2 || modeOpt.Options[0].Value != "normal" || modeOpt.Options[1].Value != "plan" {
+		t.Fatalf("unexpected mode choices: %+v", modeOpt.Options)
+	}
+}
+
+

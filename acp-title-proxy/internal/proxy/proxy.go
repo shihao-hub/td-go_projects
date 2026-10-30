@@ -57,19 +57,7 @@ func (r *Runner) buildUpdatedConfigOptions(sessionID, newWorkflowValue string) [
 		copy(baseOpts, r.lastKnownConfigOptions)
 	}
 
-	found := false
-	for i := range baseOpts {
-		if strings.EqualFold(baseOpts[i].ID, "workflow") {
-			baseOpts[i].CurrentValue = newWorkflowValue
-			found = true
-			break
-		}
-	}
-	if !found {
-		opt := protocol.DefaultWorkflowConfigOption
-		opt.CurrentValue = newWorkflowValue
-		baseOpts = append(baseOpts, opt)
-	}
+	baseOpts = protocol.RewriteModeConfigOption(baseOpts, newWorkflowValue)
 
 	// 缓存回状态
 	if st, ok := r.sessionStates[sessionID]; ok {
@@ -474,44 +462,50 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 
 			_, hasSID := resMap["sessionId"]
 			_, hasModes := resMap["modes"]
+			_, hasOpts := resMap["configOptions"]
 
-			// 2. 将 modes 替换为 Workflow 模式（Normal / Plan），实现 Shift+Tab 原生一键切换
+			var targetSID string
+			if rawSID, ok := resMap["sessionId"]; ok {
+				_ = json.Unmarshal(rawSID, &targetSID)
+			}
+			currentMode := "normal"
+			if targetSID != "" {
+				st := r.getWorkflowState(targetSID)
+				r.workflowMu.Lock()
+				if st.mode != "" {
+					currentMode = st.mode
+				}
+				r.workflowMu.Unlock()
+			}
+
+			// 2. 将 modes 替换为 Workflow 模式（Normal / Plan），实现旧版 ACP 兼容
 			if hasModes || hasSID {
-				var targetSID string
-				if rawSID, ok := resMap["sessionId"]; ok {
-					_ = json.Unmarshal(rawSID, &targetSID)
-				}
-				currentMode := "normal"
-				if targetSID != "" {
-					st := r.getWorkflowState(targetSID)
-					r.workflowMu.Lock()
-					if st.mode != "" {
-						currentMode = st.mode
-					}
-					r.workflowMu.Unlock()
-				}
 				if replaced, err := protocol.ReplaceModesInResult(msg.Result, currentMode); err == nil {
 					msg.Result = replaced
 					modified = true
 				}
 			}
 
-			// 3. 记录已知的 configOptions 供后续状态更新回显
-			if rawOpts, ok := resMap["configOptions"]; ok && len(rawOpts) > 0 {
-				var existingOpts []protocol.ConfigOption
-				if err := json.Unmarshal(rawOpts, &existingOpts); err == nil && len(existingOpts) > 0 {
-					var targetSID string
-					if rawSID, ok := resMap["sessionId"]; ok {
-						_ = json.Unmarshal(rawSID, &targetSID)
+			// 3. 将 configOptions 中的 mode 替换为 Normal / Plan 模式，实现新版 Zed Shift+Tab 循环
+			if hasOpts || hasSID {
+				if rewrittenOpts, err := protocol.RewriteConfigOptionsInResult(msg.Result, currentMode); err == nil {
+					msg.Result = rewrittenOpts
+					modified = true
+
+					// 记录全量 configOptions
+					var allOpts struct {
+						ConfigOptions []protocol.ConfigOption `json:"configOptions"`
 					}
-					r.workflowMu.Lock()
-					r.lastKnownConfigOptions = existingOpts
-					if targetSID != "" {
-						if st, ok := r.sessionStates[targetSID]; ok {
-							st.lastConfigOptions = existingOpts
+					if err := json.Unmarshal(rewrittenOpts, &allOpts); err == nil && len(allOpts.ConfigOptions) > 0 {
+						r.workflowMu.Lock()
+						r.lastKnownConfigOptions = allOpts.ConfigOptions
+						if targetSID != "" {
+							if st, ok := r.sessionStates[targetSID]; ok {
+								st.lastConfigOptions = allOpts.ConfigOptions
+							}
 						}
+						r.workflowMu.Unlock()
 					}
-					r.workflowMu.Unlock()
 				}
 			}
 
