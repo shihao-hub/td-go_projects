@@ -168,16 +168,11 @@ func (d *Daemon) createAndWarmupWorker(stopCh <-chan struct{}) (*Worker, error) 
 	timer := time.NewTimer(d.warmupDuration)
 	defer timer.Stop()
 
-	doneCh := make(chan error, 1)
-	go func() {
-		doneCh <- w.Cmd.Wait()
-	}()
-
 	select {
 	case <-stopCh:
 		_ = w.Close()
 		return nil, fmt.Errorf("daemon stopping")
-	case waitErr := <-doneCh:
+	case waitErr := <-w.WaitErr:
 		_ = w.Close()
 		return nil, fmt.Errorf("worker died during warmup: %v", waitErr)
 	case <-timer.C:
@@ -259,39 +254,53 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	}
 }
 
-func (d *Daemon) splice(conn net.Conn, reader *bufio.Reader, worker *Worker) {
+func (d *Daemon) splice(conn net.Conn, reader io.Reader, worker *Worker) {
 	defer worker.Close()
 	defer conn.Close()
 
 	done := make(chan struct{})
-	var once sync.Once
-	closeDone := func() {
-		once.Do(func() {
+	var closeOnce sync.Once
+	abort := func() {
+		closeOnce.Do(func() {
 			close(done)
+			_ = conn.Close()
+			_ = worker.Close()
 		})
 	}
 
-	// Inbound: conn -> worker.Stdin
-	go func() {
-		defer closeDone()
-		defer worker.Stdin.Close()
+	var wg sync.WaitGroup
+	wg.Add(2)
 
-		// First flush any buffered bytes in reader
-		if reader.Buffered() > 0 {
-			buf := make([]byte, reader.Buffered())
-			_, _ = reader.Read(buf)
-			_, _ = worker.Stdin.Write(buf)
+	// Inbound: client (via reader) -> worker.Stdin
+	go func() {
+		defer wg.Done()
+		defer func() {
+			if worker.Stdin != nil {
+				_ = worker.Stdin.Close()
+			}
+		}()
+
+		// Directly copy from reader which handles pre-buffered bytes automatically
+		_, err := io.Copy(worker.Stdin, reader)
+		if err != nil && err != io.EOF {
+			abort()
 		}
-		_, _ = io.Copy(worker.Stdin, conn)
 	}()
 
-	// Outbound: worker.Stdout -> conn
+	// Outbound: worker.Stdout -> client conn
 	go func() {
-		defer closeDone()
+		defer wg.Done()
+		defer abort()
+
 		_, _ = io.Copy(conn, worker.Stdout)
 	}()
 
-	<-done
+	// Wait until outbound finishes (process exits/EOF) or abort is called
+	select {
+	case <-done:
+	}
+
+	wg.Wait()
 }
 
 func ensureEnv(env *[]string, key, fallbackVal string) {

@@ -13,7 +13,7 @@ Zed ACP (Agent Client Protocol) 智能标题增强工具。
 1. **OpenCode**：自身后台已为会话生成了高质量标题（存入 `~/.local/share/opencode/opencode.db`），自动无感同步，**0 Token 成本、纯本地计算**；
 2. **Google Antigravity (AGY)**：支持**多模型优先级回退链（Provider Fallback Chain）**：
    - **首选（Primary）**：`OpenCode Go` 网关的 `deepseek-v4.1-flash`（显式关闭 `reasoningEffort` 提速至 1s 内）；
-   - **兜底（Fallback）**：`DeepSeek 官方 API` (`deepseek-chat`)，在 OpenCode Go 网关超时或异常时自动无缝接管；
+   - **兜底（Fallback）**：`DeepSeek 官方 API` (`deepseek-flash`，即 DeepSeek-V4.1-Flash，显式关闭思考以提速至 1s 内)，在 OpenCode Go 网关超时或异常时自动无缝接管；
    - **零配密钥**：支持 `"api_key": "auto"` 自动读取本机 `~/.local/share/opencode/auth.json` 中的凭据。
 
 ---
@@ -71,7 +71,8 @@ Zed ACP (Agent Client Protocol) 智能标题增强工具。
         "enabled": true,
         "base_url": "https://api.deepseek.com/v1",
         "api_key": "YOUR_DEEPSEEK_API_KEY",
-        "model": "deepseek-chat",
+        "model": "deepseek-flash",
+        "reasoning_effort": "none",
         "timeout_ms": 4000
       }
     ]

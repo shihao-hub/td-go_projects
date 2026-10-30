@@ -119,7 +119,11 @@ func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 	// 1. Inbound: Zed Stdin -> Stream
 	go func() {
 		defer wg.Done()
-		defer stream.Close()
+		defer func() {
+			if cw, ok := stream.(interface{ CloseWrite() error }); ok {
+				_ = cw.CloseWrite()
+			}
+		}()
 
 		reader := bufio.NewReaderSize(os.Stdin, 1024*1024)
 		for {

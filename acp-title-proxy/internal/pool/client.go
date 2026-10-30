@@ -4,9 +4,35 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"time"
 )
+
+// BufferedConn wraps net.Conn with an io.Reader to ensure any data
+// buffered by bufio.Reader during handshake is not lost.
+type BufferedConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func NewBufferedConn(c net.Conn, r io.Reader) *BufferedConn {
+	return &BufferedConn{
+		Conn: c,
+		r:    r,
+	}
+}
+
+func (bc *BufferedConn) Read(b []byte) (int, error) {
+	return bc.r.Read(b)
+}
+
+func (bc *BufferedConn) CloseWrite() error {
+	if tc, ok := bc.Conn.(*net.TCPConn); ok {
+		return tc.CloseWrite()
+	}
+	return nil
+}
 
 // TryAcquire attempts to connect to the daemon and acquire a pre-warmed worker stream.
 func TryAcquire(port int, timeout time.Duration) (net.Conn, error) {
@@ -58,7 +84,7 @@ func TryAcquire(port int, timeout time.Duration) (net.Conn, error) {
 
 	// Reset deadline for normal bidirectional streaming
 	_ = conn.SetDeadline(time.Time{})
-	return conn, nil
+	return NewBufferedConn(conn, reader), nil
 }
 
 // CheckStatus queries the pool status from daemon.

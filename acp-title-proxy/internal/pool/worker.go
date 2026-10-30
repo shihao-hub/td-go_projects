@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -15,6 +16,8 @@ type Worker struct {
 	Stdout    io.ReadCloser
 	Stderr    io.ReadCloser
 	CreatedAt time.Time
+	WaitErr   chan error
+	closeOnce sync.Once
 }
 
 func StartWorker(exePath string, args []string, env []string) (*Worker, error) {
@@ -55,6 +58,11 @@ func StartWorker(exePath string, args []string, env []string) (*Worker, error) {
 		_, _ = io.Copy(io.Discard, stderr)
 	}()
 
+	waitErr := make(chan error, 1)
+	go func() {
+		waitErr <- cmd.Wait()
+	}()
+
 	return &Worker{
 		ExePath:   exePath,
 		Cmd:       cmd,
@@ -62,22 +70,24 @@ func StartWorker(exePath string, args []string, env []string) (*Worker, error) {
 		Stdout:    stdout,
 		Stderr:    stderr,
 		CreatedAt: time.Now(),
+		WaitErr:   waitErr,
 	}, nil
 }
 
 func (w *Worker) Close() error {
-	if w.Stdin != nil {
-		_ = w.Stdin.Close()
-	}
-	if w.Stdout != nil {
-		_ = w.Stdout.Close()
-	}
-	if w.Stderr != nil {
-		_ = w.Stderr.Close()
-	}
-	if w.Cmd != nil && w.Cmd.Process != nil {
-		_ = w.Cmd.Process.Kill()
-		_ = w.Cmd.Wait()
-	}
+	w.closeOnce.Do(func() {
+		if w.Stdin != nil {
+			_ = w.Stdin.Close()
+		}
+		if w.Stdout != nil {
+			_ = w.Stdout.Close()
+		}
+		if w.Stderr != nil {
+			_ = w.Stderr.Close()
+		}
+		if w.Cmd != nil && w.Cmd.Process != nil {
+			_ = w.Cmd.Process.Kill()
+		}
+	})
 	return nil
 }
