@@ -20,13 +20,14 @@ type Daemon struct {
 	cfg            *config.Config
 	port           int
 	warmupDuration time.Duration
+	exeModTime     int64
 
 	listener    net.Listener
 	standbyChan chan *Worker
 
-	mu         sync.Mutex
-	closed     bool
-	workers    map[*Worker]bool
+	mu          sync.Mutex
+	closed      bool
+	workers     map[*Worker]bool
 	replenishCh chan struct{}
 }
 
@@ -42,6 +43,7 @@ func NewDaemon(cfg *config.Config, port int, warmupDuration time.Duration) *Daem
 		cfg:            cfg,
 		port:           port,
 		warmupDuration: warmupDuration,
+		exeModTime:     GetSelfModTime(),
 		standbyChan:    make(chan *Worker, 1),
 		workers:        make(map[*Worker]bool),
 		replenishCh:    make(chan struct{}, 1),
@@ -200,16 +202,41 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	case "ping":
 		_ = sendResponse(conn, PoolResponse{Status: "ok", Msg: "pong"})
 
+	case "stop":
+		_ = sendResponse(conn, PoolResponse{Status: "ok", Msg: "stopping"})
+		fmt.Println("[Pre-warm Daemon] Stop command received. Shutting down...")
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			d.shutdown()
+		}()
+		return
+
 	case "status":
 		d.mu.Lock()
 		count := len(d.standbyChan)
 		d.mu.Unlock()
 		_ = sendResponse(conn, PoolResponse{
-			Status: "ok",
-			Msg:    fmt.Sprintf("standby_count=%d", count),
+			Status:  "ok",
+			Msg:     fmt.Sprintf("standby_count=%d", count),
+			Version: d.exeModTime,
 		})
 
 	case "acquire":
+		// Auto-version upgrade detection: Check if client executable was updated
+		if req.ExeModTime > 0 && d.exeModTime > 0 && req.ExeModTime != d.exeModTime {
+			fmt.Printf("[Pre-warm Daemon] Detected updated proxy binary (client: %d, daemon: %d). Retiring outdated daemon.\n", req.ExeModTime, d.exeModTime)
+			_ = sendResponse(conn, PoolResponse{
+				Status:  "outdated",
+				Msg:     "daemon_outdated",
+				Version: d.exeModTime,
+			})
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				d.shutdown()
+			}()
+			return
+		}
+
 		// Try to acquire standby worker
 		var worker *Worker
 		select {
@@ -311,6 +338,23 @@ func ensureEnv(env *[]string, key, fallbackVal string) {
 		}
 	}
 	*env = append(*env, key+"="+fallbackVal)
+}
+
+func (d *Daemon) shutdown() {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return
+	}
+	d.closed = true
+	if d.listener != nil {
+		_ = d.listener.Close()
+	}
+	for w := range d.workers {
+		_ = w.Close()
+	}
+	d.mu.Unlock()
+	os.Exit(0)
 }
 
 func (d *Daemon) removeWorker(w *Worker) {

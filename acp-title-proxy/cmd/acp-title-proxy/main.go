@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -96,6 +97,23 @@ func main() {
 			fmt.Printf("[acp-title-proxy] Pre-warm daemon is running: %s (Status: %s)\n", resp.Msg, resp.Status)
 		}
 
+	case "stop":
+		err := pool.StopDaemon(pool.DefaultPort)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[acp-title-proxy] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("[acp-title-proxy] Pre-warm daemon stopped successfully.")
+
+	case "restart":
+		_ = pool.StopDaemon(pool.DefaultPort)
+		time.Sleep(200 * time.Millisecond)
+		if err := pool.LaunchDaemonInBackground(); err != nil {
+			fmt.Fprintf(os.Stderr, "[acp-title-proxy] Failed to start daemon: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("[acp-title-proxy] Pre-warm daemon restarted successfully in background.")
+
 	case "opencode":
 		// Mode B: Transparent stdio proxy for OpenCode
 		inj := proxy.NewInjector(os.Stdout)
@@ -128,9 +146,15 @@ func main() {
 			return
 		}
 
-		// 2. Fallback: Daemon not ready. Silently trigger daemon launch for future sessions.
-		fmt.Fprintf(os.Stderr, "[acp-title-proxy] Pre-warm pool not available (%v); starting daemon in background and falling back to direct launch...\n", err)
-		_ = pool.LaunchDaemonInBackground()
+		if errors.Is(err, pool.ErrDaemonOutdated) {
+			fmt.Fprintf(os.Stderr, "[acp-title-proxy] Outdated daemon detected and retiring; launching updated daemon in background...\n")
+			time.Sleep(150 * time.Millisecond)
+			_ = pool.LaunchDaemonInBackground()
+		} else {
+			// 2. Fallback: Daemon not ready. Silently trigger daemon launch for future sessions.
+			fmt.Fprintf(os.Stderr, "[acp-title-proxy] Pre-warm pool not available (%v); starting daemon in background and falling back to direct launch...\n", err)
+			_ = pool.LaunchDaemonInBackground()
+		}
 
 		// 3. Fallback direct launch
 		exePath, args, err := finder.FindAGY(cfg.AGY.Executable)
@@ -163,4 +187,6 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy      - Proxy runner for AGY (uses pre-warm pool if available)\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy daemon   - Pre-warm pool background service for AGY\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy status   - Query pre-warm pool status\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy stop     - Gracefully stop pre-warm pool daemon\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy restart  - Restart pre-warm pool daemon in background\n")
 }
