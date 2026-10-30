@@ -1,23 +1,42 @@
 package pool
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 )
 
+// KillProcessTree terminates the process and all of its child processes on Windows.
+func KillProcessTree(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
+		return cmd.Run()
+	}
+	p, err := os.FindProcess(pid)
+	if err == nil {
+		return p.Kill()
+	}
+	return err
+}
+
 type Worker struct {
-	ExePath   string
-	Cmd       *exec.Cmd
-	Stdin     io.WriteCloser
-	Stdout    io.ReadCloser
-	Stderr    io.ReadCloser
-	CreatedAt time.Time
-	WaitErr   chan error
-	closeOnce sync.Once
+	ExePath      string
+	Cmd          *exec.Cmd
+	Stdin        io.WriteCloser
+	Stdout       io.ReadCloser
+	StdoutReader *bufio.Reader
+	Stderr       io.ReadCloser
+	CreatedAt    time.Time
+	WaitErr      chan error
+	closeOnce    sync.Once
 }
 
 func StartWorker(exePath string, args []string, env []string) (*Worker, error) {
@@ -64,13 +83,14 @@ func StartWorker(exePath string, args []string, env []string) (*Worker, error) {
 	}()
 
 	return &Worker{
-		ExePath:   exePath,
-		Cmd:       cmd,
-		Stdin:     stdin,
-		Stdout:    stdout,
-		Stderr:    stderr,
-		CreatedAt: time.Now(),
-		WaitErr:   waitErr,
+		ExePath:      exePath,
+		Cmd:          cmd,
+		Stdin:        stdin,
+		Stdout:       stdout,
+		StdoutReader: bufio.NewReaderSize(stdout, 1024*1024),
+		Stderr:       stderr,
+		CreatedAt:    time.Now(),
+		WaitErr:      waitErr,
 	}, nil
 }
 
@@ -86,6 +106,8 @@ func (w *Worker) Close() error {
 			_ = w.Stderr.Close()
 		}
 		if w.Cmd != nil && w.Cmd.Process != nil {
+			pid := w.Cmd.Process.Pid
+			_ = KillProcessTree(pid)
 			_ = w.Cmd.Process.Kill()
 		}
 	})

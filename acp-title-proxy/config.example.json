@@ -25,5 +25,14 @@
         "timeout_ms": 4000
       }
     ]
+  },
+  "skills": {
+    "enabled": true,
+    "prefix": "skill:",
+    "dirs": [
+      "%USERPROFILE%/.agents/skills",
+      "%USERPROFILE%/.gemini/antigravity/builtin/skills"
+    ],
+    "auto_inject_prompt": true
   }
 }

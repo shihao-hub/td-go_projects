@@ -166,9 +166,28 @@ func (d *Daemon) createAndWarmupWorker(stopCh <-chan struct{}) (*Worker, error) 
 		return nil, err
 	}
 
-	// Wait for warmup duration or until process dies / daemon stops
-	timer := time.NewTimer(d.warmupDuration)
-	defer timer.Stop()
+	// Proactively perform ACP initialize handshake in the background.
+	// This forces AGY's Python engine to import modules, resolve auth, and cache
+	// capabilities in advance (takes ~6s in background, so front-end hits in 0ms).
+	initReq := []byte("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientInfo\":{\"name\":\"Daemon-Prewarm\",\"version\":\"1.0\"}}}\n")
+	if _, err := w.Stdin.Write(initReq); err != nil {
+		_ = w.Close()
+		return nil, fmt.Errorf("failed to send initialize request: %w", err)
+	}
+
+	readDone := make(chan error, 1)
+	go func() {
+		line, err := w.StdoutReader.ReadBytes('\n')
+		if err != nil {
+			readDone <- err
+			return
+		}
+		if len(line) == 0 {
+			readDone <- io.EOF
+			return
+		}
+		readDone <- nil
+	}()
 
 	select {
 	case <-stopCh:
@@ -177,9 +196,16 @@ func (d *Daemon) createAndWarmupWorker(stopCh <-chan struct{}) (*Worker, error) 
 	case waitErr := <-w.WaitErr:
 		_ = w.Close()
 		return nil, fmt.Errorf("worker died during warmup: %v", waitErr)
-	case <-timer.C:
-		// Warmup completed successfully
+	case err := <-readDone:
+		if err != nil {
+			_ = w.Close()
+			return nil, fmt.Errorf("worker initialize failed: %w", err)
+		}
+		// Warmup completed successfully and worker is hot!
 		return w, nil
+	case <-time.After(25 * time.Second):
+		_ = w.Close()
+		return nil, fmt.Errorf("worker warmup timed out after 25s")
 	}
 }
 
@@ -305,29 +331,32 @@ func (d *Daemon) splice(conn net.Conn, reader io.Reader, worker *Worker) {
 			if worker.Stdin != nil {
 				_ = worker.Stdin.Close()
 			}
+			abort() // Client disconnected (EOF or error), trigger immediate abort
 		}()
 
 		// Directly copy from reader which handles pre-buffered bytes automatically
-		_, err := io.Copy(worker.Stdin, reader)
-		if err != nil && err != io.EOF {
-			abort()
-		}
+		_, _ = io.Copy(worker.Stdin, reader)
 	}()
 
-	// Outbound: worker.Stdout -> client conn
+	// Outbound: worker.Stdout (via StdoutReader) -> client conn
 	go func() {
 		defer wg.Done()
 		defer abort()
 
-		_, _ = io.Copy(conn, worker.Stdout)
+		_, _ = io.Copy(conn, worker.StdoutReader)
 	}()
 
-	// Wait until outbound finishes (process exits/EOF) or abort is called
+	// Wait until either direction finishes
 	select {
 	case <-done:
 	}
 
+	// Terminate worker if it hasn't exited cleanly
+	killTimer := time.AfterFunc(300*time.Millisecond, func() {
+		_ = worker.Close()
+	})
 	wg.Wait()
+	killTimer.Stop()
 }
 
 func ensureEnv(env *[]string, key, fallbackVal string) {

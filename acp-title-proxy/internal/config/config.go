@@ -10,6 +10,14 @@ import (
 type Config struct {
 	OpenCode OpenCodeConfig `json:"opencode"`
 	AGY      AGYConfig      `json:"agy"`
+	Skills   SkillsConfig   `json:"skills"`
+}
+
+type SkillsConfig struct {
+	Enabled          bool     `json:"enabled"`
+	Prefix           string   `json:"prefix"`
+	Dirs             []string `json:"dirs"`
+	AutoInjectPrompt bool     `json:"auto_inject_prompt"`
 }
 
 type OpenCodeConfig struct {
@@ -69,6 +77,24 @@ func DefaultConfig() *Config {
 				},
 			},
 		},
+		Skills: SkillsConfig{
+			Enabled:          true,
+			Prefix:           "skill:",
+			Dirs:             DefaultSkillDirs(),
+			AutoInjectPrompt: true,
+		},
+	}
+}
+
+// DefaultSkillDirs returns standard search paths for skills.
+func DefaultSkillDirs() []string {
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile == "" {
+		userProfile = os.Getenv("HOME")
+	}
+	return []string{
+		filepath.Join(userProfile, ".agents", "skills"),
+		filepath.Join(userProfile, ".gemini", "antigravity", "builtin", "skills"),
 	}
 }
 
@@ -169,6 +195,10 @@ func LoadConfig() (*Config, string, error) {
 				p.APIKey = key
 			}
 		}
+	}
+
+	if len(cfg.Skills.Dirs) == 0 {
+		cfg.Skills.Dirs = DefaultSkillDirs()
 	}
 
 	return cfg, foundPath, nil

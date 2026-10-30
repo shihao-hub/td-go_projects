@@ -14,36 +14,89 @@ import (
 
 	"language_projects/go_projects/acp-title-proxy/internal/config"
 	"language_projects/go_projects/acp-title-proxy/internal/proxy"
+	"language_projects/go_projects/acp-title-proxy/internal/store"
 )
 
 type Titler struct {
 	cfg      *config.AGYConfig
 	injector *proxy.Injector
+	store    *store.Store
 
 	mu             sync.Mutex
+	zedDBPath      string
 	titledSessions map[string]bool
 	activeRequests map[string]bool
 }
 
-func NewTitler(cfg *config.AGYConfig, inj *proxy.Injector) *Titler {
+func NewTitler(cfg *config.AGYConfig, inj *proxy.Injector, st *store.Store) *Titler {
+	if st == nil {
+		var err error
+		st, err = store.NewStore("")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[AGY Titler] Warning loading persistent store: %v\n", err)
+		}
+	}
+
 	return &Titler{
 		cfg:            cfg,
 		injector:       inj,
+		store:          st,
 		titledSessions: make(map[string]bool),
 		activeRequests: make(map[string]bool),
 	}
 }
 
+// SetZedDBPath overrides the default Zed database path (mainly for unit tests).
+func (t *Titler) SetZedDBPath(path string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.zedDBPath = path
+}
+
+func (t *Titler) getZedDBPath() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.zedDBPath
+}
+
 func (t *Titler) OnSessionNew(sessionID string) {
-	// Ready
+	// Ready to accept first prompt for new session
 }
 
 func (t *Titler) OnPrompt(sessionID string, prompt string) {
 	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
+	if prompt == "" || sessionID == "" {
 		return
 	}
 
+	t.mu.Lock()
+	// 1. Fast in-memory check or active in-flight request
+	if t.titledSessions[sessionID] || t.activeRequests[sessionID] {
+		t.mu.Unlock()
+		return
+	}
+	t.mu.Unlock()
+
+	// 2. Persistent store check (survived across process restarts)
+	if t.store != nil && t.store.IsTitled(sessionID) {
+		t.mu.Lock()
+		t.titledSessions[sessionID] = true
+		t.mu.Unlock()
+		return
+	}
+
+	// 3. Zed SQLite database check (double-check if session already has valid title in Zed)
+	if title, found := store.CheckZedDBTitle(sessionID, t.getZedDBPath()); found && title != "" {
+		t.mu.Lock()
+		t.titledSessions[sessionID] = true
+		t.mu.Unlock()
+		if t.store != nil {
+			_ = t.store.MarkTitled(sessionID, title)
+		}
+		return
+	}
+
+	// 4. Truly a new session requiring initial title generation
 	t.mu.Lock()
 	if t.titledSessions[sessionID] || t.activeRequests[sessionID] {
 		t.mu.Unlock()
@@ -71,6 +124,10 @@ func (t *Titler) generateAndInjectTitle(sessionID, prompt string) {
 		t.mu.Lock()
 		t.titledSessions[sessionID] = true
 		t.mu.Unlock()
+
+		if t.store != nil {
+			_ = t.store.MarkTitled(sessionID, title)
+		}
 	}
 }
 
@@ -102,12 +159,12 @@ func (t *Titler) CallLLMDirect(prompt string) (string, error) {
 }
 
 type chatRequest struct {
-	Model           string        `json:"model"`
-	Messages        []chatMessage `json:"messages"`
-	Temperature     float64       `json:"temperature"`
-	MaxTokens       int           `json:"max_tokens"`
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
-	ReasoningEffortCamel string   `json:"reasoningEffort,omitempty"`
+	Model                string        `json:"model"`
+	Messages             []chatMessage `json:"messages"`
+	Temperature          float64       `json:"temperature"`
+	MaxTokens            int           `json:"max_tokens"`
+	ReasoningEffort      string        `json:"reasoning_effort,omitempty"`
+	ReasoningEffortCamel string        `json:"reasoningEffort,omitempty"`
 }
 
 type chatMessage struct {

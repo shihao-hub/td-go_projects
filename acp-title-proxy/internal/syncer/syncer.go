@@ -27,7 +27,7 @@ func NewSyncer(cfg *config.Config) *Syncer {
 
 	// Dummy injector for titler (we only use titler.CallLLM directly in syncer)
 	inj := proxy.NewInjector(os.Stdout)
-	agyTitler := agy.NewTitler(&cfg.AGY, inj)
+	agyTitler := agy.NewTitler(&cfg.AGY, inj, nil)
 
 	return &Syncer{
 		cfg:       cfg,

@@ -45,6 +45,33 @@ func (inj *Injector) InjectTitle(sessionID, title string) error {
 	return err
 }
 
+// InjectAvailableCommands pushes an available_commands_update notification with the given commands.
+func (inj *Injector) InjectAvailableCommands(sessionID string, commands []protocol.CommandItem) error {
+	notif := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "session/update",
+		"params": map[string]interface{}{
+			"sessionId": sessionID,
+			"update": map[string]interface{}{
+				"sessionUpdate":     "available_commands_update",
+				"availableCommands": commands,
+			},
+		},
+	}
+
+	data, err := json.Marshal(notif)
+	if err != nil {
+		return err
+	}
+
+	inj.mu.Lock()
+	defer inj.mu.Unlock()
+
+	data = append(data, '\n')
+	_, err = inj.writer.Write(data)
+	return err
+}
+
 // WriteRaw safely writes an intact raw message line to the output stream.
 func (inj *Injector) WriteRaw(data []byte) (int, error) {
 	inj.mu.Lock()

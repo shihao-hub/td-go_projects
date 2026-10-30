@@ -15,6 +15,7 @@ import (
 	"language_projects/go_projects/acp-title-proxy/internal/opencode"
 	"language_projects/go_projects/acp-title-proxy/internal/pool"
 	"language_projects/go_projects/acp-title-proxy/internal/proxy"
+	"language_projects/go_projects/acp-title-proxy/internal/skill"
 	"language_projects/go_projects/acp-title-proxy/internal/syncer"
 )
 
@@ -29,6 +30,7 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[acp-title-proxy] Warning loading config: %v\n", err)
 	}
+	skillMgr := skill.NewManager(&cfg.Skills)
 
 	switch cmd {
 	case "sync":
@@ -126,7 +128,7 @@ func main() {
 			args = append(args, os.Args[2:]...)
 		}
 		titler := opencode.NewTitler(&cfg.OpenCode, inj)
-		runner := proxy.NewRunner(exePath, args, titler)
+		runner := proxy.NewRunner(exePath, args, titler, skillMgr)
 		if err := runner.Run(inj); err != nil {
 			os.Exit(1)
 		}
@@ -134,12 +136,12 @@ func main() {
 	case "agy", "antigravity", "antigravity-acp":
 		// Mode B: Stdio proxy for AGY with Pre-warm Pool acceleration
 		inj := proxy.NewInjector(os.Stdout)
-		titler := agy.NewTitler(&cfg.AGY, inj)
+		titler := agy.NewTitler(&cfg.AGY, inj, nil)
 
 		// 1. Try to acquire a pre-warmed worker from daemon (Instant response!)
 		conn, err := pool.TryAcquire(pool.DefaultPort, 400*time.Millisecond)
 		if err == nil {
-			runner := proxy.NewRunner("", nil, titler)
+			runner := proxy.NewRunner("", nil, titler, skillMgr)
 			if err := runner.RunStream(conn, inj); err != nil {
 				os.Exit(1)
 			}
@@ -165,7 +167,7 @@ func main() {
 		if len(os.Args) > 2 {
 			args = append(args, os.Args[2:]...)
 		}
-		runner := proxy.NewRunner(exePath, args, titler)
+		runner := proxy.NewRunner(exePath, args, titler, skillMgr)
 		if err := runner.Run(inj); err != nil {
 			os.Exit(1)
 		}
