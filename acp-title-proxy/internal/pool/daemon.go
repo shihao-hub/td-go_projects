@@ -207,6 +207,16 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			// No standby worker available right now
 		}
 
+		if worker != nil {
+			// Auto-upgrade detection: Check if Zed downloaded a newer AGY version
+			if latestExe, _, err := finder.FindAGY(d.cfg.AGY.Executable); err == nil && latestExe != "" && worker.ExePath != latestExe {
+				fmt.Printf("[Pre-warm Daemon] Detected new AGY version: %s (was %s). Discarding outdated worker.\n", latestExe, worker.ExePath)
+				_ = worker.Close()
+				d.removeWorker(worker)
+				worker = nil
+			}
+		}
+
 		if worker == nil {
 			_ = sendResponse(conn, PoolResponse{Status: "error", Msg: "no_standby_worker"})
 			d.triggerReplenish()

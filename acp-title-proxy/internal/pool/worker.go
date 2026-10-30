@@ -9,6 +9,7 @@ import (
 )
 
 type Worker struct {
+	ExePath   string
 	Cmd       *exec.Cmd
 	Stdin     io.WriteCloser
 	Stdout    io.ReadCloser
@@ -55,6 +56,7 @@ func StartWorker(exePath string, args []string, env []string) (*Worker, error) {
 	}()
 
 	return &Worker{
+		ExePath:   exePath,
 		Cmd:       cmd,
 		Stdin:     stdin,
 		Stdout:    stdout,
