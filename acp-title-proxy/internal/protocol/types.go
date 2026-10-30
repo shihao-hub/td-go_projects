@@ -102,10 +102,71 @@ func RewritePrompt(raw json.RawMessage, newPromptText string) (json.RawMessage, 
 	return json.Marshal(newPromptText)
 }
 
+// NativeAugmentedCommands contains high-value Antigravity native commands that work via model prompt protocols.
+var NativeAugmentedCommands = []CommandItem{
+	{
+		Name:        "grill-me",
+		Description: "对齐需求与交互式方案盘问：在出方案前让 AI 主动提问对齐设计决策",
+	},
+	{
+		Name:        "goal",
+		Description: "深度攻坚长任务：保持极致彻底性，反复自检直到目标彻底达成",
+	},
+	{
+		Name:        "compact",
+		Description: "立即压缩提炼当前会话历史以释放上下文窗口",
+	},
+}
+
+// ConfigOptionItem represents one selectable value in an ACP config option.
+type ConfigOptionItem struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+// ConfigOption represents a configuration selector in ACP (rendered in Zed status bar).
+type ConfigOption struct {
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Category     string             `json:"category,omitempty"`
+	Type         string             `json:"type"`
+	CurrentValue string             `json:"currentValue"`
+	Options      []ConfigOptionItem `json:"options,omitempty"`
+}
+
+// SetConfigOptionParams represents parameters sent by Zed when user changes a selector.
+type SetConfigOptionParams struct {
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Value     string `json:"value"`
+}
+
+// DefaultWorkflowConfigOption defines the independent Workflow selector (Normal vs Plan).
+var DefaultWorkflowConfigOption = ConfigOption{
+	ID:           "workflow",
+	Name:         "Workflow",
+	Category:     "workflow",
+	Type:         "select",
+	CurrentValue: "normal",
+	Options: []ConfigOptionItem{
+		{
+			Value:       "normal",
+			Name:        "Normal",
+			Description: "普通对话/直接执行模式（不自动注入 /plan）",
+		},
+		{
+			Value:       "plan",
+			Name:        "Plan",
+			Description: "自动规划模式（自动前置 /plan，先出方案经批准后再动手）",
+		},
+	},
+}
+
 // MergeAvailableCommands 将额外命令合并进 rawResult 的 availableCommands 数组，
 // 保留 rawResult 中的全部既有字段并避免重复。
 func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (json.RawMessage, error) {
-	if len(rawResult) == 0 || len(extra) == 0 {
+	if len(rawResult) == 0 {
 		return rawResult, nil
 	}
 
@@ -130,6 +191,16 @@ func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (jso
 		}
 	}
 
+	// 注入解封的官方思维命令
+	for _, c := range NativeAugmentedCommands {
+		lower := strings.ToLower(c.Name)
+		if !seen[lower] {
+			seen[lower] = true
+			merged = append(merged, c)
+		}
+	}
+
+	// 注入自定义技能命令
 	for _, c := range extra {
 		lower := strings.ToLower(c.Name)
 		if !seen[lower] {
@@ -144,6 +215,43 @@ func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (jso
 	}
 
 	resultMap["availableCommands"] = mergedBytes
+	return json.Marshal(resultMap)
+}
+
+// MergeConfigOptions adds extraOption to configOptions array in rawResult if not already present.
+func MergeConfigOptions(rawResult json.RawMessage, extraOption ConfigOption) (json.RawMessage, error) {
+	if len(rawResult) == 0 {
+		return rawResult, nil
+	}
+
+	var resultMap map[string]json.RawMessage
+	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
+		return rawResult, err
+	}
+
+	var existing []ConfigOption
+	if rawOpts, ok := resultMap["configOptions"]; ok && len(rawOpts) > 0 {
+		_ = json.Unmarshal(rawOpts, &existing)
+	}
+
+	found := false
+	for _, opt := range existing {
+		if strings.EqualFold(opt.ID, extraOption.ID) {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		existing = append(existing, extraOption)
+	}
+
+	mergedBytes, err := json.Marshal(existing)
+	if err != nil {
+		return rawResult, err
+	}
+
+	resultMap["configOptions"] = mergedBytes
 	return json.Marshal(resultMap)
 }
 

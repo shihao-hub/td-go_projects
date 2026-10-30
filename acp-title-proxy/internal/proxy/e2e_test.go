@@ -100,8 +100,9 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 	}
 
 	var zedResult struct {
-		SessionID         string                 `json:"sessionId"`
-		AvailableCommands []protocol.CommandItem `json:"availableCommands"`
+		SessionID         string                  `json:"sessionId"`
+		AvailableCommands []protocol.CommandItem  `json:"availableCommands"`
+		ConfigOptions     []protocol.ConfigOption `json:"configOptions"`
 	}
 	if err := json.Unmarshal(zedNewResp.Result, &zedResult); err != nil {
 		t.Fatalf("failed to parse zed availableCommands: %v", err)
@@ -111,31 +112,57 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatalf("unexpected sessionId: %s", zedResult.SessionID)
 	}
 
-	// 应包含原生 3 条命令 + 通用 skill 命令 + 已发现的技能
-	if len(zedResult.AvailableCommands) < 4 {
-		t.Fatalf("expected >= 4 commands, got %d", len(zedResult.AvailableCommands))
+	// 应包含原生 3 条 + 3 条官方思维增强命令(grill-me, goal, compact) + 技能
+	if len(zedResult.AvailableCommands) < 7 {
+		t.Fatalf("expected >= 7 commands, got %d", len(zedResult.AvailableCommands))
 	}
 
 	foundPlan := false
-	foundSkill := false
+	foundGrillMe := false
+	foundGoal := false
+	foundCompact := false
+	foundGenericSkill := false
 	for _, c := range zedResult.AvailableCommands {
-		if c.Name == "plan" {
+		switch c.Name {
+		case "plan":
 			foundPlan = true
-		}
-		if c.Name == "skill" {
-			foundSkill = true
+		case "grill-me":
+			foundGrillMe = true
+		case "goal":
+			foundGoal = true
+		case "compact":
+			foundCompact = true
+		case "skill":
+			foundGenericSkill = true
 		}
 	}
 	if !foundPlan {
 		t.Fatal("native 'plan' command lost!")
 	}
-	if !foundSkill {
-		t.Fatal("generic 'skill' command not injected!")
+	if !foundGrillMe || !foundGoal || !foundCompact {
+		t.Fatalf("native augmented commands lost! grill-me=%v, goal=%v, compact=%v", foundGrillMe, foundGoal, foundCompact)
+	}
+	if foundGenericSkill {
+		t.Fatal("unexpected generic 'skill' command found in list!")
+	}
+
+	// 验证 Workflow 下拉框配置注入
+	foundWorkflow := false
+	for _, opt := range zedResult.ConfigOptions {
+		if opt.ID == "workflow" {
+			foundWorkflow = true
+			if len(opt.Options) != 2 || opt.Options[1].Value != "plan" {
+				t.Fatalf("unexpected workflow options: %+v", opt.Options)
+			}
+		}
+	}
+	if !foundWorkflow {
+		t.Fatal("expected workflow config option injected into Zed session/new response")
 	}
 
 	// 2. 入向测试：用户通过带前缀的 /skill:name 调用技能
 	userPromptPrefixed := []byte(`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/skill:sh-pocock-workflow 帮我审查架构"}}` + "\n")
-	processedPrefixed := runner.processInbound(userPromptPrefixed)
+	processedPrefixed := runner.processInbound(userPromptPrefixed, inj)
 
 	var inboundPrefixed protocol.JSONRPCMessage
 	if err := json.Unmarshal(processedPrefixed, &inboundPrefixed); err != nil {
@@ -150,7 +177,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 
 	// 2b. 入向测试：用户通过通用 /skill name 调用技能
 	userPromptReq := []byte(`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/skill sh-pocock-workflow 帮我审查架构"}}` + "\n")
-	processedInbound := runner.processInbound(userPromptReq)
+	processedInbound := runner.processInbound(userPromptReq, inj)
 
 	var inboundMsg protocol.JSONRPCMessage
 	if err := json.Unmarshal(processedInbound, &inboundMsg); err != nil {
@@ -175,7 +202,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 
 	// 3. 入向测试：用户调用原生 /plan 命令
 	planReq := []byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/plan 仔细规划"}}` + "\n")
-	processedPlan := runner.processInbound(planReq)
+	processedPlan := runner.processInbound(planReq, inj)
 
 	var planMsg protocol.JSONRPCMessage
 	if err := json.Unmarshal(processedPlan, &planMsg); err != nil {

@@ -77,14 +77,20 @@ func TestMergeAvailableCommands(t *testing.T) {
 		t.Fatalf("fields not preserved: %+v", res)
 	}
 
-	if len(res.AvailableCommands) != 3 {
-		t.Fatalf("expected 3 commands (plan, logout, sh-pocock-workflow), got %d", len(res.AvailableCommands))
+	// 原生 2 个 (plan, logout) + 3 个官方思维增强命令 (grill-me, goal, compact) + 1 个技能 = 6
+	if len(res.AvailableCommands) != 6 {
+		t.Fatalf("expected 6 commands (plan, logout, 3 native augmented, sh-pocock-workflow), got %d", len(res.AvailableCommands))
 	}
 
-	names := []string{res.AvailableCommands[0].Name, res.AvailableCommands[1].Name, res.AvailableCommands[2].Name}
+	names := make([]string, len(res.AvailableCommands))
+	for i, c := range res.AvailableCommands {
+		names[i] = c.Name
+	}
 	joined := strings.Join(names, ",")
-	if !strings.Contains(joined, "plan") || !strings.Contains(joined, "logout") || !strings.Contains(joined, "sh-pocock-workflow") {
-		t.Fatalf("unexpected commands: %s", joined)
+	for _, expected := range []string{"plan", "logout", "grill-me", "goal", "compact", "sh-pocock-workflow"} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("missing expected command %s in %s", expected, joined)
+		}
 	}
 }
 
@@ -124,5 +130,33 @@ func TestMergeCommandsUpdateNotification(t *testing.T) {
 
 	if len(params.Update.AvailableCommands) != 2 {
 		t.Fatalf("expected 2 commands, got %d", len(params.Update.AvailableCommands))
+	}
+}
+
+func TestMergeConfigOptions(t *testing.T) {
+	rawResult := json.RawMessage(`{
+		"sessionId": "sess_123",
+		"configOptions": [
+			{"id": "mode", "name": "Mode", "type": "select", "currentValue": "yolo"}
+		]
+	}`)
+
+	merged, err := MergeConfigOptions(rawResult, DefaultWorkflowConfigOption)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var res struct {
+		ConfigOptions []ConfigOption `json:"configOptions"`
+	}
+	if err := json.Unmarshal(merged, &res); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(res.ConfigOptions) != 2 {
+		t.Fatalf("expected 2 configOptions, got %d", len(res.ConfigOptions))
+	}
+	if res.ConfigOptions[1].ID != "workflow" {
+		t.Fatalf("expected second option to be workflow, got %s", res.ConfigOptions[1].ID)
 	}
 }
