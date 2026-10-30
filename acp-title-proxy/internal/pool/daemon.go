@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,7 +145,21 @@ func (d *Daemon) createAndWarmupWorker(stopCh <-chan struct{}) (*Worker, error) 
 	}
 
 	fmt.Printf("[Pre-warm Daemon] Starting new AGY instance for pre-warming: %s\n", exePath)
-	w, err := StartWorker(exePath, args, nil)
+
+	// Automatically inject proxy and Zed CA certificates into pre-warmed worker
+	env := os.Environ()
+	ensureEnv(&env, "HTTP_PROXY", "http://127.0.0.1:7897")
+	ensureEnv(&env, "HTTPS_PROXY", "http://127.0.0.1:7897")
+	ensureEnv(&env, "NO_PROXY", "localhost,127.0.0.1,::1")
+	if appData := os.Getenv("APPDATA"); appData != "" {
+		caFile := filepath.Join(appData, "Zed", "certs", "antigravity-ca.pem")
+		if _, err := os.Stat(caFile); err == nil {
+			ensureEnv(&env, "REQUESTS_CA_BUNDLE", caFile)
+			ensureEnv(&env, "SSL_CERT_FILE", caFile)
+		}
+	}
+
+	w, err := StartWorker(exePath, args, env)
 	if err != nil {
 		return nil, err
 	}
@@ -245,13 +261,19 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 func (d *Daemon) splice(conn net.Conn, reader *bufio.Reader, worker *Worker) {
 	defer worker.Close()
+	defer conn.Close()
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	done := make(chan struct{})
+	var once sync.Once
+	closeDone := func() {
+		once.Do(func() {
+			close(done)
+		})
+	}
 
 	// Inbound: conn -> worker.Stdin
 	go func() {
-		defer wg.Done()
+		defer closeDone()
 		defer worker.Stdin.Close()
 
 		// First flush any buffered bytes in reader
@@ -265,11 +287,21 @@ func (d *Daemon) splice(conn net.Conn, reader *bufio.Reader, worker *Worker) {
 
 	// Outbound: worker.Stdout -> conn
 	go func() {
-		defer wg.Done()
+		defer closeDone()
 		_, _ = io.Copy(conn, worker.Stdout)
 	}()
 
-	wg.Wait()
+	<-done
+}
+
+func ensureEnv(env *[]string, key, fallbackVal string) {
+	prefix := strings.ToUpper(key) + "="
+	for _, e := range *env {
+		if strings.HasPrefix(strings.ToUpper(e), prefix) {
+			return
+		}
+	}
+	*env = append(*env, key+"="+fallbackVal)
 }
 
 func (d *Daemon) removeWorker(w *Worker) {
