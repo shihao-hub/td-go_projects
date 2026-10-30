@@ -6,16 +6,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"language_projects/go_projects/acp-title-proxy/internal/config"
 	"language_projects/go_projects/acp-title-proxy/internal/proxy"
 	"language_projects/go_projects/acp-title-proxy/internal/store"
 )
+
+// maxTitleAttempts 限制单个会话在同一进程内的标题生成尝试次数，
+// 防止模型链持续失败时每条消息都消耗一次 API 配额。
+const maxTitleAttempts = 3
 
 type Titler struct {
 	cfg      *config.AGYConfig
@@ -26,6 +31,7 @@ type Titler struct {
 	zedDBPath      string
 	titledSessions map[string]bool
 	activeRequests map[string]bool
+	attempts       map[string]int
 }
 
 func NewTitler(cfg *config.AGYConfig, inj *proxy.Injector, st *store.Store) *Titler {
@@ -33,7 +39,7 @@ func NewTitler(cfg *config.AGYConfig, inj *proxy.Injector, st *store.Store) *Tit
 		var err error
 		st, err = store.NewStore("")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "[AGY Titler] Warning loading persistent store: %v\n", err)
+			log.Printf("[AGY Titler] 加载持久化标题存储失败: %v", err)
 		}
 	}
 
@@ -43,6 +49,7 @@ func NewTitler(cfg *config.AGYConfig, inj *proxy.Injector, st *store.Store) *Tit
 		store:          st,
 		titledSessions: make(map[string]bool),
 		activeRequests: make(map[string]bool),
+		attempts:       make(map[string]int),
 	}
 }
 
@@ -69,46 +76,52 @@ func (t *Titler) OnPrompt(sessionID string, prompt string) {
 		return
 	}
 
+	// 1. 内存快路径：已命名、请求处理中或已耗尽尝试次数
 	t.mu.Lock()
-	// 1. 内存快路径：已命名或请求已在处理中
-	if t.titledSessions[sessionID] || t.activeRequests[sessionID] {
+	if t.titledSessions[sessionID] || t.activeRequests[sessionID] || t.attempts[sessionID] >= maxTitleAttempts {
 		t.mu.Unlock()
 		return
 	}
 	t.mu.Unlock()
 
-	// 2. 查询持久化存储（跨进程重启存活）
+	// 2. 持久化存储：本代理此前已成功注入过标题
 	if t.store != nil && t.store.IsTitled(sessionID) {
-		t.mu.Lock()
-		t.titledSessions[sessionID] = true
-		t.mu.Unlock()
+		t.markTitled(sessionID, "")
 		return
 	}
 
-	// 3. 查询 Zed SQLite 数据库（复核该会话在 Zed 中是否已有有效标题）
-	if title, found := store.CheckZedDBTitle(sessionID, t.getZedDBPath()); found && title != "" {
-		t.mu.Lock()
-		t.titledSessions[sessionID] = true
-		t.mu.Unlock()
-		if t.store != nil {
-			_ = t.store.MarkTitled(sessionID, title)
+	// 3. 参考 Zed 的会话记录：
+	//    - title_override 非空 → 用户手动命名，尊重并跳过；
+	//    - title 非空且不是当前 prompt 的占位副本 → 历史会话已有真实标题，跳过；
+	//    - title 是首条消息的占位副本 → 视为未命名，继续生成。
+	if title, override, found := store.GetZedDBTitles(sessionID, t.getZedDBPath()); found {
+		if override != "" {
+			t.markTitled(sessionID, override)
+			log.Printf("[AGY Titler] 会话 %s 已由用户手动命名（%s），跳过自动标题", sessionID, override)
+			return
 		}
-		return
+		if title != "" && !isPlaceholderTitle(title, prompt) {
+			t.markTitled(sessionID, title)
+			log.Printf("[AGY Titler] 会话 %s 已存在历史标题（%s），跳过自动标题", sessionID, title)
+			return
+		}
 	}
 
-	// 4. 确认为新会话，需要生成初始标题
+	// 4. 确认需要生成，占用请求槽位并计入尝试次数
 	t.mu.Lock()
-	if t.titledSessions[sessionID] || t.activeRequests[sessionID] {
+	if t.titledSessions[sessionID] || t.activeRequests[sessionID] || t.attempts[sessionID] >= maxTitleAttempts {
 		t.mu.Unlock()
 		return
 	}
 	t.activeRequests[sessionID] = true
+	t.attempts[sessionID]++
+	attempt := t.attempts[sessionID]
 	t.mu.Unlock()
 
-	go t.generateAndInjectTitle(sessionID, prompt)
+	go t.generateAndInjectTitle(sessionID, prompt, attempt)
 }
 
-func (t *Titler) generateAndInjectTitle(sessionID, prompt string) {
+func (t *Titler) generateAndInjectTitle(sessionID, prompt string, attempt int) {
 	defer func() {
 		t.mu.Lock()
 		delete(t.activeRequests, sessionID)
@@ -117,18 +130,60 @@ func (t *Titler) generateAndInjectTitle(sessionID, prompt string) {
 
 	title, err := t.CallLLMDirect(prompt)
 	if err != nil || title == "" {
+		log.Printf("[AGY Titler] 会话 %s 第 %d/%d 次生成失败: %v", sessionID, attempt, maxTitleAttempts, err)
 		return
 	}
 
-	if err := t.injector.InjectTitle(sessionID, title); err == nil {
-		t.mu.Lock()
-		t.titledSessions[sessionID] = true
-		t.mu.Unlock()
-
-		if t.store != nil {
-			_ = t.store.MarkTitled(sessionID, title)
-		}
+	if err := t.injector.InjectTitle(sessionID, title); err != nil {
+		log.Printf("[AGY Titler] 会话 %s 标题注入失败: %v", sessionID, err)
+		return
 	}
+
+	t.markTitled(sessionID, title)
+	log.Printf("[AGY Titler] 会话 %s 标题已生成: %s（第 %d 次尝试）", sessionID, title, attempt)
+}
+
+// markTitled 在内存中标记会话已命名，并按需写入持久化存储。
+func (t *Titler) markTitled(sessionID, title string) {
+	t.mu.Lock()
+	t.titledSessions[sessionID] = true
+	t.mu.Unlock()
+
+	if title == "" || t.store == nil {
+		return
+	}
+	if err := t.store.MarkTitled(sessionID, title); err != nil {
+		log.Printf("[AGY Titler] 持久化会话标题失败: %v", err)
+	}
+}
+
+// isPlaceholderTitle 判断 Zed 记录的 title 是否只是当前 prompt 的占位副本。
+//
+// Zed 在用户发出首条消息时就把消息原文（可能截断、可能带文件引用前缀）写入
+// sidebar_threads.title。占位标题与 prompt 的归一化文本互为子串；而历史会话中由
+// 代理注入的真实标题（如“池化逻辑解析”）与后续追问（如“继续”）通常不存在包含关系。
+func isPlaceholderTitle(title, prompt string) bool {
+	normalizedTitle := normalizeForCompare(title)
+	if normalizedTitle == "" {
+		return true
+	}
+	normalizedPrompt := normalizeForCompare(prompt)
+	if normalizedPrompt == "" {
+		return false
+	}
+	return strings.Contains(normalizedPrompt, normalizedTitle) || strings.Contains(normalizedTitle, normalizedPrompt)
+}
+
+// normalizeForCompare 去除空白、标点与符号并统一小写，用于宽松比较标题与消息文本。
+func normalizeForCompare(s string) string {
+	var sb strings.Builder
+	for _, r := range s {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		sb.WriteRune(unicode.ToLower(r))
+	}
+	return sb.String()
 }
 
 // CallLLMDirect 按优先级顺序尝试已配置的模型提供方。
@@ -149,7 +204,7 @@ func (t *Titler) CallLLMDirect(prompt string) (string, error) {
 		}
 
 		lastErr = err
-		fmt.Fprintf(os.Stderr, "[AGY Titler] Provider %s failed: %v, falling back...\n", p.Name, err)
+		log.Printf("[AGY Titler] provider %s 调用失败，切换下一个: %v", p.Name, err)
 	}
 
 	if lastErr != nil {

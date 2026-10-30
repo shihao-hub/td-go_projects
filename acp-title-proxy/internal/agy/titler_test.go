@@ -3,8 +3,13 @@ package agy
 import (
 	"bytes"
 	"database/sql"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,12 +49,52 @@ func TestTitlerSkipIfTitledInStore(t *testing.T) {
 	}
 }
 
-func TestTitlerSkipIfTitledInZedDB(t *testing.T) {
+// newMockTitleServer 启动一个返回固定标题的假 OpenAI 兼容服务。
+func newMockTitleServer(t *testing.T, title string, hits *int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits != nil {
+			atomic.AddInt32(hits, 1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"content":%q}}]}`, title)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func mockProvider(baseURL string) *config.AGYConfig {
+	return &config.AGYConfig{
+		Providers: []config.ProviderConfig{{
+			Name:      "mock",
+			Enabled:   true,
+			BaseURL:   baseURL,
+			APIKey:    "test-key",
+			Model:     "mock-model",
+			TimeoutMs: 2000,
+		}},
+	}
+}
+
+func waitUntil(cond func() bool, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return cond()
+}
+
+// TestTitlerGeneratesDespitePlaceholderTitle 是本次修复的核心回归测试：
+// Zed 在首条消息时就会把消息原文写进 sidebar_threads.title，
+// 这类占位标题不得被当作"已有标题"而阻止生成。
+func TestTitlerGeneratesDespitePlaceholderTitle(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
 	mockZedDB := filepath.Join(tempDir, "zed.sqlite")
 
-	// 构造包含已有线程的模拟 Zed 数据库
 	db, err := sql.Open("sqlite", mockZedDB)
 	if err != nil {
 		t.Fatalf("failed to open mock zed db: %v", err)
@@ -61,7 +106,7 @@ func TestTitlerSkipIfTitledInZedDB(t *testing.T) {
 			title_override TEXT
 		);
 		INSERT INTO sidebar_threads (session_id, title, title_override) VALUES
-			('sess_zed_hist', '分析acp标题代理项目', NULL);
+			('sess_placeholder', '这部分是如何实现的？', NULL);
 	`)
 	if err != nil {
 		t.Fatalf("failed to setup mock db: %v", err)
@@ -73,28 +118,192 @@ func TestTitlerSkipIfTitledInZedDB(t *testing.T) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
+	srv := newMockTitleServer(t, "池化逻辑解析", nil)
+
 	buf := &bytes.Buffer{}
 	inj := proxy.NewInjector(buf)
-	titler := NewTitler(&config.AGYConfig{}, inj, st)
+	titler := NewTitler(mockProvider(srv.URL), inj, st)
 	titler.SetZedDBPath(mockZedDB)
 
-	// User sends "继续"
-	titler.OnPrompt("sess_zed_hist", "继续")
+	titler.OnPrompt("sess_placeholder", "这部分是如何实现的？")
 
-	time.Sleep(50 * time.Millisecond)
+	if !waitUntil(func() bool { return buf.Len() > 0 }, 2*time.Second) {
+		t.Fatalf("expected title injection despite placeholder title, got none")
+	}
 
-	// 1. 绝不允许向 Zed 注入任何标题
+	if out := buf.String(); !strings.Contains(out, "池化逻辑解析") {
+		t.Fatalf("expected injected title in output, got: %s", out)
+	}
+
+	title, ok := st.GetTitle("sess_placeholder")
+	if !ok || title != "池化逻辑解析" {
+		t.Fatalf("expected store title '池化逻辑解析', got %q (ok=%v)", title, ok)
+	}
+
+	// 第二次消息不得重复生成
+	before := buf.Len()
+	titler.OnPrompt("sess_placeholder", "继续")
+	time.Sleep(100 * time.Millisecond)
+	if buf.Len() != before {
+		t.Fatalf("expected no second injection, but output grew: %s", buf.String())
+	}
+}
+
+// TestTitlerRespectsUserOverride 验证用户手动重命名后不再被自动标题覆盖。
+func TestTitlerRespectsUserOverride(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "store.json")
+	mockZedDB := filepath.Join(tempDir, "zed.sqlite")
+
+	db, err := sql.Open("sqlite", mockZedDB)
+	if err != nil {
+		t.Fatalf("failed to open mock zed db: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE sidebar_threads (
+			session_id TEXT,
+			title TEXT,
+			title_override TEXT
+		);
+		INSERT INTO sidebar_threads (session_id, title, title_override) VALUES
+			('sess_manual', '原始标题', '手动命名');
+	`)
+	if err != nil {
+		t.Fatalf("failed to setup mock db: %v", err)
+	}
+	db.Close()
+
+	st, err := store.NewStore(storePath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	srv := newMockTitleServer(t, "自动标题", nil)
+
+	buf := &bytes.Buffer{}
+	inj := proxy.NewInjector(buf)
+	titler := NewTitler(mockProvider(srv.URL), inj, st)
+	titler.SetZedDBPath(mockZedDB)
+
+	titler.OnPrompt("sess_manual", "随便问点什么")
+	time.Sleep(150 * time.Millisecond)
+
 	if buf.Len() > 0 {
-		t.Fatalf("expected no injection for session already existing in Zed DB, but got: %s", buf.String())
+		t.Fatalf("expected no injection for user-renamed session, got: %s", buf.String())
+	}
+	title, ok := st.GetTitle("sess_manual")
+	if !ok || title != "手动命名" {
+		t.Fatalf("expected store title '手动命名', got %q (ok=%v)", title, ok)
+	}
+}
+
+// TestTitlerSkipsExistingGeneratedTitleAfterRestart 覆盖既有计划的验收场景：
+// 进程重启（本地 store 未命中）后，在已有真实标题的会话里发“继续”，不得覆写标题。
+func TestTitlerSkipsExistingGeneratedTitleAfterRestart(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "store.json")
+	mockZedDB := filepath.Join(tempDir, "zed.sqlite")
+
+	db, err := sql.Open("sqlite", mockZedDB)
+	if err != nil {
+		t.Fatalf("failed to open mock zed db: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE sidebar_threads (
+			session_id TEXT,
+			title TEXT,
+			title_override TEXT
+		);
+		INSERT INTO sidebar_threads (session_id, title, title_override) VALUES
+			('sess_restart', '池化逻辑解析', NULL);
+	`)
+	if err != nil {
+		t.Fatalf("failed to setup mock db: %v", err)
+	}
+	db.Close()
+
+	// 全新 store，模拟代理进程重启后的冷启动
+	st, err := store.NewStore(storePath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
 	}
 
-	// 2. 必须回填存储，使后续检查命中存储快路径
-	if !st.IsTitled("sess_zed_hist") {
-		t.Fatalf("expected sess_zed_hist to be backfilled into store")
+	var hits int32
+	srv := newMockTitleServer(t, "继续", &hits)
+
+	buf := &bytes.Buffer{}
+	titler := NewTitler(mockProvider(srv.URL), proxy.NewInjector(buf), st)
+	titler.SetZedDBPath(mockZedDB)
+
+	titler.OnPrompt("sess_restart", "继续")
+	time.Sleep(150 * time.Millisecond)
+
+	if buf.Len() > 0 {
+		t.Fatalf("expected no injection for session with existing title, got: %s", buf.String())
 	}
-	title, _ := st.GetTitle("sess_zed_hist")
-	if title != "分析acp标题代理项目" {
-		t.Fatalf("expected backfilled title '分析acp标题代理项目', got %q", title)
+	if got := atomic.LoadInt32(&hits); got != 0 {
+		t.Fatalf("expected no LLM call, got %d", got)
+	}
+	if title, ok := st.GetTitle("sess_restart"); !ok || title != "池化逻辑解析" {
+		t.Fatalf("expected store title '池化逻辑解析', got %q (ok=%v)", title, ok)
+	}
+}
+
+func TestIsPlaceholderTitle(t *testing.T) {
+	cases := []struct {
+		name   string
+		title  string
+		prompt string
+		want   bool
+	}{
+		{"完全相同", "这部分是如何实现的？", "这部分是如何实现的?", true},
+		{"带文件引用前缀", "这部分是如何实现的？", "main.go (76:93) 这部分是如何实现的?", true},
+		{"标题被截断", "分析acp标题代理项目", "分析 acp 标题代理项目的实现与结构设计", true},
+		{"真实标题与延续词", "池化逻辑解析", "继续", false},
+		{"真实标题与追问", "池化逻辑解析", "那 worker 怎么复用", false},
+	}
+	for _, c := range cases {
+		if got := isPlaceholderTitle(c.title, c.prompt); got != c.want {
+			t.Errorf("%s: isPlaceholderTitle(%q, %q) = %v, want %v", c.name, c.title, c.prompt, got, c.want)
+		}
+	}
+}
+
+// TestTitlerStopsAfterMaxAttempts 验证模型持续失败时不会无限重试。
+func TestTitlerStopsAfterMaxAttempts(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "store.json")
+
+	st, err := store.NewStore(storePath)
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"boom"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	buf := &bytes.Buffer{}
+	titler := NewTitler(mockProvider(srv.URL), proxy.NewInjector(buf), st)
+	// 隔离真实 Zed 数据库：指向不存在的路径，确保走生成分支
+	titler.SetZedDBPath(filepath.Join(tempDir, "zed-missing.sqlite"))
+
+	for i := 0; i < 6; i++ {
+		titler.OnPrompt("sess_fail", "触发失败的提问")
+		time.Sleep(80 * time.Millisecond)
+	}
+
+	waitUntil(func() bool { return atomic.LoadInt32(&hits) >= maxTitleAttempts }, time.Second)
+
+	if got := atomic.LoadInt32(&hits); got != maxTitleAttempts {
+		t.Fatalf("expected %d attempts, got %d", maxTitleAttempts, got)
+	}
+	if buf.Len() > 0 {
+		t.Fatalf("expected no injection on failure, got: %s", buf.String())
 	}
 }
 

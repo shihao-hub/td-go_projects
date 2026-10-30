@@ -3,9 +3,11 @@ package syncer
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -15,10 +17,17 @@ import (
 	"language_projects/go_projects/acp-title-proxy/internal/proxy"
 )
 
+// agyRetryBackoff 是 AGY 标题生成失败后的重试冷却时间，
+// 避免 watch 模式每轮轮询都对失败会话重复调用模型。
+const agyRetryBackoff = 10 * time.Minute
+
 type Syncer struct {
 	cfg       *config.Config
 	zedDBPath string
 	agyTitler *agy.Titler
+
+	mu     sync.Mutex
+	failed map[string]time.Time // sessionID -> 冷却截止时间
 }
 
 func NewSyncer(cfg *config.Config) *Syncer {
@@ -33,7 +42,38 @@ func NewSyncer(cfg *config.Config) *Syncer {
 		cfg:       cfg,
 		zedDBPath: zedDBPath,
 		agyTitler: agyTitler,
+		failed:    make(map[string]time.Time),
 	}
+}
+
+// hasUsableProvider 判断是否存在至少一个启用且带密钥的模型提供方。
+func (s *Syncer) hasUsableProvider() bool {
+	for _, p := range s.cfg.AGY.Providers {
+		if p.Enabled && strings.TrimSpace(p.APIKey) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// inBackoff 判断会话是否仍处于失败冷却期。
+func (s *Syncer) inBackoff(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	until, ok := s.failed[sessionID]
+	return ok && time.Now().Before(until)
+}
+
+func (s *Syncer) markFailed(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failed[sessionID] = time.Now().Add(agyRetryBackoff)
+}
+
+func (s *Syncer) clearFailed(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.failed, sessionID)
 }
 
 // openZedDB 以 WAL 与 busy timeout 配置打开 Zed 的 SQLite 数据库。
@@ -61,9 +101,9 @@ func (s *Syncer) SyncOpenCode() (int, error) {
 	}
 	defer ocDB.Close()
 
-	// 找出需要生成标题的线程
+	// 找出需要生成标题的线程（含自建 agent 名，如 "Opencode (auto-title)"）
 	query := `SELECT session_id FROM sidebar_threads 
-	          WHERE agent_id = 'opencode' 
+	          WHERE agent_id LIKE 'opencode%' 
 	            AND (title_override IS NULL OR title_override = '') 
 	            AND session_id IS NOT NULL`
 	rows, err := zedDB.Query(query)
@@ -125,7 +165,8 @@ func (s *Syncer) SyncOpenCode() (int, error) {
 // SyncAGY 调用 DeepSeek 为最近的 AGY 线程生成简洁标题并同步。
 // 若 maxAge > 0，仅处理该时间窗内更新的线程，避免浪费 API 配额。
 func (s *Syncer) SyncAGY(maxAge time.Duration) (int, error) {
-	if strings.TrimSpace(s.cfg.AGY.APIKey) == "" {
+	if !s.hasUsableProvider() {
+		log.Printf("[AGY] 跳过：未配置可用的模型提供方（providers 为空，或全部禁用/缺密钥）")
 		return 0, nil
 	}
 
@@ -135,8 +176,9 @@ func (s *Syncer) SyncAGY(maxAge time.Duration) (int, error) {
 	}
 	defer zedDB.Close()
 
+	// 同时覆盖官方 antigravity-acp 与自建 "Google Antigravity (auto-title)" 等变体
 	query := `SELECT session_id, title, updated_at FROM sidebar_threads 
-	          WHERE agent_id = 'antigravity-acp' 
+	          WHERE agent_id LIKE '%antigravity%' 
 	            AND (title_override IS NULL OR title_override = '') 
 	            AND session_id IS NOT NULL`
 	rows, err := zedDB.Query(query)
@@ -184,15 +226,27 @@ func (s *Syncer) SyncAGY(maxAge time.Duration) (int, error) {
 			continue
 		}
 
-		title, err := s.agyTitler.CallLLMDirect(prompt)
-		if err != nil || title == "" {
+		// 失败冷却期内跳过，避免 watch 每轮重复烧配额
+		if s.inBackoff(item.sessionID) {
 			continue
 		}
 
-		_, err = zedDB.Exec("UPDATE sidebar_threads SET title_override = ? WHERE session_id = ?", title, item.sessionID)
-		if err == nil {
-			updatedCount++
+		title, err := s.agyTitler.CallLLMDirect(prompt)
+		if err != nil || title == "" {
+			s.markFailed(item.sessionID)
+			log.Printf("[AGY] 会话 %s 标题生成失败（%s 后重试）: %v", item.sessionID, agyRetryBackoff, err)
+			continue
 		}
+
+		if _, err := zedDB.Exec("UPDATE sidebar_threads SET title_override = ? WHERE session_id = ?", title, item.sessionID); err != nil {
+			s.markFailed(item.sessionID)
+			log.Printf("[AGY] 会话 %s 标题写入失败（%s 后重试）: %v", item.sessionID, agyRetryBackoff, err)
+			continue
+		}
+
+		s.clearFailed(item.sessionID)
+		updatedCount++
+		log.Printf("[AGY] 会话 %s 标题已同步: %s", item.sessionID, title)
 	}
 
 	return updatedCount, nil
@@ -217,10 +271,15 @@ func (s *Syncer) Watch(interval time.Duration, agyMaxAge time.Duration, stopCh <
 }
 
 func (s *Syncer) runOnce(agyMaxAge time.Duration) {
-	if n, err := s.SyncOpenCode(); err == nil && n > 0 {
-		fmt.Printf("[%s] [OpenCode] Synced %d titles\n", time.Now().Format("15:04:05"), n)
+	if n, err := s.SyncOpenCode(); err != nil {
+		log.Printf("[OpenCode] 同步失败: %v", err)
+	} else if n > 0 {
+		log.Printf("[OpenCode] 已同步 %d 个标题", n)
 	}
-	if n, err := s.SyncAGY(agyMaxAge); err == nil && n > 0 {
-		fmt.Printf("[%s] [AGY] Synced %d titles via LLM (OpenCode Go / DeepSeek)\n", time.Now().Format("15:04:05"), n)
+
+	if n, err := s.SyncAGY(agyMaxAge); err != nil {
+		log.Printf("[AGY] 同步失败: %v", err)
+	} else if n > 0 {
+		log.Printf("[AGY] 已同步 %d 个标题", n)
 	}
 }

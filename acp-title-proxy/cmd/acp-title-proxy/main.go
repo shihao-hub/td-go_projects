@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"language_projects/go_projects/acp-title-proxy/internal/agy"
+	"language_projects/go_projects/acp-title-proxy/internal/applog"
 	"language_projects/go_projects/acp-title-proxy/internal/config"
 	"language_projects/go_projects/acp-title-proxy/internal/finder"
 	"language_projects/go_projects/acp-title-proxy/internal/opencode"
@@ -26,6 +27,12 @@ func main() {
 	}
 
 	cmd := strings.ToLower(os.Args[1])
+
+	// 日志同时落盘到 %APPDATA%\language_projects\acp-title-proxy\acp-title-proxy.log，
+	// 因为 Zed 不会转发 agent 子进程的 stderr，仅靠终端无法排查。
+	closeLog := applog.Init()
+	defer closeLog()
+
 	cfg, cfgPath, err := config.LoadConfig()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[acp-title-proxy] Warning loading config: %v\n", err)

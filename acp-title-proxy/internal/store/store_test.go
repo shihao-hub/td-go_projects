@@ -50,7 +50,7 @@ func TestStorePersistence(t *testing.T) {
 	}
 }
 
-func TestCheckZedDBTitle(t *testing.T) {
+func TestGetZedDBTitles(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "mock_zed.sqlite")
 
@@ -68,7 +68,7 @@ func TestCheckZedDBTitle(t *testing.T) {
 		);
 		INSERT INTO sidebar_threads (session_id, title, title_override) VALUES
 			('sess_with_override', '原始标题', '人工覆盖标题'),
-			('sess_with_title', '分析acp标题代理项目', NULL),
+			('sess_with_title', '这部分是如何实现的？', NULL),
 			('sess_empty', '', NULL);
 	`)
 	if err != nil {
@@ -76,27 +76,26 @@ func TestCheckZedDBTitle(t *testing.T) {
 	}
 	db.Close()
 
-	// 场景 1：会话存在 title_override
-	title, ok := CheckZedDBTitle("sess_with_override", dbPath)
-	if !ok || title != "人工覆盖标题" {
-		t.Errorf("expected '人工覆盖标题', got %q (ok=%v)", title, ok)
+	// 场景 1：会话存在 title 与 title_override
+	title, override, found := GetZedDBTitles("sess_with_override", dbPath)
+	if !found || title != "原始标题" || override != "人工覆盖标题" {
+		t.Errorf("unexpected result: title=%q override=%q found=%v", title, override, found)
 	}
 
-	// 场景 2：会话存在 title
-	title, ok = CheckZedDBTitle("sess_with_title", dbPath)
-	if !ok || title != "分析acp标题代理项目" {
-		t.Errorf("expected '分析acp标题代理项目', got %q (ok=%v)", title, ok)
+	// 场景 2：只有 title（是否占位由调用方结合 prompt 判定）
+	title, override, found = GetZedDBTitles("sess_with_title", dbPath)
+	if !found || title != "这部分是如何实现的？" || override != "" {
+		t.Errorf("unexpected result: title=%q override=%q found=%v", title, override, found)
 	}
 
-	// 场景 3：会话标题为空
-	_, ok = CheckZedDBTitle("sess_empty", dbPath)
-	if ok {
-		t.Errorf("expected sess_empty to return false")
+	// 场景 3：标题均为空
+	title, override, found = GetZedDBTitles("sess_empty", dbPath)
+	if !found || title != "" || override != "" {
+		t.Errorf("unexpected result: title=%q override=%q found=%v", title, override, found)
 	}
 
 	// 场景 4：会话不存在
-	_, ok = CheckZedDBTitle("sess_not_found", dbPath)
-	if ok {
-		t.Errorf("expected sess_not_found to return false")
+	if _, _, found = GetZedDBTitles("sess_not_found", dbPath); found {
+		t.Errorf("expected sess_not_found to return found=false")
 	}
 }

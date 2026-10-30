@@ -19,11 +19,14 @@ func GetDefaultZedDBPath() string {
 	return filepath.Join(localAppData, "Zed", "db", "0-stable", "db.sqlite")
 }
 
-// CheckZedDBTitle 检查该会话是否已存在于 Zed 的 sidebar_threads 表，
-// 且已建立有效标题（title 或 title_override）。
-func CheckZedDBTitle(sessionID string, customDBPath string) (string, bool) {
+// GetZedDBTitles 返回该会话在 Zed 中记录的标题（title）与用户覆盖标题（title_override）。
+//
+// title 对 AGY 这类自身不产标题的 agent 而言，可能是 Zed 在首条消息时写入的占位副本
+// （首条消息原文或其截断），因此调用方必须结合当前 prompt 判断它是否真的代表已命名，
+// 不能仅凭 title 非空就跳过标题生成。title_override 则始终代表用户的显式命名意图。
+func GetZedDBTitles(sessionID string, customDBPath string) (string, string, bool) {
 	if sessionID == "" {
-		return "", false
+		return "", "", false
 	}
 
 	dbPath := customDBPath
@@ -32,40 +35,25 @@ func CheckZedDBTitle(sessionID string, customDBPath string) (string, bool) {
 	}
 
 	if dbPath == "" {
-		return "", false
+		return "", "", false
 	}
 
 	if _, err := os.Stat(dbPath); err != nil {
-		return "", false
+		return "", "", false
 	}
 
 	connStr := fmt.Sprintf("file:%s?mode=ro&_pragma=busy_timeout(1000)", dbPath)
 	db, err := sql.Open("sqlite", connStr)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	defer db.Close()
 
 	var title, titleOverride sql.NullString
 	query := "SELECT title, title_override FROM sidebar_threads WHERE session_id = ? LIMIT 1"
-	err = db.QueryRow(query, sessionID).Scan(&title, &titleOverride)
-	if err != nil {
-		return "", false
+	if err := db.QueryRow(query, sessionID).Scan(&title, &titleOverride); err != nil {
+		return "", "", false
 	}
 
-	if titleOverride.Valid {
-		to := strings.TrimSpace(titleOverride.String)
-		if to != "" {
-			return to, true
-		}
-	}
-
-	if title.Valid {
-		t := strings.TrimSpace(title.String)
-		if t != "" {
-			return t, true
-		}
-	}
-
-	return "", false
+	return strings.TrimSpace(title.String), strings.TrimSpace(titleOverride.String), true
 }
