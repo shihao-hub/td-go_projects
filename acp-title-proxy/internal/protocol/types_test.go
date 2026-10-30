@@ -77,20 +77,14 @@ func TestMergeAvailableCommands(t *testing.T) {
 		t.Fatalf("fields not preserved: %+v", res)
 	}
 
-	// 原生 2 个 (plan, logout) + 3 个官方思维增强命令 (grill-me, goal, compact) + 1 个技能 = 6
-	if len(res.AvailableCommands) != 6 {
-		t.Fatalf("expected 6 commands (plan, logout, 3 native augmented, sh-pocock-workflow), got %d", len(res.AvailableCommands))
+	if len(res.AvailableCommands) != 3 {
+		t.Fatalf("expected 3 commands (plan, logout, sh-pocock-workflow), got %d", len(res.AvailableCommands))
 	}
 
-	names := make([]string, len(res.AvailableCommands))
-	for i, c := range res.AvailableCommands {
-		names[i] = c.Name
-	}
+	names := []string{res.AvailableCommands[0].Name, res.AvailableCommands[1].Name, res.AvailableCommands[2].Name}
 	joined := strings.Join(names, ",")
-	for _, expected := range []string{"plan", "logout", "grill-me", "goal", "compact", "sh-pocock-workflow"} {
-		if !strings.Contains(joined, expected) {
-			t.Fatalf("missing expected command %s in %s", expected, joined)
-		}
+	if !strings.Contains(joined, "plan") || !strings.Contains(joined, "logout") || !strings.Contains(joined, "sh-pocock-workflow") {
+		t.Fatalf("unexpected commands: %s", joined)
 	}
 }
 
@@ -128,110 +122,7 @@ func TestMergeCommandsUpdateNotification(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 原有 1 个(usage) + 3 个官方思维增强命令 + 1 个技能 = 5
-	if len(params.Update.AvailableCommands) != 5 {
-		t.Fatalf("expected 5 commands, got %d", len(params.Update.AvailableCommands))
+	if len(params.Update.AvailableCommands) != 2 {
+		t.Fatalf("expected 2 commands, got %d", len(params.Update.AvailableCommands))
 	}
 }
-
-func TestMergeConfigOptions(t *testing.T) {
-	rawResult := json.RawMessage(`{
-		"sessionId": "sess_123",
-		"configOptions": [
-			{"id": "mode", "name": "Mode", "type": "select", "currentValue": "yolo"}
-		]
-	}`)
-
-	merged, err := MergeConfigOptions(rawResult, DefaultWorkflowConfigOption)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var res struct {
-		ConfigOptions []ConfigOption `json:"configOptions"`
-	}
-	if err := json.Unmarshal(merged, &res); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(res.ConfigOptions) != 2 {
-		t.Fatalf("expected 2 configOptions, got %d", len(res.ConfigOptions))
-	}
-	if res.ConfigOptions[1].ID != "workflow" {
-		t.Fatalf("expected second option to be workflow, got %s", res.ConfigOptions[1].ID)
-	}
-}
-
-func TestReplaceModesInResult(t *testing.T) {
-	rawResult := json.RawMessage(`{
-		"sessionId": "sess_123",
-		"modes": {
-			"currentModeId": "yolo",
-			"availableModes": [
-				{"id": "default", "name": "Default"},
-				{"id": "yolo", "name": "YOLO"}
-			]
-		}
-	}`)
-
-	replaced, err := ReplaceModesInResult(rawResult, "plan")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var res struct {
-		SessionID string       `json:"sessionId"`
-		Modes     SessionModes `json:"modes"`
-	}
-	if err := json.Unmarshal(replaced, &res); err != nil {
-		t.Fatal(err)
-	}
-
-	if res.SessionID != "sess_123" {
-		t.Fatalf("expected sessionId sess_123, got %s", res.SessionID)
-	}
-	if res.Modes.CurrentModeID != "plan" {
-		t.Fatalf("expected currentModeId plan, got %s", res.Modes.CurrentModeID)
-	}
-	if len(res.Modes.AvailableModes) != 2 {
-		t.Fatalf("expected 2 modes (normal, plan), got %d", len(res.Modes.AvailableModes))
-	}
-	if res.Modes.AvailableModes[0].ID != "normal" || res.Modes.AvailableModes[1].ID != "plan" {
-		t.Fatalf("unexpected availableModes: %+v", res.Modes.AvailableModes)
-	}
-}
-
-func TestRewriteConfigOptionsInResult(t *testing.T) {
-	rawResult := json.RawMessage(`{
-		"sessionId": "sess_123",
-		"configOptions": [
-			{"id": "model", "name": "Model", "currentValue": "flash"},
-			{"id": "mode", "name": "Mode", "category": "mode", "currentValue": "yolo", "options": [{"value": "default", "name": "Default"}, {"value": "yolo", "name": "YOLO"}]}
-		]
-	}`)
-
-	rewritten, err := RewriteConfigOptionsInResult(rawResult, "plan")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var res struct {
-		ConfigOptions []ConfigOption `json:"configOptions"`
-	}
-	if err := json.Unmarshal(rewritten, &res); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(res.ConfigOptions) != 2 {
-		t.Fatalf("expected 2 options, got %d", len(res.ConfigOptions))
-	}
-	modeOpt := res.ConfigOptions[1]
-	if modeOpt.ID != "mode" || modeOpt.CurrentValue != "plan" {
-		t.Fatalf("unexpected mode opt: %+v", modeOpt)
-	}
-	if len(modeOpt.Options) != 2 || modeOpt.Options[0].Value != "normal" || modeOpt.Options[1].Value != "plan" {
-		t.Fatalf("unexpected mode choices: %+v", modeOpt.Options)
-	}
-}
-
-

@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -33,8 +32,6 @@ func main() {
 	// 因为 Zed 不会转发 agent 子进程的 stderr，仅靠终端无法排查。
 	closeLog := applog.Init()
 	defer closeLog()
-
-	log.Printf("[Proxy Main] PID=%d Args=%v", os.Getpid(), os.Args)
 
 	cfg, cfgPath, err := config.LoadConfig()
 	if err != nil {
@@ -150,7 +147,6 @@ func main() {
 
 		// 1. 优先从守护进程获取已预热的 worker（即时响应）
 		conn, err := pool.TryAcquire(pool.DefaultPort, 400*time.Millisecond)
-		log.Printf("[Proxy AGY] Pre-warm acquire result: err=%v", err)
 		if err == nil {
 			runner := proxy.NewRunner("", nil, titler, skillMgr)
 			if err := runner.RunStream(conn, inj); err != nil {

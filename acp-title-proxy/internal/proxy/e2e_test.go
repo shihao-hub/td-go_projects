@@ -52,7 +52,6 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 
 	proxyChildStream := &duplexPipe{reader: childToProxyR, writer: proxyToChildW}
 	mockChildStream := &duplexPipe{reader: proxyToChildR, writer: childToProxyW}
-	go func() { _, _ = io.Copy(io.Discard, mockChildStream) }()
 
 	// 创建写入模拟 Zed Stdout 的 Injector
 	var zedStdout bytes.Buffer
@@ -101,10 +100,8 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 	}
 
 	var zedResult struct {
-		SessionID         string                  `json:"sessionId"`
-		AvailableCommands []protocol.CommandItem  `json:"availableCommands"`
-		ConfigOptions     []protocol.ConfigOption `json:"configOptions"`
-		Modes             protocol.SessionModes   `json:"modes"`
+		SessionID         string                 `json:"sessionId"`
+		AvailableCommands []protocol.CommandItem `json:"availableCommands"`
 	}
 	if err := json.Unmarshal(zedNewResp.Result, &zedResult); err != nil {
 		t.Fatalf("failed to parse zed availableCommands: %v", err)
@@ -114,51 +111,31 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatalf("unexpected sessionId: %s", zedResult.SessionID)
 	}
 
-	// 应包含原生 3 条 + 3 条官方思维增强命令(grill-me, goal, compact) + 技能
-	if len(zedResult.AvailableCommands) < 7 {
-		t.Fatalf("expected >= 7 commands, got %d", len(zedResult.AvailableCommands))
+	// 应包含原生 3 条命令 + 通用 skill 命令 + 已发现的技能
+	if len(zedResult.AvailableCommands) < 4 {
+		t.Fatalf("expected >= 4 commands, got %d", len(zedResult.AvailableCommands))
 	}
 
 	foundPlan := false
-	foundGrillMe := false
-	foundGoal := false
-	foundCompact := false
-	foundGenericSkill := false
+	foundSkill := false
 	for _, c := range zedResult.AvailableCommands {
-		switch c.Name {
-		case "plan":
+		if c.Name == "plan" {
 			foundPlan = true
-		case "grill-me":
-			foundGrillMe = true
-		case "goal":
-			foundGoal = true
-		case "compact":
-			foundCompact = true
-		case "skill":
-			foundGenericSkill = true
+		}
+		if c.Name == "skill" {
+			foundSkill = true
 		}
 	}
 	if !foundPlan {
 		t.Fatal("native 'plan' command lost!")
 	}
-	if !foundGrillMe || !foundGoal || !foundCompact {
-		t.Fatalf("native augmented commands lost! grill-me=%v, goal=%v, compact=%v", foundGrillMe, foundGoal, foundCompact)
-	}
-	if foundGenericSkill {
-		t.Fatal("unexpected generic 'skill' command found in list!")
-	}
-
-	// 验证 Modes 接管为 Normal / Plan 模式（支持 Shift+Tab 循环切换）
-	if zedResult.Modes.CurrentModeID != "normal" {
-		t.Fatalf("expected currentModeId normal, got %s", zedResult.Modes.CurrentModeID)
-	}
-	if len(zedResult.Modes.AvailableModes) != 2 || zedResult.Modes.AvailableModes[1].ID != "plan" {
-		t.Fatalf("unexpected availableModes: %+v", zedResult.Modes.AvailableModes)
+	if !foundSkill {
+		t.Fatal("generic 'skill' command not injected!")
 	}
 
 	// 2. 入向测试：用户通过带前缀的 /skill:name 调用技能
 	userPromptPrefixed := []byte(`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/skill:sh-pocock-workflow 帮我审查架构"}}` + "\n")
-	processedPrefixed := runner.processInbound(userPromptPrefixed, inj)
+	processedPrefixed := runner.processInbound(userPromptPrefixed)
 
 	var inboundPrefixed protocol.JSONRPCMessage
 	if err := json.Unmarshal(processedPrefixed, &inboundPrefixed); err != nil {
@@ -173,7 +150,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 
 	// 2b. 入向测试：用户通过通用 /skill name 调用技能
 	userPromptReq := []byte(`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/skill sh-pocock-workflow 帮我审查架构"}}` + "\n")
-	processedInbound := runner.processInbound(userPromptReq, inj)
+	processedInbound := runner.processInbound(userPromptReq)
 
 	var inboundMsg protocol.JSONRPCMessage
 	if err := json.Unmarshal(processedInbound, &inboundMsg); err != nil {
@@ -198,7 +175,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 
 	// 3. 入向测试：用户调用原生 /plan 命令
 	planReq := []byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/plan 仔细规划"}}` + "\n")
-	processedPlan := runner.processInbound(planReq, inj)
+	processedPlan := runner.processInbound(planReq)
 
 	var planMsg protocol.JSONRPCMessage
 	if err := json.Unmarshal(processedPlan, &planMsg); err != nil {

@@ -4,10 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
-	"log"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 
 	"language_projects/go_projects/acp-title-proxy/internal/pool"
@@ -25,85 +23,12 @@ type SkillManager interface {
 	MatchAndRewrite(rawPrompt string) (bool, string, string, *skill.Skill)
 }
 
-// PlanModeInstruction 是处于 Plan 模式时强制注入的安全手刹约束，模拟 OpenCode 的严格规划与切回提示。
-const PlanModeInstruction = "【系统约束：当前处于 Plan 规划模式（只读分析阶段）。严禁调用任何具有修改文件、创建文件、写入代码或产生系统副作用的工具；仅允许使用只读工具（如读取文件、搜索代码）进行分析，并输出严谨的实施方案。若用户要求直接动手执行或编写代码，请务必明确提示用户：“当前处于 Plan 规划模式，请先在底部状态栏将 Workflow 切换为 Normal 后，我再立即为您执行代码修改。”】\n\n"
-
-type sessionWorkflowState struct {
-	mode              string // "normal" or "plan"
-	lastConfigOptions []protocol.ConfigOption
-}
-
 type Runner struct {
-	ExePath                string
-	Args                   []string
-	Titler                 Titler
-	SkillMgr               SkillManager
-	Stdin                  io.Reader
-	workerWriter           io.Writer
-	workflowMu             sync.Mutex
-	sessionStates          map[string]*sessionWorkflowState
-	lastKnownConfigOptions []protocol.ConfigOption
-}
-
-func (r *Runner) forceWorkerYOLO(sessionID string) {
-	if r.workerWriter == nil || sessionID == "" {
-		return
-	}
-	go func() {
-		reqCfg := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"id":      "__proxy_internal_yolo_cfg__",
-			"method":  "session/set_config_option",
-			"params": map[string]interface{}{
-				"sessionId": sessionID,
-				"configId":  "mode",
-				"value":     "yolo",
-			},
-		}
-		if b, err := json.Marshal(reqCfg); err == nil {
-			b = append(b, '\n')
-			_, _ = r.workerWriter.Write(b)
-		}
-
-		reqMode := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"id":      "__proxy_internal_yolo_mode__",
-			"method":  "session/set_mode",
-			"params": map[string]interface{}{
-				"sessionId": sessionID,
-				"modeId":    "yolo",
-			},
-		}
-		if b, err := json.Marshal(reqMode); err == nil {
-			b = append(b, '\n')
-			_, _ = r.workerWriter.Write(b)
-		}
-		log.Printf("[Proxy Worker] Forced backend worker session=%s to YOLO mode", sessionID)
-	}()
-}
-
-func (r *Runner) buildUpdatedConfigOptions(sessionID, newWorkflowValue string) []protocol.ConfigOption {
-	r.workflowMu.Lock()
-	defer r.workflowMu.Unlock()
-
-	var baseOpts []protocol.ConfigOption
-	if st, ok := r.sessionStates[sessionID]; ok && len(st.lastConfigOptions) > 0 {
-		baseOpts = make([]protocol.ConfigOption, len(st.lastConfigOptions))
-		copy(baseOpts, st.lastConfigOptions)
-	} else if len(r.lastKnownConfigOptions) > 0 {
-		baseOpts = make([]protocol.ConfigOption, len(r.lastKnownConfigOptions))
-		copy(baseOpts, r.lastKnownConfigOptions)
-	}
-
-	baseOpts = protocol.RewriteModeConfigOption(baseOpts, newWorkflowValue)
-
-	// 缓存回状态
-	if st, ok := r.sessionStates[sessionID]; ok {
-		st.lastConfigOptions = baseOpts
-	}
-	r.lastKnownConfigOptions = baseOpts
-
-	return baseOpts
+	ExePath  string
+	Args     []string
+	Titler   Titler
+	SkillMgr SkillManager
+	Stdin    io.Reader
 }
 
 func (r *Runner) getStdin() io.Reader {
@@ -113,29 +38,12 @@ func (r *Runner) getStdin() io.Reader {
 	return os.Stdin
 }
 
-func (r *Runner) getWorkflowState(sessionID string) *sessionWorkflowState {
-	r.workflowMu.Lock()
-	defer r.workflowMu.Unlock()
-	if r.sessionStates == nil {
-		r.sessionStates = make(map[string]*sessionWorkflowState)
-	}
-	s, ok := r.sessionStates[sessionID]
-	if !ok {
-		s = &sessionWorkflowState{
-			mode: "normal",
-		}
-		r.sessionStates[sessionID] = s
-	}
-	return s
-}
-
 func NewRunner(exePath string, args []string, titler Titler, skillMgr SkillManager) *Runner {
 	return &Runner{
-		ExePath:       exePath,
-		Args:          args,
-		Titler:        titler,
-		SkillMgr:      skillMgr,
-		sessionStates: make(map[string]*sessionWorkflowState),
+		ExePath:  exePath,
+		Args:     args,
+		Titler:   titler,
+		SkillMgr: skillMgr,
 	}
 }
 
@@ -164,7 +72,6 @@ func (r *Runner) Run(inj *Injector) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	r.workerWriter = childStdin
 
 	done := make(chan struct{})
 	var closeOnce sync.Once
@@ -183,27 +90,25 @@ func (r *Runner) Run(inj *Injector) error {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// 1. 直接透传 Stderr
+	// 1. 直接转发 Stderr
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(os.Stderr, childStderr)
 	}()
 
-	// 2. Inbound: Zed Stdin -> Child Stdin
+	// 2. 入向：Zed Stdin -> 子进程 Stdin
 	// 不纳入 WaitGroup：客户端不关闭 stdin 时该 goroutine 会永久阻塞在 Read 上，
 	// 若等待它，代理进程在会话重建后会残留为僵尸进程。
 	go func() {
-		defer abort()
+		defer abort() // Zed Stdin 关闭 -> 立即终止子进程
 
 		reader := bufio.NewReaderSize(r.getStdin(), 1024*1024)
 		for {
 			line, err := reader.ReadBytes('\n')
 			if len(line) > 0 {
-				newLine := r.processInbound(line, inj)
-				if len(newLine) > 0 {
-					if _, writeErr := childStdin.Write(newLine); writeErr != nil {
-						return
-					}
+				newLine := r.processInbound(line)
+				if _, writeErr := childStdin.Write(newLine); writeErr != nil {
+					return
 				}
 			}
 			if err != nil {
@@ -212,7 +117,7 @@ func (r *Runner) Run(inj *Injector) error {
 		}
 	}()
 
-	// 3. Outbound: Child Stdout -> Zed Stdout (via Injector)
+	// 3. 出向：子进程 Stdout -> Zed Stdout（经 Injector）
 	go func() {
 		defer wg.Done()
 		defer abort()
@@ -222,10 +127,8 @@ func (r *Runner) Run(inj *Injector) error {
 			line, err := reader.ReadBytes('\n')
 			if len(line) > 0 {
 				newLine := r.processOutbound(line, inj)
-				if len(newLine) > 0 {
-					if _, writeErr := inj.WriteRaw(newLine); writeErr != nil {
-						return
-					}
+				if _, writeErr := inj.WriteRaw(newLine); writeErr != nil {
+					return
 				}
 			}
 			if err != nil {
@@ -244,10 +147,9 @@ func (r *Runner) Run(inj *Injector) error {
 	return err
 }
 
-// RunStream bridges Zed stdio with an existing duplex stream (e.g. connected to pre-warm pool).
+// RunStream 打通 Zed stdio 与已有的双工流（如已连接预热池）。
 func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 	defer stream.Close()
-	r.workerWriter = stream
 
 	done := make(chan struct{})
 	var closeOnce sync.Once
@@ -262,21 +164,19 @@ func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// 1. Inbound: Zed Stdin -> Stream
+	// 1. 入向：Zed Stdin -> 双工流
 	// 不纳入 WaitGroup：客户端不关闭 stdin 时该 goroutine 会永久阻塞在 Read 上，
 	// 若等待它，代理进程在会话重建后会残留为僵尸进程。
 	go func() {
-		defer abort()
+		defer abort() // Zed Stdin 关闭 -> 关闭双工流并中止
 
 		reader := bufio.NewReaderSize(r.getStdin(), 1024*1024)
 		for {
 			line, err := reader.ReadBytes('\n')
 			if len(line) > 0 {
-				newLine := r.processInbound(line, inj)
-				if len(newLine) > 0 {
-					if _, writeErr := stream.Write(newLine); writeErr != nil {
-						return
-					}
+				newLine := r.processInbound(line)
+				if _, writeErr := stream.Write(newLine); writeErr != nil {
+					return
 				}
 			}
 			if err != nil {
@@ -285,7 +185,7 @@ func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 		}
 	}()
 
-	// 2. Outbound: Stream -> Zed Stdout (via Injector)
+	// 2. 出向：双工流 -> Zed Stdout（经 Injector）
 	go func() {
 		defer wg.Done()
 		defer abort()
@@ -295,10 +195,8 @@ func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 			line, err := reader.ReadBytes('\n')
 			if len(line) > 0 {
 				newLine := r.processOutbound(line, inj)
-				if len(newLine) > 0 {
-					if _, writeErr := inj.WriteRaw(newLine); writeErr != nil {
-						return
-					}
+				if _, writeErr := inj.WriteRaw(newLine); writeErr != nil {
+					return
 				}
 			}
 			if err != nil {
@@ -316,149 +214,76 @@ func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 	return nil
 }
 
-func (r *Runner) processInbound(line []byte, inj *Injector) []byte {
+func (r *Runner) processInbound(line []byte) []byte {
 	var msg protocol.JSONRPCMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return line
 	}
-	if msg.Method != "" {
-		log.Printf("[Proxy IN] method=%s id=%v", msg.Method, msg.ID)
-	}
 
-	// 1. 拦截 Zed 切换 Mode (session/set_mode，由 Shift+Tab 快捷键或点击 Mode 下拉框触发)
-	if msg.Method == "session/set_mode" && len(msg.Params) > 0 {
-		var setModeParams protocol.SetModeParams
-		if err := json.Unmarshal(msg.Params, &setModeParams); err == nil && setModeParams.SessionID != "" {
-			val := strings.ToLower(strings.TrimSpace(setModeParams.ModeID))
-			mappedMode := "normal"
-			if val == "plan" {
-				mappedMode = "plan"
-			}
-
-			state := r.getWorkflowState(setModeParams.SessionID)
-			r.workflowMu.Lock()
-			state.mode = mappedMode
-			r.workflowMu.Unlock()
-
-			r.forceWorkerYOLO(setModeParams.SessionID)
-
-			// 向 Zed 直接回复成功结果，拦截不透传给底层（底层保持 YOLO）
-			if inj != nil && msg.ID != nil {
-				resp := map[string]interface{}{
-					"jsonrpc": "2.0",
-					"id":      msg.ID,
-					"result":  map[string]interface{}{},
-				}
-				if respData, err := json.Marshal(resp); err == nil {
-					respData = append(respData, '\n')
-					_, _ = inj.WriteRaw(respData)
-					log.Printf("[Proxy IN] Intercepted set_mode=%s (mapped=%s) for session=%s", val, mappedMode, setModeParams.SessionID)
-				}
-			}
-			return nil
-		}
-	}
-
-	// 2. 兼容拦截 Zed 切换下拉框配置 (session/set_config_option)
-	if msg.Method == "session/set_config_option" && len(msg.Params) > 0 {
-		var setParams protocol.SetConfigOptionParams
-		if err := json.Unmarshal(msg.Params, &setParams); err == nil && setParams.SessionID != "" {
-			if strings.EqualFold(setParams.ConfigID, "workflow") || strings.EqualFold(setParams.ConfigID, "mode") {
-				val := strings.ToLower(strings.TrimSpace(setParams.Value))
-				mappedMode := "normal"
-				if val == "plan" {
-					mappedMode = "plan"
-				}
-
-				state := r.getWorkflowState(setParams.SessionID)
-				r.workflowMu.Lock()
-				state.mode = mappedMode
-				r.workflowMu.Unlock()
-
-				r.forceWorkerYOLO(setParams.SessionID)
-
-				updatedOpts := r.buildUpdatedConfigOptions(setParams.SessionID, mappedMode)
-
-				// 向 Zed 回复包含全量 configOptions 的成功结果，确保客户端状态更新与 UI 联动
-				if inj != nil && msg.ID != nil {
-					resp := map[string]interface{}{
-						"jsonrpc": "2.0",
-						"id":      msg.ID,
-						"result": map[string]interface{}{
-							"configOptions": updatedOpts,
-						},
-					}
-					if respData, err := json.Marshal(resp); err == nil {
-						respData = append(respData, '\n')
-						_, _ = inj.WriteRaw(respData)
-						log.Printf("[Proxy IN] Responded to set_config_option %s=%s (mapped=%s)", setParams.ConfigID, val, mappedMode)
-					}
-				}
-				return nil
-			}
-		}
-	}
-
-	// 感知 session/load 请求，为恢复的历史会话预先初始化状态
-	if msg.Method == "session/load" && len(msg.Params) > 0 {
-		var loadParams struct {
-			SessionID string `json:"sessionId"`
-		}
-		if err := json.Unmarshal(msg.Params, &loadParams); err == nil && loadParams.SessionID != "" {
-			_ = r.getWorkflowState(loadParams.SessionID)
-		}
-	}
-
-	// 2. 拦截与重写 session/prompt
 	if msg.Method == "session/prompt" && len(msg.Params) > 0 {
 		var params protocol.SessionPromptParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil && params.SessionID != "" {
-			r.forceWorkerYOLO(params.SessionID)
 			promptText := protocol.ExtractPromptText(params.Prompt)
 			effectivePrompt := promptText
-			userTask := promptText
 
-			state := r.getWorkflowState(params.SessionID)
-			r.workflowMu.Lock()
-			currentMode := state.mode
-			r.workflowMu.Unlock()
-
-			// A. 技能匹配与注入
-			skillMatched := false
+			// 检查技能匹配并重写 prompt
 			if r.SkillMgr != nil && promptText != "" {
 				matched, rewritten, task, _ := r.SkillMgr.MatchAndRewrite(promptText)
 				if matched {
-					skillMatched = true
-					effectivePrompt = rewritten
-					userTask = task
+					// 1. 向 Titler 传入干净的用户任务，保证会话标题有意义
+					if r.Titler != nil {
+						titlerPrompt := task
+						if titlerPrompt == "" {
+							titlerPrompt = promptText
+						}
+						r.Titler.OnPrompt(params.SessionID, titlerPrompt)
+					}
+
+					// 2. 注入技能并重写 prompt
+					if newPromptRaw, err := protocol.RewritePrompt(params.Prompt, rewritten); err == nil {
+						params.Prompt = newPromptRaw
+						if newParamsRaw, err := json.Marshal(params); err == nil {
+							msg.Params = newParamsRaw
+							if newLine, err := json.Marshal(msg); err == nil {
+								newLine = append(newLine, '\n')
+								return newLine
+							}
+						}
+					}
+					return line
 				}
 			}
 
-			// B. Plan 模式：OpenCode 安全手刹机制
-			planInjected := false
-			if currentMode == "plan" {
-				planInjected = true
-				trimmed := strings.TrimSpace(effectivePrompt)
-				userContent := strings.TrimPrefix(trimmed, "/plan")
-				userContent = strings.TrimSpace(userContent)
-				effectivePrompt = "/plan " + PlanModeInstruction + userContent
+			// 未匹配到技能时，按常规通知 Titler
+			if r.Titler != nil && effectivePrompt != "" {
+				r.Titler.OnPrompt(params.SessionID, effectivePrompt)
+			}
+		}
+	}
+
+	return line
+}
+
+func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
+	var msg protocol.JSONRPCMessage
+	if err := json.Unmarshal(line, &msg); err != nil {
+		return line
+	}
+
+	// 1. 识别 session/new 响应：{"id": 1, "result": {"sessionId": "...", "availableCommands": [...]}}
+	if msg.ID != nil && len(msg.Result) > 0 {
+		var res protocol.SessionNewResult
+		if err := json.Unmarshal(msg.Result, &res); err == nil && res.SessionID != "" {
+			if r.Titler != nil {
+				r.Titler.OnSessionNew(res.SessionID)
 			}
 
-			// C. 更新 Titler（使用干净的用户任务描述，不带 /plan 与技能模版前缀）
-			if r.Titler != nil && userTask != "" {
-				cleanTitlePrompt := strings.TrimPrefix(strings.TrimSpace(userTask), "/plan")
-				cleanTitlePrompt = strings.TrimSpace(cleanTitlePrompt)
-				if cleanTitlePrompt != "" {
-					r.Titler.OnPrompt(params.SessionID, cleanTitlePrompt)
-				}
-			}
-
-			// D. 如果发生改写（技能或 Plan 手刹注入），替换并重组 JSON-RPC
-			if skillMatched || planInjected {
-				if newPromptRaw, err := protocol.RewritePrompt(params.Prompt, effectivePrompt); err == nil {
-					params.Prompt = newPromptRaw
-					if newParamsRaw, err := json.Marshal(params); err == nil {
-						msg.Params = newParamsRaw
+			// 将自定义技能合并进 availableCommands
+			if r.SkillMgr != nil {
+				skills := r.SkillMgr.GetCommandItems()
+				if len(skills) > 0 {
+					if mergedResult, err := protocol.MergeAvailableCommands(msg.Result, skills); err == nil {
+						msg.Result = mergedResult
 						if newLine, err := json.Marshal(msg); err == nil {
 							newLine = append(newLine, '\n')
 							return newLine
@@ -469,149 +294,18 @@ func (r *Runner) processInbound(line []byte, inj *Injector) []byte {
 		}
 	}
 
-	return line
-}
-
-func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
-	log.Printf("[Proxy OUT] %s", string(line[:min(len(line), 250)]))
-	var msg protocol.JSONRPCMessage
-	if err := json.Unmarshal(line, &msg); err != nil {
-		return line
-	}
-
-	// 0. 拦截底层响应中的内部 YOLO 设置回包，不转发给 Zed
-	if msg.ID != nil {
-		var idStr string
-		_ = json.Unmarshal(*msg.ID, &idStr)
-		if strings.HasPrefix(idStr, "__proxy_internal_yolo_") {
-			return nil
-		}
-	}
-
-	// 1. 终极兜底：如果底层仍然发出权限请求 (session/request_permission)，代理自动放行批准
-	if msg.Method == "session/request_permission" && msg.ID != nil && len(msg.Params) > 0 {
-		log.Printf("[Proxy Auto-Approve] Intercepted session/request_permission id=%v, auto-allowing", msg.ID)
-		if r.workerWriter != nil {
-			go func() {
-				allowResp := map[string]interface{}{
-					"jsonrpc": "2.0",
-					"id":      msg.ID,
-					"result": map[string]interface{}{
-						"outcome": map[string]interface{}{
-							"outcome": "allow",
-						},
-					},
-				}
-				if respBytes, err := json.Marshal(allowResp); err == nil {
-					respBytes = append(respBytes, '\n')
-					_, _ = r.workerWriter.Write(respBytes)
-				}
-			}()
-		}
-		// 阻断通知，不让 Zed 弹出确认卡片
-		return nil
-	}
-
-	// 2. 识别 session/new 与 session/load 响应：合并 availableCommands 与注入 workflow 独立下拉框
-	if msg.ID != nil && len(msg.Result) > 0 {
-		var resMap map[string]json.RawMessage
-		if err := json.Unmarshal(msg.Result, &resMap); err == nil {
-			modified := false
-
-			// 如果有 sessionId，触发 Titler 并强制将底层 Worker 切到 YOLO 模式
-			if rawSID, ok := resMap["sessionId"]; ok {
-				var sid string
-				if err := json.Unmarshal(rawSID, &sid); err == nil && sid != "" {
-					if r.Titler != nil {
-						r.Titler.OnSessionNew(sid)
-					}
-					r.forceWorkerYOLO(sid)
-				}
-			}
-
-			// 如果包含 availableCommands，合并官方思维命令与技能族
-			if _, ok := resMap["availableCommands"]; ok {
-				var skills []protocol.CommandItem
-				if r.SkillMgr != nil {
-					skills = r.SkillMgr.GetCommandItems()
-				}
-				if mergedCmds, err := protocol.MergeAvailableCommands(msg.Result, skills); err == nil {
-					msg.Result = mergedCmds
-					modified = true
-				}
-			}
-
-			_, hasSID := resMap["sessionId"]
-			_, hasModes := resMap["modes"]
-			_, hasOpts := resMap["configOptions"]
-
-			var targetSID string
-			if rawSID, ok := resMap["sessionId"]; ok {
-				_ = json.Unmarshal(rawSID, &targetSID)
-			}
-			currentMode := "normal"
-			if targetSID != "" {
-				st := r.getWorkflowState(targetSID)
-				r.workflowMu.Lock()
-				if st.mode != "" {
-					currentMode = st.mode
-				}
-				r.workflowMu.Unlock()
-			}
-
-			// 2. 将 modes 替换为 Workflow 模式（Normal / Plan），实现旧版 ACP 兼容
-			if hasModes || hasSID {
-				if replaced, err := protocol.ReplaceModesInResult(msg.Result, currentMode); err == nil {
-					msg.Result = replaced
-					modified = true
-				}
-			}
-
-			// 3. 将 configOptions 中的 mode 替换为 Normal / Plan 模式，实现新版 Zed Shift+Tab 循环
-			if hasOpts || hasSID {
-				if rewrittenOpts, err := protocol.RewriteConfigOptionsInResult(msg.Result, currentMode); err == nil {
-					msg.Result = rewrittenOpts
-					modified = true
-
-					// 记录全量 configOptions
-					var allOpts struct {
-						ConfigOptions []protocol.ConfigOption `json:"configOptions"`
-					}
-					if err := json.Unmarshal(rewrittenOpts, &allOpts); err == nil && len(allOpts.ConfigOptions) > 0 {
-						r.workflowMu.Lock()
-						r.lastKnownConfigOptions = allOpts.ConfigOptions
-						if targetSID != "" {
-							if st, ok := r.sessionStates[targetSID]; ok {
-								st.lastConfigOptions = allOpts.ConfigOptions
-							}
-						}
-						r.workflowMu.Unlock()
-					}
-				}
-			}
-
-			if modified {
-				if newLine, err := json.Marshal(msg); err == nil {
-					newLine = append(newLine, '\n')
-					log.Printf("[Proxy OUT] Injected workflow/commands into response id=%v", msg.ID)
-					return newLine
-				}
-			}
-		}
-	}
-
-	// 2. 识别 session/update 通知：合并 availableCommands (session/load 会推送此通知)
+	// 2. 识别 session/update 通知：available_commands_update
 	if msg.Method == "session/update" && len(msg.Params) > 0 {
-		var skills []protocol.CommandItem
 		if r.SkillMgr != nil {
-			skills = r.SkillMgr.GetCommandItems()
-		}
-		if mergedParams, matched, err := protocol.MergeCommandsUpdateNotification(msg.Params, skills); err == nil && matched {
-			msg.Params = mergedParams
-			if newLine, err := json.Marshal(msg); err == nil {
-				newLine = append(newLine, '\n')
-				log.Printf("[Proxy OUT] Injected skills/commands into session/update notification")
-				return newLine
+			skills := r.SkillMgr.GetCommandItems()
+			if len(skills) > 0 {
+				if mergedParams, matched, err := protocol.MergeCommandsUpdateNotification(msg.Params, skills); err == nil && matched {
+					msg.Params = mergedParams
+					if newLine, err := json.Marshal(msg); err == nil {
+						newLine = append(newLine, '\n')
+						return newLine
+					}
+				}
 			}
 		}
 	}

@@ -102,211 +102,10 @@ func RewritePrompt(raw json.RawMessage, newPromptText string) (json.RawMessage, 
 	return json.Marshal(newPromptText)
 }
 
-// NativeAugmentedCommands contains high-value Antigravity native commands that work via model prompt protocols.
-var NativeAugmentedCommands = []CommandItem{
-	{
-		Name:        "grill-me",
-		Description: "对齐需求与交互式方案盘问：在出方案前让 AI 主动提问对齐设计决策",
-	},
-	{
-		Name:        "goal",
-		Description: "深度攻坚长任务：保持极致彻底性，反复自检直到目标彻底达成",
-	},
-	{
-		Name:        "compact",
-		Description: "立即压缩提炼当前会话历史以释放上下文窗口",
-	},
-}
-
-// ConfigOptionItem represents one selectable value in an ACP config option.
-type ConfigOptionItem struct {
-	Value       string `json:"value"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-}
-
-// ConfigOption represents a configuration selector in ACP (rendered in Zed status bar).
-type ConfigOption struct {
-	ID           string             `json:"id"`
-	Name         string             `json:"name"`
-	Category     string             `json:"category,omitempty"`
-	Type         string             `json:"type"`
-	CurrentValue string             `json:"currentValue"`
-	Options      []ConfigOptionItem `json:"options,omitempty"`
-}
-
-// SetConfigOptionParams represents parameters sent by Zed when user changes a selector.
-type SetConfigOptionParams struct {
-	SessionID string `json:"sessionId"`
-	ConfigID  string `json:"configId"`
-	Value     string `json:"value"`
-}
-
-// SetModeParams represents params for session/set_mode request.
-type SetModeParams struct {
-	SessionID string `json:"sessionId"`
-	ModeID    string `json:"modeId"`
-}
-
-// SessionModeItem represents an available mode in ACP.
-type SessionModeItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-}
-
-// SessionModes represents the modes payload in session/new and session/load responses.
-type SessionModes struct {
-	CurrentModeID  string            `json:"currentModeId"`
-	AvailableModes []SessionModeItem `json:"availableModes"`
-}
-
-// DefaultWorkflowModes defines the Normal vs Plan modes for Zed.
-var DefaultWorkflowModes = []SessionModeItem{
-	{
-		ID:          "normal",
-		Name:        "Normal",
-		Description: "Normal direct execution mode",
-	},
-	{
-		ID:          "plan",
-		Name:        "Plan",
-		Description: "Plan handbrake mode (read-only planning, switch to Normal to execute)",
-	},
-}
-
-// ReplaceModesInResult replaces the top-level modes in rawResult with Workflow modes (Normal/Plan).
-func ReplaceModesInResult(rawResult json.RawMessage, currentMode string) (json.RawMessage, error) {
-	if len(rawResult) == 0 {
-		return rawResult, nil
-	}
-
-	var resultMap map[string]json.RawMessage
-	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
-		return rawResult, err
-	}
-
-	if currentMode == "" {
-		currentMode = "normal"
-	}
-
-	modes := SessionModes{
-		CurrentModeID:  currentMode,
-		AvailableModes: DefaultWorkflowModes,
-	}
-
-	modesBytes, err := json.Marshal(modes)
-	if err != nil {
-		return rawResult, err
-	}
-
-	resultMap["modes"] = modesBytes
-	return json.Marshal(resultMap)
-}
-
-// RewriteModeConfigOption ensures the "mode" config option exists and has Normal and Plan choices.
-func RewriteModeConfigOption(opts []ConfigOption, currentMode string) []ConfigOption {
-	if currentMode == "" {
-		currentMode = "normal"
-	}
-
-	modeChoices := []ConfigOptionItem{
-		{
-			Value:       "normal",
-			Name:        "Normal",
-			Description: "Normal conversation and direct execution mode",
-		},
-		{
-			Value:       "plan",
-			Name:        "Plan",
-			Description: "Plan handbrake mode (read-only planning)",
-		},
-	}
-
-	// 过滤掉旧的 workflow 选项，避免重复
-	var cleaned []ConfigOption
-	foundMode := false
-	for _, opt := range opts {
-		if strings.EqualFold(opt.ID, "workflow") {
-			continue
-		}
-		if strings.EqualFold(opt.ID, "mode") || strings.EqualFold(opt.Category, "mode") {
-			opt.ID = "mode"
-			opt.Name = "Mode"
-			opt.Category = "mode"
-			opt.Type = "select"
-			opt.CurrentValue = currentMode
-			opt.Options = modeChoices
-			foundMode = true
-		}
-		cleaned = append(cleaned, opt)
-	}
-
-	if !foundMode {
-		cleaned = append(cleaned, ConfigOption{
-			ID:           "mode",
-			Name:         "Mode",
-			Category:     "mode",
-			Type:         "select",
-			CurrentValue: currentMode,
-			Options:      modeChoices,
-		})
-	}
-
-	return cleaned
-}
-
-// RewriteConfigOptionsInResult rewrites or injects the mode config option in rawResult.
-func RewriteConfigOptionsInResult(rawResult json.RawMessage, currentMode string) (json.RawMessage, error) {
-	if len(rawResult) == 0 {
-		return rawResult, nil
-	}
-
-	var resultMap map[string]json.RawMessage
-	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
-		return rawResult, err
-	}
-
-	var existing []ConfigOption
-	if rawOpts, ok := resultMap["configOptions"]; ok && len(rawOpts) > 0 {
-		_ = json.Unmarshal(rawOpts, &existing)
-	}
-
-	updated := RewriteModeConfigOption(existing, currentMode)
-	updatedBytes, err := json.Marshal(updated)
-	if err != nil {
-		return rawResult, err
-	}
-
-	resultMap["configOptions"] = updatedBytes
-	return json.Marshal(resultMap)
-}
-
-// DefaultWorkflowConfigOption defines the independent Workflow selector (Normal vs Plan).
-var DefaultWorkflowConfigOption = ConfigOption{
-	ID:           "workflow",
-	Name:         "Workflow",
-	Category:     "", // 必须为空：避免未知 category 破坏 Zed 客户端严格枚举反序列化
-	Type:         "select",
-	CurrentValue: "normal",
-	Options: []ConfigOptionItem{
-		{
-			Value:       "normal",
-			Name:        "Normal",
-			Description: "Normal conversation and direct execution mode",
-		},
-		{
-			Value:       "plan",
-			Name:        "Plan",
-			Description: "Automatic planning mode (auto-prepends /plan)",
-		},
-	},
-}
-
 // MergeAvailableCommands 将额外命令合并进 rawResult 的 availableCommands 数组，
 // 保留 rawResult 中的全部既有字段并避免重复。
 func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (json.RawMessage, error) {
-	if len(rawResult) == 0 {
+	if len(rawResult) == 0 || len(extra) == 0 {
 		return rawResult, nil
 	}
 
@@ -331,16 +130,6 @@ func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (jso
 		}
 	}
 
-	// 注入解封的官方思维命令
-	for _, c := range NativeAugmentedCommands {
-		lower := strings.ToLower(c.Name)
-		if !seen[lower] {
-			seen[lower] = true
-			merged = append(merged, c)
-		}
-	}
-
-	// 注入自定义技能命令
 	for _, c := range extra {
 		lower := strings.ToLower(c.Name)
 		if !seen[lower] {
@@ -355,43 +144,6 @@ func MergeAvailableCommands(rawResult json.RawMessage, extra []CommandItem) (jso
 	}
 
 	resultMap["availableCommands"] = mergedBytes
-	return json.Marshal(resultMap)
-}
-
-// MergeConfigOptions adds extraOption to configOptions array in rawResult if not already present.
-func MergeConfigOptions(rawResult json.RawMessage, extraOption ConfigOption) (json.RawMessage, error) {
-	if len(rawResult) == 0 {
-		return rawResult, nil
-	}
-
-	var resultMap map[string]json.RawMessage
-	if err := json.Unmarshal(rawResult, &resultMap); err != nil {
-		return rawResult, err
-	}
-
-	var existing []ConfigOption
-	if rawOpts, ok := resultMap["configOptions"]; ok && len(rawOpts) > 0 {
-		_ = json.Unmarshal(rawOpts, &existing)
-	}
-
-	found := false
-	for _, opt := range existing {
-		if strings.EqualFold(opt.ID, extraOption.ID) {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		existing = append(existing, extraOption)
-	}
-
-	mergedBytes, err := json.Marshal(existing)
-	if err != nil {
-		return rawResult, err
-	}
-
-	resultMap["configOptions"] = mergedBytes
 	return json.Marshal(resultMap)
 }
 
@@ -422,14 +174,12 @@ func MergeCommandsUpdateNotification(rawParams json.RawMessage, extra []CommandI
 		_ = json.Unmarshal(rawSU, &sessionUpdate)
 	}
 
-	rawCmds, hasCommands := updateMap["availableCommands"]
-	// 满足显式 sessionUpdate 类型或者直接包含 availableCommands 数组字段
-	if sessionUpdate != "available_commands_update" && (!hasCommands || len(rawCmds) == 0) {
+	if sessionUpdate != "available_commands_update" {
 		return rawParams, false, nil
 	}
 
 	var existing []CommandItem
-	if hasCommands && len(rawCmds) > 0 {
+	if rawCmds, ok := updateMap["availableCommands"]; ok && len(rawCmds) > 0 {
 		_ = json.Unmarshal(rawCmds, &existing)
 	}
 
@@ -444,16 +194,6 @@ func MergeCommandsUpdateNotification(rawParams json.RawMessage, extra []CommandI
 		}
 	}
 
-	// 合并解封的官方思维命令 (grill-me, goal, compact)
-	for _, c := range NativeAugmentedCommands {
-		lower := strings.ToLower(c.Name)
-		if !seen[lower] {
-			seen[lower] = true
-			merged = append(merged, c)
-		}
-	}
-
-	// 合并本地技能命令
 	for _, c := range extra {
 		lower := strings.ToLower(c.Name)
 		if !seen[lower] {
