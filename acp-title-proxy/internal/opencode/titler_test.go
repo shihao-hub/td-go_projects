@@ -21,8 +21,8 @@ func TestQueryDB(t *testing.T) {
 	inj := proxy.NewInjector(os.Stdout)
 	titler := NewTitler(cfg, inj)
 
-	// Query an existing session
-	// ses_e8984926bffeLAdxhRnZJ33B5P was found earlier
+	// 查询一个已存在的会话
+	// ses_e8984926bffeLAdxhRnZJ33B5P 为先前已定位到的会话 ID
 	title, found := titler.queryDB("ses_e8984926bffeLAdxhRnZJ33B5P")
 	if !found {
 		t.Log("Session not found, but queryDB ran without panic")

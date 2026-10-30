@@ -46,7 +46,7 @@ func NewTitler(cfg *config.AGYConfig, inj *proxy.Injector, st *store.Store) *Tit
 	}
 }
 
-// SetZedDBPath overrides the default Zed database path (mainly for unit tests).
+// SetZedDBPath 覆盖默认的 Zed 数据库路径（主要用于单元测试）。
 func (t *Titler) SetZedDBPath(path string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -60,7 +60,7 @@ func (t *Titler) getZedDBPath() string {
 }
 
 func (t *Titler) OnSessionNew(sessionID string) {
-	// Ready to accept first prompt for new session
+	// 就绪，等待新会话的首个 prompt
 }
 
 func (t *Titler) OnPrompt(sessionID string, prompt string) {
@@ -70,14 +70,14 @@ func (t *Titler) OnPrompt(sessionID string, prompt string) {
 	}
 
 	t.mu.Lock()
-	// 1. Fast in-memory check or active in-flight request
+	// 1. 内存快路径：已命名或请求已在处理中
 	if t.titledSessions[sessionID] || t.activeRequests[sessionID] {
 		t.mu.Unlock()
 		return
 	}
 	t.mu.Unlock()
 
-	// 2. Persistent store check (survived across process restarts)
+	// 2. 查询持久化存储（跨进程重启存活）
 	if t.store != nil && t.store.IsTitled(sessionID) {
 		t.mu.Lock()
 		t.titledSessions[sessionID] = true
@@ -85,7 +85,7 @@ func (t *Titler) OnPrompt(sessionID string, prompt string) {
 		return
 	}
 
-	// 3. Zed SQLite database check (double-check if session already has valid title in Zed)
+	// 3. 查询 Zed SQLite 数据库（复核该会话在 Zed 中是否已有有效标题）
 	if title, found := store.CheckZedDBTitle(sessionID, t.getZedDBPath()); found && title != "" {
 		t.mu.Lock()
 		t.titledSessions[sessionID] = true
@@ -96,7 +96,7 @@ func (t *Titler) OnPrompt(sessionID string, prompt string) {
 		return
 	}
 
-	// 4. Truly a new session requiring initial title generation
+	// 4. 确认为新会话，需要生成初始标题
 	t.mu.Lock()
 	if t.titledSessions[sessionID] || t.activeRequests[sessionID] {
 		t.mu.Unlock()
@@ -131,7 +131,7 @@ func (t *Titler) generateAndInjectTitle(sessionID, prompt string) {
 	}
 }
 
-// CallLLMDirect tries configured providers in priority order.
+// CallLLMDirect 按优先级顺序尝试已配置的模型提供方。
 func (t *Titler) CallLLMDirect(prompt string) (string, error) {
 	if len(t.cfg.Providers) == 0 {
 		return "", fmt.Errorf("no LLM providers configured")

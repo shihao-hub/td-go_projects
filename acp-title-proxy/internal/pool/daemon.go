@@ -59,11 +59,11 @@ func (d *Daemon) Start(stopCh <-chan struct{}) error {
 	d.listener = l
 	fmt.Printf("[Pre-warm Daemon] Listening on %s\n", addr)
 
-	// Start background replenisher loop
+	// 启动后台补充循环
 	go d.replenishLoop(stopCh)
 	d.triggerReplenish()
 
-	// Accept loop
+	// 接受连接循环
 	go func() {
 		<-stopCh
 		d.mu.Lock()
@@ -71,7 +71,7 @@ func (d *Daemon) Start(stopCh <-chan struct{}) error {
 		if d.listener != nil {
 			_ = d.listener.Close()
 		}
-		// Terminate all remaining workers
+		// 终止所有剩余 worker
 		for w := range d.workers {
 			_ = w.Close()
 		}
@@ -114,12 +114,12 @@ func (d *Daemon) replenishLoop(stopCh <-chan struct{}) {
 			}
 			d.mu.Unlock()
 
-			// Check if we already have a standby worker
+			// 检查是否已有待命 worker
 			if len(d.standbyChan) > 0 {
 				continue
 			}
 
-			// Pre-warm a new worker
+			// 预热一个新 worker
 			w, err := d.createAndWarmupWorker(stopCh)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[Pre-warm Daemon] Failed to pre-warm worker: %v\n", err)
@@ -148,7 +148,7 @@ func (d *Daemon) createAndWarmupWorker(stopCh <-chan struct{}) (*Worker, error) 
 
 	fmt.Printf("[Pre-warm Daemon] Starting new AGY instance for pre-warming: %s\n", exePath)
 
-	// Automatically inject proxy and Zed CA certificates into pre-warmed worker
+	// 自动向预热的 worker 注入代理与 Zed CA 证书
 	env := os.Environ()
 	ensureEnv(&env, "HTTP_PROXY", "http://127.0.0.1:7897")
 	ensureEnv(&env, "HTTPS_PROXY", "http://127.0.0.1:7897")
@@ -166,9 +166,9 @@ func (d *Daemon) createAndWarmupWorker(stopCh <-chan struct{}) (*Worker, error) 
 		return nil, err
 	}
 
-	// Proactively perform ACP initialize handshake in the background.
-	// This forces AGY's Python engine to import modules, resolve auth, and cache
-	// capabilities in advance (takes ~6s in background, so front-end hits in 0ms).
+	// 在后台主动完成 ACP initialize 握手，
+	// 强制 AGY 的 Python 引擎预先导入模块、解析鉴权并缓存
+	// 能力（后台约需 6 秒，前端命中时耗时 0ms）。
 	initReq := []byte("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":1,\"clientInfo\":{\"name\":\"Daemon-Prewarm\",\"version\":\"1.0\"}}}\n")
 	if _, err := w.Stdin.Write(initReq); err != nil {
 		_ = w.Close()
@@ -201,7 +201,7 @@ func (d *Daemon) createAndWarmupWorker(stopCh <-chan struct{}) (*Worker, error) 
 			_ = w.Close()
 			return nil, fmt.Errorf("worker initialize failed: %w", err)
 		}
-		// Warmup completed successfully and worker is hot!
+		// 预热成功，worker 已就绪！
 		return w, nil
 	case <-time.After(25 * time.Second):
 		_ = w.Close()
@@ -248,7 +248,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		})
 
 	case "acquire":
-		// Auto-version upgrade detection: Check if client executable was updated
+		// 版本自愈检测：检查客户端可执行文件是否已更新
 		if req.ExeModTime > 0 && d.exeModTime > 0 && req.ExeModTime != d.exeModTime {
 			fmt.Printf("[Pre-warm Daemon] Detected updated proxy binary (client: %d, daemon: %d). Retiring outdated daemon.\n", req.ExeModTime, d.exeModTime)
 			_ = sendResponse(conn, PoolResponse{
@@ -263,16 +263,16 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			return
 		}
 
-		// Try to acquire standby worker
+		// 尝试获取待命 worker
 		var worker *Worker
 		select {
 		case worker = <-d.standbyChan:
 		case <-time.After(500 * time.Millisecond):
-			// No standby worker available right now
+			// 当前没有可用的待命 worker
 		}
 
 		if worker != nil {
-			// Auto-upgrade detection: Check if Zed downloaded a newer AGY version
+			// 自动升级检测：检查 Zed 是否已下载更新的 AGY 版本
 			if latestExe, _, err := finder.FindAGY(d.cfg.AGY.Executable); err == nil && latestExe != "" && worker.ExePath != latestExe {
 				fmt.Printf("[Pre-warm Daemon] Detected new AGY version: %s (was %s). Discarding outdated worker.\n", latestExe, worker.ExePath)
 				_ = worker.Close()
@@ -287,7 +287,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			return
 		}
 
-		// Success! Notify client
+		// 成功，通知客户端
 		if err := sendResponse(conn, PoolResponse{Status: "ok", Msg: "worker_assigned"}); err != nil {
 			_ = worker.Close()
 			d.removeWorker(worker)
@@ -295,10 +295,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			return
 		}
 
-		// Trigger background replenishment for next session
+		// 触发后台补充，为下一个会话做准备
 		d.triggerReplenish()
 
-		// Splice streams between TCP conn and Worker process
+		// 在 TCP 连接与 worker 进程之间双向转发数据
 		d.splice(conn, reader, worker)
 		d.removeWorker(worker)
 
@@ -324,21 +324,21 @@ func (d *Daemon) splice(conn net.Conn, reader io.Reader, worker *Worker) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Inbound: client (via reader) -> worker.Stdin
+	// 入向：客户端（经 reader）-> worker.Stdin
 	go func() {
 		defer wg.Done()
 		defer func() {
 			if worker.Stdin != nil {
 				_ = worker.Stdin.Close()
 			}
-			abort() // Client disconnected (EOF or error), trigger immediate abort
+			abort() // 客户端断开（EOF 或错误），立即中止
 		}()
 
-		// Directly copy from reader which handles pre-buffered bytes automatically
+		// 直接从 reader 拷贝，已预缓冲的字节会被自动带走
 		_, _ = io.Copy(worker.Stdin, reader)
 	}()
 
-	// Outbound: worker.Stdout (via StdoutReader) -> client conn
+	// 出向：worker.Stdout（经 StdoutReader）-> 客户端连接
 	go func() {
 		defer wg.Done()
 		defer abort()
@@ -346,12 +346,12 @@ func (d *Daemon) splice(conn net.Conn, reader io.Reader, worker *Worker) {
 		_, _ = io.Copy(conn, worker.StdoutReader)
 	}()
 
-	// Wait until either direction finishes
+	// 等待任一方向结束
 	select {
 	case <-done:
 	}
 
-	// Terminate worker if it hasn't exited cleanly
+	// 若 worker 未正常退出则强制终止
 	killTimer := time.AfterFunc(300*time.Millisecond, func() {
 		_ = worker.Close()
 	})

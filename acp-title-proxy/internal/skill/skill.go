@@ -13,20 +13,20 @@ import (
 	"language_projects/go_projects/acp-title-proxy/internal/protocol"
 )
 
-// Skill represents a discovered skill with its metadata and command definition.
+// Skill 表示一个已发现的技能及其元数据与命令定义。
 type Skill struct {
-	Name           string // e.g. "sh-pocock-workflow"
-	CommandName    string // e.g. "sh-pocock-workflow" or "skill:sh-pocock-workflow"
-	Path           string // Absolute path to SKILL.md
-	Description    string // Cleaned short description for UI tooltip
+	Name           string // 例如 "sh-pocock-workflow"
+	CommandName    string // 例如 "sh-pocock-workflow" 或 "skill:sh-pocock-workflow"
+	Path           string // SKILL.md 的绝对路径
+	Description    string // 清理后的简短描述，供 UI 提示使用
 	RawDescription string
 }
 
-// Manager manages discovering, caching and matching skills.
+// Manager 负责技能的发现、缓存与匹配。
 type Manager struct {
 	cfg        *config.SkillsConfig
 	mu         sync.RWMutex
-	skills     map[string]*Skill // key: lower-cased CommandName
+	skills     map[string]*Skill // 键为小写化的 CommandName
 	skillsList []*Skill
 	lastScan   time.Time
 }
@@ -46,7 +46,7 @@ func NewManager(cfg *config.SkillsConfig) *Manager {
 	return m
 }
 
-// Scan traverses configured directories and discovers all valid skills.
+// Scan 遍历配置目录并发现所有有效技能。
 func (m *Manager) Scan() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -72,7 +72,7 @@ func (m *Manager) Scan() error {
 			}
 
 			dirName := entry.Name()
-			// Ignore hidden directories, test hooks and python caches
+			// 忽略隐藏目录、测试钩子与 Python 缓存
 			if strings.HasPrefix(dirName, ".") || dirName == "__pycache__" || dirName == "node_modules" {
 				continue
 			}
@@ -98,7 +98,7 @@ func (m *Manager) Scan() error {
 
 			lowerCmdName := strings.ToLower(cmdName)
 			lowerSkillName := strings.ToLower(skillName)
-			// First discovered (earlier dir in precedence) wins
+			// 先发现者优先（目录顺序即优先级）
 			if _, exists := newSkills[lowerCmdName]; exists {
 				continue
 			}
@@ -119,7 +119,7 @@ func (m *Manager) Scan() error {
 		}
 	}
 
-	// Sort skills alphabetically by CommandName for clean UI display
+	// 按 CommandName 字母序排序，便于 UI 展示
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].CommandName < list[j].CommandName
 	})
@@ -130,7 +130,7 @@ func (m *Manager) Scan() error {
 	return nil
 }
 
-// GetCommandItems returns protocol.CommandItem slice for Zed's availableCommands.
+// GetCommandItems 返回供 Zed 的 availableCommands 使用的 protocol.CommandItem 列表。
 func (m *Manager) GetCommandItems() []protocol.CommandItem {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -141,7 +141,7 @@ func (m *Manager) GetCommandItems() []protocol.CommandItem {
 
 	items := make([]protocol.CommandItem, 0, len(m.skillsList)+1)
 
-	// Add generic /skill command
+	// 追加通用 /skill 命令
 	items = append(items, protocol.CommandItem{
 		Name:        "skill",
 		Description: "指定并激活特定技能 (用法: /skill <name> [任务说明])",
@@ -157,7 +157,7 @@ func (m *Manager) GetCommandItems() []protocol.CommandItem {
 	return items
 }
 
-// MatchAndRewrite checks if the prompt invokes a skill and rewrites it with prompt augmentation.
+// MatchAndRewrite 判断 prompt 是否调用技能，并做技能增强后的重写。
 func (m *Manager) MatchAndRewrite(rawPrompt string) (bool, string, string, *Skill) {
 	if !m.cfg.Enabled || !m.cfg.AutoInjectPrompt {
 		return false, rawPrompt, rawPrompt, nil
@@ -183,7 +183,7 @@ func (m *Manager) MatchAndRewrite(rawPrompt string) (bool, string, string, *Skil
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	// Mode 1: Generic syntax "/skill <name> [user task]"
+	// 模式 1：通用语法 "/skill <name> [用户任务]"
 	if lowerFirstToken == "skill" && len(fields) >= 2 {
 		skillArg := strings.ToLower(fields[1])
 		if s, ok := m.skills[skillArg]; ok {
@@ -203,7 +203,7 @@ func (m *Manager) MatchAndRewrite(rawPrompt string) (bool, string, string, *Skil
 		}
 	}
 
-	// Mode 2: Direct skill command "/sh-pocock-workflow [user task]"
+	// 模式 2：直接技能命令 "/sh-pocock-workflow [用户任务]"
 	if targetSkill == nil {
 		if s, ok := m.skills[lowerFirstToken]; ok {
 			targetSkill = s
@@ -221,7 +221,7 @@ func (m *Manager) MatchAndRewrite(rawPrompt string) (bool, string, string, *Skil
 		return false, rawPrompt, rawPrompt, nil
 	}
 
-	// Build augmented prompt
+	// 构造增强后的 prompt
 	rewritten := m.buildPrompt(targetSkill, userTask)
 	return true, rewritten, userTask, targetSkill
 }

@@ -13,7 +13,7 @@ import (
 	"language_projects/go_projects/acp-title-proxy/internal/skill"
 )
 
-// duplexPipe creates a bidirectional in-memory ReadWriteCloser pair.
+// duplexPipe 创建一对双向的内存 ReadWriteCloser。
 type duplexPipe struct {
 	reader *io.PipeReader
 	writer *io.PipeWriter
@@ -33,7 +33,7 @@ func (d *duplexPipe) Close() error {
 }
 
 func TestE2E_ProxySkillAugmentation(t *testing.T) {
-	// Initialize real skill manager with default dirs
+	// 使用默认目录初始化真实的技能管理器
 	cfg := &config.SkillsConfig{
 		Enabled:          true,
 		Prefix:           "skill:",
@@ -46,14 +46,14 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatal("expected at least 1 skill discovered")
 	}
 
-	// Create duplex stream simulating Child (e.g. AGY server)
+	// 创建双工流，模拟子进程（如 AGY server）
 	childToProxyR, childToProxyW := io.Pipe()
 	proxyToChildR, proxyToChildW := io.Pipe()
 
 	proxyChildStream := &duplexPipe{reader: childToProxyR, writer: proxyToChildW}
 	mockChildStream := &duplexPipe{reader: proxyToChildR, writer: childToProxyW}
 
-	// Create injector writing to simulated Zed Stdout
+	// 创建写入模拟 Zed Stdout 的 Injector
 	var zedStdout bytes.Buffer
 	inj := NewInjector(&zedStdout)
 
@@ -64,12 +64,12 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 	runner := NewRunner("", nil, nil, skillMgr)
 	runner.Stdin = zedStdinR
 
-	// Run stream in background
+	// 在后台运行流处理
 	go func() {
 		_ = runner.RunStream(proxyChildStream, inj)
 	}()
 
-	// 1. Child sends session/new response (simulating native agy response with 3 commands)
+	// 1. 子进程返回 session/new 响应（模拟原生 agy 的 3 条命令）
 	nativeNewResp := protocol.JSONRPCMessage{
 		JSONRPC: "2.0",
 		ID:      rawID(1),
@@ -86,7 +86,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 	respBytes = append(respBytes, '\n')
 	_, _ = mockChildStream.Write(respBytes)
 
-	// Wait for Zed to receive augmented response
+	// 等待 Zed 收到增强后的响应
 	time.Sleep(100 * time.Millisecond)
 
 	zedLines := strings.Split(strings.TrimSpace(zedStdout.String()), "\n")
@@ -111,7 +111,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatalf("unexpected sessionId: %s", zedResult.SessionID)
 	}
 
-	// Must have native 3 commands + generic skill + discovered skills
+	// 应包含原生 3 条命令 + 通用 skill 命令 + 已发现的技能
 	if len(zedResult.AvailableCommands) < 4 {
 		t.Fatalf("expected >= 4 commands, got %d", len(zedResult.AvailableCommands))
 	}
@@ -133,7 +133,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatal("generic 'skill' command not injected!")
 	}
 
-	// 2. Test Inbound: User invokes a skill via prefixed /skill:name
+	// 2. 入向测试：用户通过带前缀的 /skill:name 调用技能
 	userPromptPrefixed := []byte(`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/skill:sh-pocock-workflow 帮我审查架构"}}` + "\n")
 	processedPrefixed := runner.processInbound(userPromptPrefixed)
 
@@ -148,7 +148,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatalf("expected prompt injection for /skill:sh-pocock-workflow, got:\n%s", extractedPrefixed)
 	}
 
-	// 2b. Test Inbound: User invokes a skill via generic /skill name
+	// 2b. 入向测试：用户通过通用 /skill name 调用技能
 	userPromptReq := []byte(`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/skill sh-pocock-workflow 帮我审查架构"}}` + "\n")
 	processedInbound := runner.processInbound(userPromptReq)
 
@@ -173,7 +173,7 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatalf("expected SKILL.md path in prompt, got:\n%s", extractedPrompt)
 	}
 
-	// 3. Test Inbound: User invokes native /plan command
+	// 3. 入向测试：用户调用原生 /plan 命令
 	planReq := []byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/plan 仔细规划"}}` + "\n")
 	processedPlan := runner.processInbound(planReq)
 

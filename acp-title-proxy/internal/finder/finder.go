@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-// FindOpenCode locates the opencode executable.
+// FindOpenCode 定位 opencode 可执行文件。
 func FindOpenCode(customPath string) (string, []string, error) {
 	if customPath != "" {
 		if _, err := os.Stat(customPath); err == nil {
@@ -15,18 +15,18 @@ func FindOpenCode(customPath string) (string, []string, error) {
 		}
 	}
 
-	// 1. Check Zed registry
+	// 1. 查询 Zed 注册表
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData != "" {
 		pattern := filepath.Join(localAppData, "Zed", "external_agents", "registry", "opencode", "*", "opencode.exe")
 		matches, err := filepath.Glob(pattern)
 		if err == nil && len(matches) > 0 {
-			// Pick latest match
+			// 取版本最新的匹配项
 			return matches[len(matches)-1], []string{"acp"}, nil
 		}
 	}
 
-	// 2. Check PATH
+	// 2. 查询 PATH
 	if path, err := exec.LookPath("opencode"); err == nil {
 		return path, []string{"acp"}, nil
 	}
@@ -34,7 +34,7 @@ func FindOpenCode(customPath string) (string, []string, error) {
 	return "", nil, fmt.Errorf("could not find opencode.exe in Zed registry or system PATH")
 }
 
-// FindAGY locates the agy_acp_server executable.
+// FindAGY 定位 agy_acp_server 可执行文件。
 func FindAGY(customPath string) (string, []string, error) {
 	if customPath != "" {
 		if _, err := os.Stat(customPath); err == nil {
@@ -42,18 +42,18 @@ func FindAGY(customPath string) (string, []string, error) {
 		}
 	}
 
-	// 1. Check Zed registry
+	// 1. 查询 Zed 注册表
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData != "" {
 		pattern := filepath.Join(localAppData, "Zed", "external_agents", "registry", "antigravity-acp", "*", "agy_acp_server.exe")
 		matches, err := filepath.Glob(pattern)
 		if err == nil && len(matches) > 0 {
-			// Pick latest match
+			// 取版本最新的匹配项
 			return matches[len(matches)-1], nil, nil
 		}
 	}
 
-	// 2. Check PATH
+	// 2. 查询 PATH
 	if path, err := exec.LookPath("agy_acp_server"); err == nil {
 		return path, nil, nil
 	}

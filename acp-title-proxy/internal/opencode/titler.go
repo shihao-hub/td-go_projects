@@ -31,7 +31,7 @@ func NewTitler(cfg *config.OpenCodeConfig, inj *proxy.Injector) *Titler {
 }
 
 func (t *Titler) OnSessionNew(sessionID string) {
-	// Ready to accept prompts for this session
+	// 就绪，等待该会话的 prompt
 }
 
 func (t *Titler) OnPrompt(sessionID string, prompt string) {
@@ -68,7 +68,7 @@ func (t *Titler) pollSessionTitle(sessionID string) {
 
 		title, found := t.queryDB(sessionID)
 		if found && title != "" && !strings.HasPrefix(title, "New session") {
-			// Found valid title! Push to Zed.
+			// 找到有效标题，推送到 Zed。
 			if err := t.injector.InjectTitle(sessionID, title); err == nil {
 				t.mu.Lock()
 				t.titledSessions[sessionID] = true
@@ -92,7 +92,7 @@ func (t *Titler) queryDB(sessionID string) (string, bool) {
 	defer db.Close()
 
 	var title sql.NullString
-	// OpenCode v2.2+ uses session_v2, legacy uses session
+	// OpenCode v2.2+ 使用 session_v2 表，旧版本使用 session 表
 	query := "SELECT title FROM session_v2 WHERE id = ? LIMIT 1"
 	err = db.QueryRow(query, sessionID).Scan(&title)
 	if err != nil || !title.Valid {

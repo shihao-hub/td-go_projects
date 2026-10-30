@@ -12,7 +12,7 @@ func TestStorePersistence(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "sub", "titled_sessions.json")
 
-	// 1. First run: create and mark
+	// 1. 首次运行：创建并登记
 	s1, err := NewStore(storePath)
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
@@ -30,7 +30,7 @@ func TestStorePersistence(t *testing.T) {
 		t.Errorf("expected sess_123 to be titled")
 	}
 
-	// 2. Second run: simulate process restart by loading from disk
+	// 2. 第二次运行：从磁盘加载，模拟进程重启
 	s2, err := NewStore(storePath)
 	if err != nil {
 		t.Fatalf("NewStore reload failed: %v", err)
@@ -76,25 +76,25 @@ func TestCheckZedDBTitle(t *testing.T) {
 	}
 	db.Close()
 
-	// Case 1: Session with title_override
+	// 场景 1：会话存在 title_override
 	title, ok := CheckZedDBTitle("sess_with_override", dbPath)
 	if !ok || title != "人工覆盖标题" {
 		t.Errorf("expected '人工覆盖标题', got %q (ok=%v)", title, ok)
 	}
 
-	// Case 2: Session with title
+	// 场景 2：会话存在 title
 	title, ok = CheckZedDBTitle("sess_with_title", dbPath)
 	if !ok || title != "分析acp标题代理项目" {
 		t.Errorf("expected '分析acp标题代理项目', got %q (ok=%v)", title, ok)
 	}
 
-	// Case 3: Session with empty title
+	// 场景 3：会话标题为空
 	_, ok = CheckZedDBTitle("sess_empty", dbPath)
 	if ok {
 		t.Errorf("expected sess_empty to return false")
 	}
 
-	// Case 4: Non-existent session
+	// 场景 4：会话不存在
 	_, ok = CheckZedDBTitle("sess_not_found", dbPath)
 	if ok {
 		t.Errorf("expected sess_not_found to return false")

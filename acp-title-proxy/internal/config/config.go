@@ -31,9 +31,9 @@ type ProviderConfig struct {
 	Name            string `json:"name"`
 	Enabled         bool   `json:"enabled"`
 	BaseURL         string `json:"base_url"`
-	APIKey          string `json:"api_key"` // can be "auto" to read from ~/.local/share/opencode/auth.json
+	APIKey          string `json:"api_key"` // 可设为 "auto"，从 ~/.local/share/opencode/auth.json 读取
 	Model           string `json:"model"`
-	ReasoningEffort string `json:"reasoning_effort,omitempty"` // "none", "low", etc.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"` // 取值如 "none"、"low" 等
 	TimeoutMs       int    `json:"timeout_ms"`
 }
 
@@ -41,7 +41,7 @@ type AGYConfig struct {
 	Executable string           `json:"executable"`
 	Providers  []ProviderConfig `json:"providers"`
 
-	// Legacy single-provider fields (for backward compatibility)
+	// 旧的单提供方配置字段（保留向后兼容）
 	BaseURL   string `json:"base_url,omitempty"`
 	APIKey    string `json:"api_key,omitempty"`
 	Model     string `json:"model,omitempty"`
@@ -86,7 +86,7 @@ func DefaultConfig() *Config {
 	}
 }
 
-// DefaultSkillDirs returns standard search paths for skills.
+// DefaultSkillDirs 返回技能目录的标准搜索路径。
 func DefaultSkillDirs() []string {
 	userProfile := os.Getenv("USERPROFILE")
 	if userProfile == "" {
@@ -98,7 +98,7 @@ func DefaultSkillDirs() []string {
 	}
 }
 
-// ExpandEnv replaces %VAR% or $VAR with environment values.
+// ExpandEnv 将 %VAR% 或 $VAR 替换为环境变量值。
 func ExpandEnv(path string) string {
 	if strings.Contains(path, "%") {
 		parts := strings.Split(path, "%")
@@ -110,7 +110,7 @@ func ExpandEnv(path string) string {
 	return os.ExpandEnv(path)
 }
 
-// ResolveAuthKey reads the key for a provider from ~/.local/share/opencode/auth.json if needed.
+// ResolveAuthKey 按需从 ~/.local/share/opencode/auth.json 读取指定提供方的密钥。
 func ResolveAuthKey(providerName string) string {
 	home := os.Getenv("USERPROFILE")
 	if home == "" {
@@ -136,7 +136,7 @@ func ResolveAuthKey(providerName string) string {
 	return ""
 }
 
-// LoadConfig searches for config.json in several known locations.
+// LoadConfig 在若干已知位置查找 config.json。
 func LoadConfig() (*Config, string, error) {
 	cfg := DefaultConfig()
 
@@ -172,7 +172,7 @@ func LoadConfig() (*Config, string, error) {
 		cfg.OpenCode.MaxPolls = 8
 	}
 
-	// Migrate legacy single provider configuration if present and providers list is empty
+	// 若存在旧的单提供方配置且 providers 列表为空，则迁移为多提供方结构
 	if len(cfg.AGY.Providers) == 0 && cfg.AGY.BaseURL != "" {
 		cfg.AGY.Providers = append(cfg.AGY.Providers, ProviderConfig{
 			Name:      "legacy",
@@ -184,7 +184,7 @@ func LoadConfig() (*Config, string, error) {
 		})
 	}
 
-	// Resolve "auto" keys and ensure timeout
+	// 解析 "auto" 密钥并补全超时默认值
 	for i := range cfg.AGY.Providers {
 		p := &cfg.AGY.Providers[i]
 		if p.TimeoutMs <= 0 {

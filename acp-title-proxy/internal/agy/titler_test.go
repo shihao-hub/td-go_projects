@@ -24,7 +24,7 @@ func TestTitlerSkipIfTitledInStore(t *testing.T) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
-	// Pre-record session as titled
+	// 预先登记该会话已命名
 	if err := st.MarkTitled("sess_existing", "已有的历史标题"); err != nil {
 		t.Fatalf("failed to mark titled: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestTitlerSkipIfTitledInStore(t *testing.T) {
 	// User sends continuation message "继续"
 	titler.OnPrompt("sess_existing", "继续")
 
-	// Sleep briefly to ensure no async goroutine launched
+	// 短暂休眠，确认没有异步 goroutine 被拉起
 	time.Sleep(50 * time.Millisecond)
 
 	if buf.Len() > 0 {
@@ -49,7 +49,7 @@ func TestTitlerSkipIfTitledInZedDB(t *testing.T) {
 	storePath := filepath.Join(tempDir, "store.json")
 	mockZedDB := filepath.Join(tempDir, "zed.sqlite")
 
-	// Create mock Zed DB with an existing thread
+	// 构造包含已有线程的模拟 Zed 数据库
 	db, err := sql.Open("sqlite", mockZedDB)
 	if err != nil {
 		t.Fatalf("failed to open mock zed db: %v", err)
@@ -83,12 +83,12 @@ func TestTitlerSkipIfTitledInZedDB(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	// 1. Must NOT inject any title into Zed
+	// 1. 绝不允许向 Zed 注入任何标题
 	if buf.Len() > 0 {
 		t.Fatalf("expected no injection for session already existing in Zed DB, but got: %s", buf.String())
 	}
 
-	// 2. Must backfill store so future checks hit store fast-path
+	// 2. 必须回填存储，使后续检查命中存储快路径
 	if !st.IsTitled("sess_zed_hist") {
 		t.Fatalf("expected sess_zed_hist to be backfilled into store")
 	}
@@ -102,11 +102,11 @@ func TestTitlerSurvivesProcessRestartSimulation(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.json")
 
-	// Session 1: Process 1 titles the session
+	// 会话 1：进程 1 为该会话命名
 	st1, _ := store.NewStore(storePath)
 	_ = st1.MarkTitled("sess_reboot_test", "首条提问总结出来的标题")
 
-	// Session 2: Process 2 starts up fresh (simulating Zed or agent reboot)
+	// 会话 2：进程 2 全新启动（模拟 Zed 或 agent 重启）
 	st2, err := store.NewStore(storePath)
 	if err != nil {
 		t.Fatalf("failed to reload store: %v", err)
@@ -157,7 +157,7 @@ func TestFallbackToDeepSeek(t *testing.T) {
 		t.Skip("config not loaded")
 	}
 
-	// Disable opencode-go to test fallback to deepseek-official
+	// 禁用 opencode-go，验证回退到 deepseek-official
 	mockCfg := *cfg
 	mockCfg.AGY.Providers = make([]config.ProviderConfig, len(cfg.AGY.Providers))
 	copy(mockCfg.AGY.Providers, cfg.AGY.Providers)

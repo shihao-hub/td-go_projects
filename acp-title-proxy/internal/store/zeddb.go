@@ -10,7 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// GetDefaultZedDBPath returns the standard path to Zed's SQLite database on Windows.
+// GetDefaultZedDBPath 返回 Windows 上 Zed SQLite 数据库的标准路径。
 func GetDefaultZedDBPath() string {
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {
@@ -19,8 +19,8 @@ func GetDefaultZedDBPath() string {
 	return filepath.Join(localAppData, "Zed", "db", "0-stable", "db.sqlite")
 }
 
-// CheckZedDBTitle checks if the given sessionID already exists in Zed's sidebar_threads table
-// and has an established valid title (either title or title_override).
+// CheckZedDBTitle 检查该会话是否已存在于 Zed 的 sidebar_threads 表，
+// 且已建立有效标题（title 或 title_override）。
 func CheckZedDBTitle(sessionID string, customDBPath string) (string, bool) {
 	if sessionID == "" {
 		return "", false

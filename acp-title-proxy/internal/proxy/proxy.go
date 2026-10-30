@@ -90,16 +90,16 @@ func (r *Runner) Run(inj *Injector) error {
 	var wg sync.WaitGroup
 	wg.Add(3)
 
-	// 1. Forward Stderr directly
+	// 1. 直接转发 Stderr
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(os.Stderr, childStderr)
 	}()
 
-	// 2. Inbound: Zed Stdin -> Child Stdin
+	// 2. 入向：Zed Stdin -> 子进程 Stdin
 	go func() {
 		defer wg.Done()
-		defer abort() // Zed Stdin closed -> terminate child immediately
+		defer abort() // Zed Stdin 关闭 -> 立即终止子进程
 
 		reader := bufio.NewReaderSize(r.getStdin(), 1024*1024)
 		for {
@@ -116,7 +116,7 @@ func (r *Runner) Run(inj *Injector) error {
 		}
 	}()
 
-	// 3. Outbound: Child Stdout -> Zed Stdout (via Injector)
+	// 3. 出向：子进程 Stdout -> Zed Stdout（经 Injector）
 	go func() {
 		defer wg.Done()
 		defer abort()
@@ -146,7 +146,7 @@ func (r *Runner) Run(inj *Injector) error {
 	return err
 }
 
-// RunStream bridges Zed stdio with an existing duplex stream (e.g. connected to pre-warm pool).
+// RunStream 打通 Zed stdio 与已有的双工流（如已连接预热池）。
 func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 	defer stream.Close()
 
@@ -163,10 +163,10 @@ func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// 1. Inbound: Zed Stdin -> Stream
+	// 1. 入向：Zed Stdin -> 双工流
 	go func() {
 		defer wg.Done()
-		defer abort() // Zed Stdin closed -> close stream and abort
+		defer abort() // Zed Stdin 关闭 -> 关闭双工流并中止
 
 		reader := bufio.NewReaderSize(r.getStdin(), 1024*1024)
 		for {
@@ -183,7 +183,7 @@ func (r *Runner) RunStream(stream io.ReadWriteCloser, inj *Injector) error {
 		}
 	}()
 
-	// 2. Outbound: Stream -> Zed Stdout (via Injector)
+	// 2. 出向：双工流 -> Zed Stdout（经 Injector）
 	go func() {
 		defer wg.Done()
 		defer abort()
@@ -224,11 +224,11 @@ func (r *Runner) processInbound(line []byte) []byte {
 			promptText := protocol.ExtractPromptText(params.Prompt)
 			effectivePrompt := promptText
 
-			// Check skill matching and prompt rewrite
+			// 检查技能匹配并重写 prompt
 			if r.SkillMgr != nil && promptText != "" {
 				matched, rewritten, task, _ := r.SkillMgr.MatchAndRewrite(promptText)
 				if matched {
-					// 1. Pass clean user task to Titler so session title is meaningful
+					// 1. 向 Titler 传入干净的用户任务，保证会话标题有意义
 					if r.Titler != nil {
 						titlerPrompt := task
 						if titlerPrompt == "" {
@@ -237,7 +237,7 @@ func (r *Runner) processInbound(line []byte) []byte {
 						r.Titler.OnPrompt(params.SessionID, titlerPrompt)
 					}
 
-					// 2. Rewrite prompt with skill injection
+					// 2. 注入技能并重写 prompt
 					if newPromptRaw, err := protocol.RewritePrompt(params.Prompt, rewritten); err == nil {
 						params.Prompt = newPromptRaw
 						if newParamsRaw, err := json.Marshal(params); err == nil {
@@ -252,7 +252,7 @@ func (r *Runner) processInbound(line []byte) []byte {
 				}
 			}
 
-			// If no skill matched, notify Titler normally
+			// 未匹配到技能时，按常规通知 Titler
 			if r.Titler != nil && effectivePrompt != "" {
 				r.Titler.OnPrompt(params.SessionID, effectivePrompt)
 			}
@@ -268,7 +268,7 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 		return line
 	}
 
-	// 1. Detect session/new response: {"id": 1, "result": {"sessionId": "...", "availableCommands": [...]}}
+	// 1. 识别 session/new 响应：{"id": 1, "result": {"sessionId": "...", "availableCommands": [...]}}
 	if msg.ID != nil && len(msg.Result) > 0 {
 		var res protocol.SessionNewResult
 		if err := json.Unmarshal(msg.Result, &res); err == nil && res.SessionID != "" {
@@ -276,7 +276,7 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 				r.Titler.OnSessionNew(res.SessionID)
 			}
 
-			// Merge custom skills into availableCommands
+			// 将自定义技能合并进 availableCommands
 			if r.SkillMgr != nil {
 				skills := r.SkillMgr.GetCommandItems()
 				if len(skills) > 0 {
@@ -292,7 +292,7 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 		}
 	}
 
-	// 2. Detect session/update notification: available_commands_update
+	// 2. 识别 session/update 通知：available_commands_update
 	if msg.Method == "session/update" && len(msg.Params) > 0 {
 		if r.SkillMgr != nil {
 			skills := r.SkillMgr.GetCommandItems()

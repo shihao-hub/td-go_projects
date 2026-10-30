@@ -62,7 +62,7 @@ description: 这是一个测试技能
 
 	mgr := NewManager(cfg)
 	commands := mgr.GetCommandItems()
-	if len(commands) < 2 { // "skill" + "skill:my-test-skill"
+	if len(commands) < 2 { // "skill" 与 "skill:my-test-skill" 两条命令
 		t.Fatalf("expected at least 2 commands, got %d", len(commands))
 	}
 
@@ -79,7 +79,7 @@ description: 这是一个测试技能
 		t.Fatal("skill:my-test-skill command not found in list")
 	}
 
-	// Test MatchAndRewrite with prefixed command "/skill:my-test-skill"
+	// 测试 MatchAndRewrite 处理带前缀命令 "/skill:my-test-skill"
 	matched, rewritten, task, s := mgr.MatchAndRewrite("/skill:my-test-skill 请帮我测试")
 	if !matched {
 		t.Fatal("expected match for /skill:my-test-skill")
@@ -94,13 +94,13 @@ description: 这是一个测试技能
 		t.Fatalf("expected prompt to contain injection header, got:\n%s", rewritten)
 	}
 
-	// Test MatchAndRewrite with non-prefixed command "/my-test-skill" (dual compatibility)
+	// 测试 MatchAndRewrite 处理无前缀命令 "/my-test-skill"（双向兼容）
 	matchedDirect, _, _, _ := mgr.MatchAndRewrite("/my-test-skill 请帮我测试")
 	if !matchedDirect {
 		t.Fatal("expected fallback match for /my-test-skill")
 	}
 
-	// Test MatchAndRewrite with generic /skill command
+	// 测试 MatchAndRewrite 处理通用 /skill 命令
 	matchedGen, rewrittenGen, taskGen, sGen := mgr.MatchAndRewrite("/skill my-test-skill 进行验证")
 	if !matchedGen {
 		t.Fatal("expected match for /skill my-test-skill")
@@ -115,7 +115,7 @@ description: 这是一个测试技能
 		t.Fatalf("expected prompt to contain injection header, got:\n%s", rewrittenGen)
 	}
 
-	// Test non-skill command (e.g. /plan)
+	// 测试非技能命令（如 /plan）
 	matchedPlan, _, _, _ := mgr.MatchAndRewrite("/plan 仔细规划")
 	if matchedPlan {
 		t.Fatal("should NOT match /plan")

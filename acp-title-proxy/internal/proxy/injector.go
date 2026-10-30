@@ -8,7 +8,7 @@ import (
 	"language_projects/go_projects/acp-title-proxy/internal/protocol"
 )
 
-// Injector manages thread-safe writes to the ACP client (Zed).
+// Injector 负责向 ACP 客户端（Zed）线程安全地写入数据。
 type Injector struct {
 	mu     sync.Mutex
 	writer io.Writer
@@ -18,7 +18,7 @@ func NewInjector(w io.Writer) *Injector {
 	return &Injector{writer: w}
 }
 
-// InjectTitle pushes a session_info_update notification with the given title.
+// InjectTitle 推送携带指定标题的 session_info_update 通知。
 func (inj *Injector) InjectTitle(sessionID, title string) error {
 	notif := protocol.SessionUpdateNotification{
 		JSONRPC: "2.0",
@@ -45,7 +45,7 @@ func (inj *Injector) InjectTitle(sessionID, title string) error {
 	return err
 }
 
-// InjectAvailableCommands pushes an available_commands_update notification with the given commands.
+// InjectAvailableCommands 推送携带指定命令的 available_commands_update 通知。
 func (inj *Injector) InjectAvailableCommands(sessionID string, commands []protocol.CommandItem) error {
 	notif := map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -72,7 +72,7 @@ func (inj *Injector) InjectAvailableCommands(sessionID string, commands []protoc
 	return err
 }
 
-// WriteRaw safely writes an intact raw message line to the output stream.
+// WriteRaw 将完整的一行原始消息安全写入输出流。
 func (inj *Injector) WriteRaw(data []byte) (int, error) {
 	inj.mu.Lock()
 	defer inj.mu.Unlock()

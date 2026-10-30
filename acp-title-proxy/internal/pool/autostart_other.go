@@ -7,7 +7,7 @@ import (
 	"os/exec"
 )
 
-// LaunchDaemonInBackground launches acp-title-proxy daemon in the background.
+// LaunchDaemonInBackground 在后台拉起 acp-title-proxy 守护进程。
 func LaunchDaemonInBackground() error {
 	exePath, err := os.Executable()
 	if err != nil {

@@ -101,7 +101,7 @@ func TestProcessInboundRewritePrompt(t *testing.T) {
 		t.Fatalf("expected augmented prompt, got: %s", extractedText)
 	}
 
-	// Verify that titler was passed the original task, not the augmented text!
+	// 验证传给 titler 的是原始任务，而非增强后的文本！
 	if titler.lastPrompt != "do this work" {
 		t.Fatalf("expected titler to receive clean task 'do this work', got '%s'", titler.lastPrompt)
 	}

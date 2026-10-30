@@ -7,14 +7,14 @@ import (
 	"sync"
 )
 
-// Store provides thread-safe persistent tracking of titled ACP sessions.
+// Store 线程安全地持久化记录已命名的 ACP 会话。
 type Store struct {
 	filePath string
 	mu       sync.RWMutex
-	titled   map[string]string // sessionID -> title
+	titled   map[string]string // sessionID -> 标题
 }
 
-// GetDataFilePath returns the standard storage path conforming to repository invariants:
+// GetDataFilePath 返回符合仓库数据落盘规范的标准存储路径：
 // %APPDATA%\language_projects\acp-title-proxy\titled_sessions.json
 func GetDataFilePath() string {
 	appData := os.Getenv("APPDATA")
@@ -28,7 +28,7 @@ func GetDataFilePath() string {
 	return filepath.Join(appData, "language_projects", "acp-title-proxy", "titled_sessions.json")
 }
 
-// NewStore loads existing titled sessions from disk or creates a new empty store.
+// NewStore 从磁盘加载已命名会话，或创建空存储。
 func NewStore(customPath string) (*Store, error) {
 	fp := customPath
 	if fp == "" {
@@ -50,7 +50,7 @@ func NewStore(customPath string) (*Store, error) {
 	return s, nil
 }
 
-// IsTitled checks whether the sessionID has already been titled.
+// IsTitled 判断该会话是否已被命名。
 func (s *Store) IsTitled(sessionID string) bool {
 	if sessionID == "" {
 		return false
@@ -61,7 +61,7 @@ func (s *Store) IsTitled(sessionID string) bool {
 	return exists
 }
 
-// GetTitle returns the recorded title for the sessionID, if present.
+// GetTitle 返回该会话已记录的标题（若存在）。
 func (s *Store) GetTitle(sessionID string) (string, bool) {
 	if sessionID == "" {
 		return "", false
@@ -72,7 +72,7 @@ func (s *Store) GetTitle(sessionID string) (string, bool) {
 	return title, exists
 }
 
-// MarkTitled records a session as titled and persists it to disk.
+// MarkTitled 将会话登记为已命名并持久化到磁盘。
 func (s *Store) MarkTitled(sessionID, title string) error {
 	if sessionID == "" {
 		return nil

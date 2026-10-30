@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// KillProcessTree terminates the process and all of its child processes on Windows.
+// KillProcessTree 在 Windows 上终止该进程及其全部子进程。
 func KillProcessTree(pid int) error {
 	if pid <= 0 {
 		return nil
@@ -72,7 +72,7 @@ func StartWorker(exePath string, args []string, env []string) (*Worker, error) {
 		return nil, fmt.Errorf("start worker error: %w", err)
 	}
 
-	// Discard stderr in background
+	// 后台丢弃 stderr
 	go func() {
 		_, _ = io.Copy(io.Discard, stderr)
 	}()

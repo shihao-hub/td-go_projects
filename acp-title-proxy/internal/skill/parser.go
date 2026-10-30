@@ -6,14 +6,14 @@ import (
 	"unicode/utf8"
 )
 
-// ParseFrontmatter extracts name and description from a SKILL.md content.
+// ParseFrontmatter 从 SKILL.md 内容中提取 name 与 description。
 func ParseFrontmatter(content string) (name, description string) {
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 {
 		return "", ""
 	}
 
-	// Must start with "---"
+	// 必须以 "---" 开头
 	firstLine := strings.TrimSpace(lines[0])
 	if firstLine != "---" {
 		return "", ""
@@ -37,9 +37,9 @@ func ParseFrontmatter(content string) (name, description string) {
 			break
 		}
 
-		// Handle multi-line description continuation
+		// 处理多行 description 的续行
 		if readingDesc {
-			// Check indentation of current line
+			// 检查当前行的缩进
 			currentIndent := len(line) - len(strings.TrimLeft(line, " \t"))
 			if trimmed == "" {
 				descLines = append(descLines, "")
@@ -58,7 +58,7 @@ func ParseFrontmatter(content string) (name, description string) {
 			}
 		}
 
-		// Match top-level keys
+		// 匹配顶层键
 		if strings.HasPrefix(trimmed, "name:") {
 			val := strings.TrimSpace(strings.TrimPrefix(trimmed, "name:"))
 			name = strings.Trim(val, `"'`)
@@ -91,7 +91,7 @@ func ParseFrontmatter(content string) (name, description string) {
 	return name, description
 }
 
-// CleanDescription cleans whitespace and limits description length without cutting UTF-8 runes.
+// CleanDescription 清理空白并限制描述长度，且不截断 UTF-8 字符。
 func CleanDescription(desc string, maxRunes int) string {
 	var sb strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(desc))

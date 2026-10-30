@@ -15,7 +15,7 @@ var (
 	ErrDaemonOutdated = errors.New("daemon outdated")
 )
 
-// GetSelfModTime returns the modification time (UnixNano) of the current executable.
+// GetSelfModTime 返回当前可执行文件的修改时间（UnixNano）。
 func GetSelfModTime() int64 {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -28,8 +28,8 @@ func GetSelfModTime() int64 {
 	return info.ModTime().UnixNano()
 }
 
-// BufferedConn wraps net.Conn with an io.Reader to ensure any data
-// buffered by bufio.Reader during handshake is not lost.
+// BufferedConn 用 io.Reader 包装 net.Conn，确保
+// 握手期间被 bufio.Reader 缓冲的数据不会丢失。
 type BufferedConn struct {
 	net.Conn
 	r io.Reader
@@ -53,7 +53,7 @@ func (bc *BufferedConn) CloseWrite() error {
 	return nil
 }
 
-// TryAcquire attempts to connect to the daemon and acquire a pre-warmed worker stream.
+// TryAcquire 尝试连接守护进程并获取一个已预热的 worker 流。
 func TryAcquire(port int, timeout time.Duration) (net.Conn, error) {
 	if port <= 0 {
 		port = DefaultPort
@@ -68,7 +68,7 @@ func TryAcquire(port int, timeout time.Duration) (net.Conn, error) {
 		return nil, fmt.Errorf("daemon not reachable on %s: %w", addr, err)
 	}
 
-	// Set deadline for handshake
+	// 设置握手超时
 	_ = conn.SetDeadline(time.Now().Add(1500 * time.Millisecond))
 
 	req := PoolRequest{
@@ -110,12 +110,12 @@ func TryAcquire(port int, timeout time.Duration) (net.Conn, error) {
 		return nil, fmt.Errorf("daemon could not assign worker: %s", resp.Msg)
 	}
 
-	// Reset deadline for normal bidirectional streaming
+	// 恢复正常双向流式传输的超时设置
 	_ = conn.SetDeadline(time.Time{})
 	return NewBufferedConn(conn, reader), nil
 }
 
-// StopDaemon requests the daemon to gracefully stop and clean up all workers.
+// StopDaemon 请求守护进程优雅退出并清理全部 worker。
 func StopDaemon(port int) error {
 	if port <= 0 {
 		port = DefaultPort
@@ -148,7 +148,7 @@ func StopDaemon(port int) error {
 	return nil
 }
 
-// CheckStatus queries the pool status from daemon.
+// CheckStatus 查询守护进程的连接池状态。
 func CheckStatus(port int) (*PoolResponse, error) {
 	if port <= 0 {
 		port = DefaultPort

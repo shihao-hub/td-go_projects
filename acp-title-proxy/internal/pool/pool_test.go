@@ -9,18 +9,18 @@ import (
 )
 
 func TestBufferedConn(t *testing.T) {
-	// Create an in-memory pipe pair
+	// 创建一对内存管道
 	c1, c2 := net.Pipe()
 	defer c1.Close()
 	defer c2.Close()
 
-	// Simulate buffered data from bufio.Reader
+	// 模拟 bufio.Reader 中已缓冲的数据
 	preBuffered := []byte("PRE_BUFFERED_DATA\n")
 	mockReader := io.MultiReader(bytes.NewReader(preBuffered), c1)
 
 	bconn := NewBufferedConn(c1, mockReader)
 
-	// In background, write subsequent data to c2
+	// 在后台向 c2 写入后续数据
 	go func() {
 		time.Sleep(10 * time.Millisecond)
 		_, _ = c2.Write([]byte("SUBSEQUENT_DATA\n"))

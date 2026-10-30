@@ -34,7 +34,7 @@ func main() {
 
 	switch cmd {
 	case "sync":
-		// Mode A: One-shot sync (100% external, settings.json untouched)
+		// 模式 A：一次性同步（完全外部化，不改动 settings.json）
 		fmt.Printf("[acp-title-proxy] Running one-shot sync (Config: %s)...\n", cfgPath)
 		s := syncer.NewSyncer(cfg)
 
@@ -45,7 +45,7 @@ func main() {
 			fmt.Printf("[OpenCode] Successfully synced %d titles from opencode.db\n", ocCount)
 		}
 
-		// Sync AGY threads updated in last 24h
+		// 同步最近 24 小时内更新的 AGY 线程
 		agyCount, err := s.SyncAGY(24 * time.Hour)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[AGY] Sync error: %v\n", err)
@@ -54,7 +54,7 @@ func main() {
 		}
 
 	case "watch":
-		// Mode A: Background daemon watcher (100% external, settings.json untouched)
+		// 模式 A：后台守护进程监听（完全外部化，不改动 settings.json）
 		fmt.Printf("[acp-title-proxy] Starting background watcher (Config: %s)...\n", cfgPath)
 		fmt.Println("[acp-title-proxy] Watching Zed db.sqlite for new threads. Press Ctrl+C to stop.")
 		s := syncer.NewSyncer(cfg)
@@ -69,11 +69,11 @@ func main() {
 			close(stopCh)
 		}()
 
-		// Poll every 3 seconds; AGY only syncs threads updated within last 2 hours
+		// 每 3 秒轮询一次；AGY 仅同步最近 2 小时内更新的线程
 		s.Watch(3*time.Second, 2*time.Hour, stopCh)
 
 	case "daemon":
-		// Pre-warm pool daemon for AGY
+		// 为 AGY 预热连接池守护进程
 		fmt.Printf("[acp-title-proxy] Starting AGY pre-warm pool daemon (Port: %d)...\n", pool.DefaultPort)
 		stopCh := make(chan struct{})
 		sigCh := make(chan os.Signal, 1)
@@ -117,7 +117,7 @@ func main() {
 		fmt.Println("[acp-title-proxy] Pre-warm daemon restarted successfully in background.")
 
 	case "opencode":
-		// Mode B: Transparent stdio proxy for OpenCode
+		// 模式 B：面向 OpenCode 的透明 stdio 代理
 		inj := proxy.NewInjector(os.Stdout)
 		exePath, args, err := finder.FindOpenCode(cfg.OpenCode.Executable)
 		if err != nil {
@@ -134,11 +134,11 @@ func main() {
 		}
 
 	case "agy", "antigravity", "antigravity-acp":
-		// Mode B: Stdio proxy for AGY with Pre-warm Pool acceleration
+		// 模式 B：带预热池加速的 AGY stdio 代理
 		inj := proxy.NewInjector(os.Stdout)
 		titler := agy.NewTitler(&cfg.AGY, inj, nil)
 
-		// 1. Try to acquire a pre-warmed worker from daemon (Instant response!)
+		// 1. 优先从守护进程获取已预热的 worker（即时响应）
 		conn, err := pool.TryAcquire(pool.DefaultPort, 400*time.Millisecond)
 		if err == nil {
 			runner := proxy.NewRunner("", nil, titler, skillMgr)
@@ -153,12 +153,12 @@ func main() {
 			time.Sleep(150 * time.Millisecond)
 			_ = pool.LaunchDaemonInBackground()
 		} else {
-			// 2. Fallback: Daemon not ready. Silently trigger daemon launch for future sessions.
+			// 2. 兜底：守护进程未就绪，静默拉起守护进程供后续会话使用
 			fmt.Fprintf(os.Stderr, "[acp-title-proxy] Pre-warm pool not available (%v); starting daemon in background and falling back to direct launch...\n", err)
 			_ = pool.LaunchDaemonInBackground()
 		}
 
-		// 3. Fallback direct launch
+		// 3. 兜底：直接启动
 		exePath, args, err := finder.FindAGY(cfg.AGY.Executable)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[acp-title-proxy] Error: %v\n", err)
