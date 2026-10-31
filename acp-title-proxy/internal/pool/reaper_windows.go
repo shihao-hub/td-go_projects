@@ -59,7 +59,10 @@ func (r *Reaper) findCandidates() []HarnessInfo {
 	}
 
 	knownParentPids := make(map[int]bool)
-	if r.getWorkerPids != nil {
+	// 显式传入 worker PID 时只扫描这些 worker；未传入时才自动发现全部
+	// agy_acp_server，避免共享 daemon 误杀预热池里的 harness。
+	discoverAll := r.getWorkerPids == nil
+	if !discoverAll {
 		for _, pid := range r.getWorkerPids() {
 			if pid > 0 {
 				knownParentPids[pid] = true
@@ -82,8 +85,7 @@ func (r *Reaper) findCandidates() []HarnessInfo {
 			exeName:   exe,
 		})
 
-		// 同时自动发现系统中运行的所有 agy_acp_server
-		if strings.EqualFold(exe, "agy_acp_server.exe") {
+		if discoverAll && strings.EqualFold(exe, "agy_acp_server.exe") {
 			knownParentPids[int(entry.ProcessID)] = true
 		}
 

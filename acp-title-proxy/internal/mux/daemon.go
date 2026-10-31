@@ -70,6 +70,8 @@ type Daemon struct {
 
 	closed       bool
 	shutdownOnce sync.Once
+	stopCh       chan struct{}
+	lastClientAt time.Time
 	startedAt    time.Time
 }
 
@@ -81,13 +83,15 @@ func NewDaemon(cfg *config.Config, logger *log.Logger, factory BackendFactory) *
 		factory = defaultFactory(cfg, logger)
 	}
 	return &Daemon{
-		cfg:      cfg,
-		logger:   logger,
-		factory:  factory,
-		clients:  make(map[*Client]bool),
-		sessions: make(map[string]*Client),
-		pending:  make(map[string]*pendingReq),
-		wreq:     make(map[string]*workerReq),
+		cfg:          cfg,
+		logger:       logger,
+		factory:      factory,
+		clients:      make(map[*Client]bool),
+		sessions:     make(map[string]*Client),
+		pending:      make(map[string]*pendingReq),
+		wreq:         make(map[string]*workerReq),
+		stopCh:       make(chan struct{}),
+		lastClientAt: time.Now(),
 	}
 }
 
@@ -129,6 +133,7 @@ func (d *Daemon) Run() error {
 	if err := d.startBackend(); err != nil {
 		d.logger.Printf("backend start failed: %v", err)
 	}
+	go d.runIdleExit()
 
 	for {
 		conn, err := ln.Accept()
@@ -192,6 +197,7 @@ func (d *Daemon) handleConn(conn net.Conn) {
 		c := d.newClient(conn, reader)
 		d.mu.Lock()
 		d.clients[c] = true
+		d.lastClientAt = time.Now()
 		d.mu.Unlock()
 		d.logger.Printf("client %s attached (pid=%d)", c.id, hs.ClientPID)
 		c.readLoop()
@@ -284,6 +290,34 @@ func (d *Daemon) restartBackend() {
 		}
 	}
 	d.logger.Printf("backend restart gave up")
+}
+
+// runIdleExit 在所有 client 断开且空闲超过 share.idle_ttl_minutes 后退出 daemon，
+// 释放 worker 及其全部 localharness。下次 panel 打开时 serve 会自动拉起。
+func (d *Daemon) runIdleExit() {
+	ttl := time.Duration(d.cfg.Share.IdleTTLMinutes) * time.Minute
+	if ttl <= 0 {
+		return
+	}
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
+			d.mu.Lock()
+			clients := len(d.clients)
+			last := d.lastClientAt
+			d.mu.Unlock()
+			if clients == 0 && time.Since(last) >= ttl {
+				d.logger.Printf("share daemon idle for %s (no clients), shutting down", time.Since(last).Round(time.Second))
+				d.Shutdown()
+				return
+			}
+		}
+	}
 }
 
 func (d *Daemon) fromBackendResponse(m protocol.Message) {
@@ -558,6 +592,7 @@ func (d *Daemon) sendToBackend(line []byte) {
 func (d *Daemon) removeClient(c *Client) {
 	d.mu.Lock()
 	delete(d.clients, c)
+	d.lastClientAt = time.Now()
 
 	orphan := make([]string, 0)
 	for sid, owner := range d.sessions {
@@ -696,6 +731,7 @@ func (d *Daemon) Shutdown() {
 	d.shutdownOnce.Do(func() {
 		d.mu.Lock()
 		d.closed = true
+		close(d.stopCh)
 		ln := d.ln
 		clients := make([]*Client, 0, len(d.clients))
 		for c := range d.clients {
