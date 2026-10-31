@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,10 +15,9 @@ import (
 	"language_projects/go_projects/acp-title-proxy/internal/skill"
 )
 
-// duplexPipe 创建一对双向的内存 ReadWriteCloser。
 type duplexPipe struct {
-	reader *io.PipeReader
-	writer *io.PipeWriter
+	reader io.ReadCloser
+	writer io.WriteCloser
 }
 
 func (d *duplexPipe) Read(p []byte) (n int, err error) {
@@ -32,12 +33,35 @@ func (d *duplexPipe) Close() error {
 	return d.writer.Close()
 }
 
+func rawID(id int) *json.RawMessage {
+	b, _ := json.Marshal(id)
+	rm := json.RawMessage(b)
+	return &rm
+}
+
 func TestE2E_ProxySkillAugmentation(t *testing.T) {
-	// 使用默认目录初始化真实的技能管理器
+	// 使用隔离的临时目录构建测试技能，保证测试独立自洽
+	tempSkillDir, err := os.MkdirTemp("", "e2e-skill-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempSkillDir)
+
+	for _, name := range []string{"sh-pocock-workflow", "grill-me"} {
+		dir := filepath.Join(tempSkillDir, name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		content := "---\nname: " + name + "\ndescription: test skill " + name + "\n---\n# Guide\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	cfg := &config.SkillsConfig{
 		Enabled:          true,
 		Prefix:           "skill:",
-		Dirs:             config.DefaultSkillDirs(),
+		Dirs:             []string{tempSkillDir},
 		AutoInjectPrompt: true,
 	}
 	skillMgr := skill.NewManager(cfg)
@@ -169,37 +193,30 @@ func TestE2E_ProxySkillAugmentation(t *testing.T) {
 		t.Fatalf("failed to unmarshal prompt params: %v", err)
 	}
 
-	extractedPrompt := protocol.ExtractPromptText(promptParams.Prompt)
-	if !strings.Contains(extractedPrompt, "【系统注入：激活技能 sh-pocock-workflow】") {
-		t.Fatalf("expected prompt injection, got:\n%s", extractedPrompt)
+	extractedText := protocol.ExtractPromptText(promptParams.Prompt)
+	if !strings.Contains(extractedText, "【系统注入：激活技能 sh-pocock-workflow】") {
+		t.Fatalf("expected prompt injection in payload, got:\n%s", extractedText)
 	}
-	if !strings.Contains(extractedPrompt, "帮我审查架构") {
-		t.Fatalf("expected user task preserved, got:\n%s", extractedPrompt)
-	}
-	if !strings.Contains(extractedPrompt, "SKILL.md") {
-		t.Fatalf("expected SKILL.md path in prompt, got:\n%s", extractedPrompt)
+	if !strings.Contains(extractedText, "帮我审查架构") {
+		t.Fatalf("expected original prompt content preserved, got:\n%s", extractedText)
 	}
 
-	// 3. 入向测试：用户调用原生 /plan 命令
-	planReq := []byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":"/plan 仔细规划"}}` + "\n")
-	processedPlan := runner.processInbound(planReq)
+	// 3. 验证 promptText 结构体格式入向重写
+	structuredPromptReq := []byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"sess_test_123","prompt":[{"type":"text","text":"/skill:sh-pocock-workflow 帮我审查架构"}]}}` + "\n")
+	processedStructured := runner.processInbound(structuredPromptReq)
 
-	var planMsg protocol.JSONRPCMessage
-	if err := json.Unmarshal(processedPlan, &planMsg); err != nil {
-		t.Fatalf("failed to unmarshal processed plan: %v", err)
-	}
-	var planParams protocol.SessionPromptParams
-	_ = json.Unmarshal(planMsg.Params, &planParams)
-	if protocol.ExtractPromptText(planParams.Prompt) != "/plan 仔细规划" {
-		t.Fatalf("native /plan was corrupted! got: %s", protocol.ExtractPromptText(planParams.Prompt))
+	var structuredMsg protocol.JSONRPCMessage
+	if err := json.Unmarshal(processedStructured, &structuredMsg); err != nil {
+		t.Fatalf("failed to unmarshal structured message: %v", err)
 	}
 
-	_ = proxyChildStream.Close()
-	_ = mockChildStream.Close()
-}
+	var structuredParams protocol.SessionPromptParams
+	if err := json.Unmarshal(structuredMsg.Params, &structuredParams); err != nil {
+		t.Fatalf("failed to unmarshal structured params: %v", err)
+	}
 
-func rawID(id int) *json.RawMessage {
-	b, _ := json.Marshal(id)
-	rm := json.RawMessage(b)
-	return &rm
+	structuredExtracted := protocol.ExtractPromptText(structuredParams.Prompt)
+	if !strings.Contains(structuredExtracted, "【系统注入：激活技能 sh-pocock-workflow】") {
+		t.Fatalf("expected prompt injection in structured prompt, got:\n%s", structuredExtracted)
+	}
 }

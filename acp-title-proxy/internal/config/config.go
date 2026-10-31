@@ -11,6 +11,27 @@ type Config struct {
 	OpenCode OpenCodeConfig `json:"opencode"`
 	AGY      AGYConfig      `json:"agy"`
 	Skills   SkillsConfig   `json:"skills"`
+	Reaper   ReaperConfig   `json:"reaper"`
+	Share    ShareConfig    `json:"share"`
+}
+
+// ShareConfig 控制 ACP 多会话共享后端（agy-share）。
+type ShareConfig struct {
+	Enabled                bool   `json:"enabled"`
+	Port                   int    `json:"port"`
+	MaxSessions            int    `json:"max_sessions"`
+	Overflow               string `json:"overflow"`
+	IdleTTLMinutes         int    `json:"idle_ttl_minutes"`
+	AllowMixedCapabilities bool   `json:"allow_mixed_capabilities"`
+	FallbackDirect         bool   `json:"fallback_direct"`
+	Executable             string `json:"executable"`
+	LogPath                string `json:"log_path"`
+}
+
+type ReaperConfig struct {
+	Enabled              bool `json:"enabled"`
+	IdleMinutes          int  `json:"idle_minutes"`
+	CheckIntervalMinutes int  `json:"check_interval_minutes"`
 }
 
 type SkillsConfig struct {
@@ -82,6 +103,19 @@ func DefaultConfig() *Config {
 			Prefix:           "skill:",
 			Dirs:             DefaultSkillDirs(),
 			AutoInjectPrompt: true,
+		},
+		Reaper: ReaperConfig{
+			Enabled:              true,
+			IdleMinutes:          20,
+			CheckIntervalMinutes: 5,
+		},
+		Share: ShareConfig{
+			Enabled:        true,
+			Port:           47600,
+			MaxSessions:    6,
+			Overflow:       "reject",
+			IdleTTLMinutes: 30,
+			FallbackDirect: true,
 		},
 	}
 }
@@ -199,6 +233,32 @@ func LoadConfig() (*Config, string, error) {
 
 	if len(cfg.Skills.Dirs) == 0 {
 		cfg.Skills.Dirs = DefaultSkillDirs()
+	}
+
+	if cfg.Reaper.IdleMinutes <= 0 {
+		cfg.Reaper.IdleMinutes = 20
+	}
+	if cfg.Reaper.CheckIntervalMinutes <= 0 {
+		cfg.Reaper.CheckIntervalMinutes = 5
+	}
+
+	// 共享后端默认值
+	if cfg.Share.Port <= 0 {
+		cfg.Share.Port = 47600
+	}
+	if cfg.Share.MaxSessions <= 0 {
+		cfg.Share.MaxSessions = 6
+	}
+	if cfg.Share.Overflow == "" {
+		cfg.Share.Overflow = "reject"
+	}
+	if cfg.Share.IdleTTLMinutes <= 0 {
+		cfg.Share.IdleTTLMinutes = 30
+	}
+	if cfg.Share.LogPath == "" {
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			cfg.Share.LogPath = filepath.Join(appData, "acp-title-proxy", "agy-share.log")
+		}
 	}
 
 	return cfg, foundPath, nil

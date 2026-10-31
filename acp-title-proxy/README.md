@@ -62,6 +62,44 @@ Zed 不会转发 agent 子进程的 stderr，排查标题问题请直接看该�
 
 ---
 
+### 共享后端（推荐：多个 agent panel 复用同一个 AGY worker）
+
+`agy share` 把 AGY 后端变成常驻单例：Zed 每个 panel 只启动一个轻量客户端，
+所有 panel 共享同一个 `agy_acp_server`，内存不再随 panel 数线性增长。
+不带 `share` 的 `agy` 仍然保持原来的 1:1 预热池行为，随时可回退。
+
+```powershell
+.\bin\acp-title-proxy.exe share          # 启动共享 daemon（首个 agy share 也会自动拉起）
+.\bin\acp-title-proxy.exe share-status   # 查看 worker / 会话 / 客户端数
+.\bin\acp-title-proxy.exe share-stop     # 停止 daemon 并回收 worker 进程树
+.\bin\acp-title-proxy.exe share-restart  # 重启
+```
+
+`settings.json` 的 `agent_servers` 新增（不要改官方 `antigravity-acp` registry 条目）：
+
+```json
+"Google Antigravity (auto-title)": {
+  "type": "custom",
+  "command": "D:/Users/language_projects/go_projects/acp-title-proxy/bin/acp-title-proxy.exe",
+  "args": ["agy", "share"],
+  "env": {
+    "HTTP_PROXY": "http://127.0.0.1:7897",
+    "HTTPS_PROXY": "http://127.0.0.1:7897",
+    "NO_PROXY": "localhost,127.0.0.1,::1",
+    "REQUESTS_CA_BUNDLE": "C:/Users/29580/AppData/Roaming/Zed/certs/antigravity-ca.pem",
+    "SSL_CERT_FILE": "C:/Users/29580/AppData/Roaming/Zed/certs/antigravity-ca.pem"
+  }
+}
+```
+
+- 每个 panel 一个轻量客户端（约 10MB），只做 stdio ↔ TCP 转发；
+- 共享 worker 实测 1 worker + 2 会话约 190MB；
+- `agy share` 连不上 daemon 会尝试拉起，仍失败则回退直连；
+- 标题生成与 `/skill:` 技能注入在共享模式下同样生效；
+- `serve` 保留为内部别名，效果与 `agy share` 相同。
+
+---
+
 ## 配置文件 (`config.json`)
 放置在 `bin/config.json` 或同级目录下（已由 `.gitignore` 自动排除）：
 ```json

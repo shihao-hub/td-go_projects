@@ -14,7 +14,6 @@ import (
 	"unicode"
 
 	"language_projects/go_projects/acp-title-proxy/internal/config"
-	"language_projects/go_projects/acp-title-proxy/internal/proxy"
 	"language_projects/go_projects/acp-title-proxy/internal/store"
 )
 
@@ -22,9 +21,15 @@ import (
 // 防止模型链持续失败时每条消息都消耗一次 API 配额。
 const maxTitleAttempts = 3
 
+// Injector 是标题注入目标。proxy.Injector（stdio 直连）与 mux.Daemon（共享后端）
+// 都实现该接口，从而让标题能力同时适用于两种运行模式。
+type Injector interface {
+	InjectTitle(sessionID, title string) error
+}
+
 type Titler struct {
 	cfg      *config.AGYConfig
-	injector *proxy.Injector
+	injector Injector
 	store    *store.Store
 
 	mu             sync.Mutex
@@ -34,7 +39,7 @@ type Titler struct {
 	attempts       map[string]int
 }
 
-func NewTitler(cfg *config.AGYConfig, inj *proxy.Injector, st *store.Store) *Titler {
+func NewTitler(cfg *config.AGYConfig, inj Injector, st *store.Store) *Titler {
 	if st == nil {
 		var err error
 		st, err = store.NewStore("")

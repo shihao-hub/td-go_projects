@@ -34,5 +34,21 @@
       "%USERPROFILE%/.gemini/antigravity/builtin/skills"
     ],
     "auto_inject_prompt": true
+  },
+  "reaper": {
+    "enabled": true,
+    "idle_minutes": 20,
+    "check_interval_minutes": 5
+  },
+  "share": {
+    "enabled": true,
+    "port": 47600,
+    "max_sessions": 6,
+    "overflow": "reject",
+    "idle_ttl_minutes": 30,
+    "allow_mixed_capabilities": false,
+    "fallback_direct": true,
+    "executable": "",
+    "log_path": "%APPDATA%/acp-title-proxy/agy-share.log"
   }
 }

@@ -63,6 +63,14 @@ func (d *Daemon) Start(stopCh <-chan struct{}) error {
 	go d.replenishLoop(stopCh)
 	d.triggerReplenish()
 
+	// 启动闲置沙箱回收巡检循环
+	if d.cfg != nil && d.cfg.Reaper.Enabled {
+		reaper := NewReaper(d.cfg.Reaper, d.getWorkerPids)
+		go reaper.Start(stopCh)
+		fmt.Printf("[Pre-warm Daemon] Idle harness reaper started (IdleTimeout: %dm, CheckInterval: %dm)\n",
+			d.cfg.Reaper.IdleMinutes, d.cfg.Reaper.CheckIntervalMinutes)
+	}
+
 	// 接受连接循环
 	go func() {
 		<-stopCh
@@ -390,6 +398,18 @@ func (d *Daemon) removeWorker(w *Worker) {
 	d.mu.Lock()
 	delete(d.workers, w)
 	d.mu.Unlock()
+}
+
+func (d *Daemon) getWorkerPids() []int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var pids []int
+	for w := range d.workers {
+		if w != nil && w.Cmd != nil && w.Cmd.Process != nil {
+			pids = append(pids, w.Cmd.Process.Pid)
+		}
+	}
+	return pids
 }
 
 func sendResponse(w io.Writer, resp PoolResponse) error {
