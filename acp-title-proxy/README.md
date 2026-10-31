@@ -96,7 +96,38 @@ Zed 不会转发 agent 子进程的 stderr，排查标题问题请直接看该�
 - 共享 worker 实测 1 worker + 2 会话约 190MB；
 - `agy share` 连不上 daemon 会尝试拉起，仍失败则回退直连；
 - 标题生成与 `/skill:` 技能注入在共享模式下同样生效；
-- `serve` 保留为内部别名，效果与 `agy share` 相同。
+- `serve` 保留为内部别名，效果与 `agy share` 相同；
+- 所有 panel 关闭后，daemon 空闲 `share.idle_ttl_minutes`（默认 30）分钟会自动退出并释放 worker/harness；
+  下次打开 panel 时 `serve` 自动拉起 daemon（冷启动几秒），旧 thread 的历史仍从本地会话库回放。
+
+---
+
+### 会话归属迁移（`agy threads`）
+
+Zed 把每个会话的归属记在 `sidebar_threads.agent_id` 上，取值就是 `settings.json`
+里 `agent_servers` 的键名。历史上由官方 `antigravity-acp` 创建的会话，可以把
+`agent_id` 就地改写成 `Google Antigravity (auto-title)`：`session_id` 保持不变，
+会话本体（`~/.gemini/antigravity-acp/conversations/<sid>.db`）两边共用，重开时
+Zed 发 `session/load`，后端回放完整历史（agy 声明了 `loadSession: true`）。
+
+```powershell
+# 看分布（只读，Zed 开着也能看）
+.\bin\acp-title-proxy.exe agy threads list
+
+# 过户（默认 dry-run；--from/--to 可省略，默认即 官方 → auto-title）
+.\bin\acp-title-proxy.exe agy threads adopt
+.\bin\acp-title-proxy.exe agy threads adopt --apply     # 执行前先完全退出 Zed
+
+# 只归档、不改归属
+.\bin\acp-title-proxy.exe agy threads archive --agent antigravity-acp --apply
+```
+
+- 写库前必须**完全退出 Zed**（含托盘），否则改动会被内存缓存覆盖；
+- 写前用 `VACUUM INTO` 做一致性快照（自动合并 WAL），落在
+  `%APPDATA%\language_projects\acp-title-proxy\backups\threads-<时间戳>\db.sqlite`；
+- 没有 `session_id` 的空 thread 会被跳过，需要时用 `archive` 单独处理；
+- 迁移**不降低内存**：每个打开的会话仍有独立 harness，省掉的是 `agy_acp_server`
+  的重复实例；收益是历史会话统一由共享 daemon 承载、标题统一管理。
 
 ---
 

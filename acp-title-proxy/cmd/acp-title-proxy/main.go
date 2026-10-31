@@ -187,6 +187,14 @@ func main() {
 			return
 		}
 
+		// agy threads：管理 Zed 侧会话的 agent 归属与归档状态
+		if len(os.Args) > 2 && strings.EqualFold(os.Args[2], "threads") {
+			if code := runThreads(os.Args[3:]); code != 0 {
+				os.Exit(code)
+			}
+			return
+		}
+
 		// 模式 B：带预热池加速的 AGY stdio 代理
 		inj := proxy.NewInjector(os.Stdout)
 		titler := agy.NewTitler(&cfg.AGY, inj, nil)
@@ -287,5 +295,9 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy serve         - Per-panel client for Zed (attach to shared daemon)\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy share-status  - Query shared backend status\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy share-stop    - Stop shared backend and its worker\n")
-	fmt.Fprintf(os.Stderr, "  acp-title-proxy share-restart - Restart shared backend in background\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy share-restart - Restart shared backend in background\n\n")
+	fmt.Fprintf(os.Stderr, "Zed thread management (agent ownership / archive):\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy threads list    - Show sessions grouped by agent_id\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy threads adopt   - Move sessions from one agent to another (dry-run)\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy threads archive - Archive sessions of an agent (dry-run)\n")
 }
