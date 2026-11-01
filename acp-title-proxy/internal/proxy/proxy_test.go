@@ -41,6 +41,16 @@ func (m *mockSkillMgr) MatchAndRewrite(rawPrompt string) (bool, string, string, 
 	return false, rawPrompt, rawPrompt, nil
 }
 
+type mockTracker struct {
+	promptStarts int
+	promptDones  int
+	lastSession  string
+}
+
+func (m *mockTracker) OnPromptStart()          { m.promptStarts++ }
+func (m *mockTracker) OnPromptDone()           { m.promptDones++ }
+func (m *mockTracker) OnSessionID(sid string)  { m.lastSession = sid }
+
 func TestProcessOutboundMergeCommands(t *testing.T) {
 	titler := &mockTitler{}
 	skillMgr := &mockSkillMgr{
@@ -110,5 +120,32 @@ func TestProcessInboundRewritePrompt(t *testing.T) {
 	// 验证传给 titler 的是原始任务，而非增强后的文本！
 	if titler.lastPrompt != "do this work" {
 		t.Fatalf("expected titler to receive clean task 'do this work', got '%s'", titler.lastPrompt)
+	}
+}
+
+func TestStateTrackerLifecycle(t *testing.T) {
+	tracker := &mockTracker{}
+	runner := NewRunner("", nil, nil, nil)
+	runner.Tracker = tracker
+
+	// 1. session/new 响应
+	rawNew := []byte(`{"jsonrpc":"2.0","id":1,"result":{"sessionId":"sess_abc"}}` + "\n")
+	runner.processOutbound(rawNew, nil)
+	if tracker.lastSession != "sess_abc" {
+		t.Fatalf("expected tracker session sess_abc, got %s", tracker.lastSession)
+	}
+
+	// 2. session/prompt 请求 -> Tracker.OnPromptStart
+	rawPrompt := []byte(`{"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"sess_abc","prompt":"hi"}}` + "\n")
+	runner.processInbound(rawPrompt)
+	if tracker.promptStarts != 1 {
+		t.Fatalf("expected 1 promptStart, got %d", tracker.promptStarts)
+	}
+
+	// 3. session/prompt 响应 -> Tracker.OnPromptDone
+	rawResp := []byte(`{"jsonrpc":"2.0","id":2,"result":{"stopReason":"end_turn"}}` + "\n")
+	runner.processOutbound(rawResp, nil)
+	if tracker.promptDones != 1 {
+		t.Fatalf("expected 1 promptDone, got %d", tracker.promptDones)
 	}
 }

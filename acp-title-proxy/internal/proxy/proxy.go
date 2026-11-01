@@ -25,12 +25,23 @@ type SkillManager interface {
 	MatchAndRewrite(rawPrompt string) (bool, string, string, *skill.Skill)
 }
 
+// StateTracker 监听会话状态变化（提示开始、提示完成、会话ID确定）。
+type StateTracker interface {
+	OnPromptStart()
+	OnPromptDone()
+	OnSessionID(sid string)
+}
+
 type Runner struct {
 	ExePath  string
 	Args     []string
 	Titler   Titler
 	SkillMgr SkillManager
+	Tracker  StateTracker
 	Stdin    io.Reader
+
+	mu             sync.Mutex
+	pendingPrompts map[string]struct{}
 }
 
 func (r *Runner) getStdin() io.Reader {
@@ -42,10 +53,11 @@ func (r *Runner) getStdin() io.Reader {
 
 func NewRunner(exePath string, args []string, titler Titler, skillMgr SkillManager) *Runner {
 	return &Runner{
-		ExePath:  exePath,
-		Args:     args,
-		Titler:   titler,
-		SkillMgr: skillMgr,
+		ExePath:        exePath,
+		Args:           args,
+		Titler:         titler,
+		SkillMgr:       skillMgr,
+		pendingPrompts: make(map[string]struct{}),
 	}
 }
 
@@ -234,6 +246,21 @@ func (r *Runner) processInbound(line []byte) []byte {
 		return line
 	}
 
+	if msg.Method == "session/prompt" {
+		if msg.ID != nil {
+			idStr := protocol.IDString(*msg.ID)
+			r.mu.Lock()
+			if r.pendingPrompts == nil {
+				r.pendingPrompts = make(map[string]struct{})
+			}
+			r.pendingPrompts[idStr] = struct{}{}
+			r.mu.Unlock()
+		}
+		if r.Tracker != nil {
+			r.Tracker.OnPromptStart()
+		}
+	}
+
 	if msg.Method == "session/prompt" && len(msg.Params) > 0 {
 		var params protocol.SessionPromptParams
 		if err := json.Unmarshal(msg.Params, &params); err == nil && params.SessionID != "" {
@@ -284,12 +311,33 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 		return line
 	}
 
+	// 追踪 prompt 响应完成
+	if msg.ID != nil {
+		idStr := protocol.IDString(*msg.ID)
+		r.mu.Lock()
+		if r.pendingPrompts != nil {
+			if _, ok := r.pendingPrompts[idStr]; ok {
+				delete(r.pendingPrompts, idStr)
+				if len(r.pendingPrompts) == 0 && r.Tracker != nil {
+					r.mu.Unlock()
+					r.Tracker.OnPromptDone()
+					goto afterPromptDone
+				}
+			}
+		}
+		r.mu.Unlock()
+	afterPromptDone:
+	}
+
 	// 1. 识别 session/new 响应：{"id": 1, "result": {"sessionId": "...", "availableCommands": [...]}}
 	if msg.ID != nil && len(msg.Result) > 0 {
 		var res protocol.SessionNewResult
 		if err := json.Unmarshal(msg.Result, &res); err == nil && res.SessionID != "" {
 			if r.Titler != nil {
 				r.Titler.OnSessionNew(res.SessionID)
+			}
+			if r.Tracker != nil {
+				r.Tracker.OnSessionID(res.SessionID)
 			}
 
 			// 将官方思维命令与自定义技能合并进 availableCommands，并过滤裸 skill

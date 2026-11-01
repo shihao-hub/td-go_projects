@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"language_projects/go_projects/acp-title-proxy/internal/applog"
 	"language_projects/go_projects/acp-title-proxy/internal/config"
 	"language_projects/go_projects/acp-title-proxy/internal/finder"
+	"language_projects/go_projects/acp-title-proxy/internal/governor"
 	"language_projects/go_projects/acp-title-proxy/internal/mux"
 	"language_projects/go_projects/acp-title-proxy/internal/opencode"
 	"language_projects/go_projects/acp-title-proxy/internal/pool"
@@ -208,6 +210,22 @@ func main() {
 			return
 		}
 
+		// agy sessions：列出直连模式下当前受管的活跃会话
+		if len(os.Args) > 2 && (strings.EqualFold(os.Args[2], "sessions") || strings.EqualFold(os.Args[2], "list-sessions")) {
+			gov := governor.NewGovernor(3)
+			list := gov.List()
+			if len(list) == 0 {
+				fmt.Println("[acp-title-proxy] 当前无受管活跃 AGY 会话")
+				return
+			}
+			fmt.Printf("[acp-title-proxy] 受管活跃 AGY 会话清单 (%d 个):\n", len(list))
+			for _, s := range list {
+				fmt.Printf("  PID=%-7d 状态=%-5s 创建=%s 最近活跃=%s 会话ID=%s\n",
+					s.PID, s.State, s.CreatedAt.Format("15:04:05"), s.LastActiveAt.Format("15:04:05"), s.SessionID)
+			}
+			return
+		}
+
 		// agy reap：清理父进程已退出的 AGY 孤儿进程（内存泄漏兜底）
 		if len(os.Args) > 2 && strings.EqualFold(os.Args[2], "reap") {
 			dryRun := false
@@ -260,7 +278,68 @@ func main() {
 			return
 		}
 
-		// 模式 B：带预热池加速的 AGY stdio 代理
+		// 解析直连模式参数与会话上限
+		isDirect := false
+		maxSessions := 3
+		var passthroughArgs []string
+
+		for i := 2; i < len(os.Args); i++ {
+			arg := os.Args[i]
+			if arg == "--direct" || arg == "-direct" {
+				isDirect = true
+				continue
+			}
+			if strings.HasPrefix(arg, "--max-sessions=") {
+				isDirect = true
+				if n, err := strconv.Atoi(strings.TrimPrefix(arg, "--max-sessions=")); err == nil && n > 0 {
+					maxSessions = n
+				}
+				continue
+			}
+			if arg == "--max-sessions" && i+1 < len(os.Args) {
+				isDirect = true
+				i++
+				if n, err := strconv.Atoi(os.Args[i]); err == nil && n > 0 {
+					maxSessions = n
+				}
+				continue
+			}
+			passthroughArgs = append(passthroughArgs, arg)
+		}
+
+		// 直连模式（轻量透明壳子，无预热池守护进程，由 Governor 管理并发配额）
+		if isDirect {
+			gov := governor.NewGovernor(maxSessions)
+			if err := gov.Acquire(); err != nil {
+				fmt.Fprintf(os.Stderr, "[acp-title-proxy] %v\n", err)
+				os.Exit(1)
+			}
+			defer gov.Release()
+
+			inj := proxy.NewInjector(os.Stdout)
+			titler := agy.NewTitler(&cfg.AGY, inj, nil)
+
+			exePath, args, err := finder.FindAGY(cfg.AGY.Executable)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[acp-title-proxy] Error: %v\n", err)
+				gov.Release()
+				os.Exit(1)
+			}
+			if len(passthroughArgs) > 0 {
+				args = append(args, passthroughArgs...)
+			}
+
+			runner := proxy.NewRunner(exePath, args, titler, skillMgr)
+			runner.Tracker = gov
+			if err := runner.Run(inj); err != nil {
+				gov.Release()
+				os.Exit(1)
+			}
+			gov.Release()
+			return
+		}
+
+		// 默认模式：带预热池加速的 AGY stdio 代理
 		inj := proxy.NewInjector(os.Stdout)
 		titler := agy.NewTitler(&cfg.AGY, inj, nil)
 
@@ -318,36 +397,37 @@ func shareStatus(cfg *config.Config) int {
 	defer conn.Close()
 
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
-	_, _ = conn.Write([]byte(`{"cmd":"status"}` + "\n"))
-	line, err := bufio.NewReader(conn).ReadBytes('\n')
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadString('\n')
 	if err != nil {
-		fmt.Println("[acp-title-proxy] failed to read share status:", err)
+		fmt.Println("[acp-title-proxy] share daemon status read error:", err)
 		return 1
 	}
-	fmt.Println(strings.TrimSpace(string(line)))
+	fmt.Print(line)
 	return 0
 }
 
 func shareStop(cfg *config.Config) int {
 	conn, err := net.DialTimeout("tcp", shareAddr(cfg), time.Second)
 	if err != nil {
-		fmt.Println("[acp-title-proxy] share daemon is NOT running")
+		fmt.Println("[acp-title-proxy] share daemon is NOT running (nothing to stop)")
 		return 0
 	}
 	defer conn.Close()
 
-	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
-	_, _ = conn.Write([]byte(`{"cmd":"stop"}` + "\n"))
-	_, _ = bufio.NewReader(conn).ReadBytes('\n')
-	fmt.Println("[acp-title-proxy] share daemon stopped")
+	_, _ = fmt.Fprintln(conn, "STOP")
+	fmt.Println("[acp-title-proxy] stop signal sent to share daemon.")
 	return 0
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "acp-title-proxy - Zed ACP Title Enhancement Utility\n\n")
-	fmt.Fprintf(os.Stderr, "Mode A (Zero-intrusion, settings.json untouched, 100%% upgrade-safe):\n")
-	fmt.Fprintf(os.Stderr, "  acp-title-proxy sync     - One-shot sync: syncs all OpenCode & recent AGY titles\n")
+	fmt.Fprintf(os.Stderr, "Usage: acp-title-proxy <command> [args...]\n\n")
+	fmt.Fprintf(os.Stderr, "Mode A (Zero Zed modifications - fully external):\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy sync     - One-shot sync: writes LLM titles to Zed db.sqlite\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy watch    - Background watcher: auto-syncs newly created threads\n\n")
+	fmt.Fprintf(os.Stderr, "Mode B (Direct Shell with Session Quota Governor - Recommended):\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy --direct [--max-sessions=3] - Direct 1:1 wrapper without pre-warm pool\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy sessions                    - List currently managed active sessions\n\n")
 	fmt.Fprintf(os.Stderr, "Mode B (Stdio proxy wrapper with Pre-warm Pool):\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy opencode - Proxy runner for OpenCode\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy      - Proxy runner for AGY (uses pre-warm pool if available)\n")
