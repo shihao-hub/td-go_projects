@@ -119,6 +119,28 @@ Zed 不会转发 agent 子进程的 stderr，排查标题问题请直接看这�
 
 ---
 
+### AGY 官方二进制自动更新（`agy update`）
+
+在 Zed 中，使用自定义 `type: "custom"` 的 Agent 不会触发官方 Registry 的二进制下载逻辑。
+`acp-title-proxy` 内置了与 Zed 官方哈希算法 100% 对齐的更新引擎，能够自动检测官方更新，
+并将新版二进制静默解压到 Zed 官方目录规范（`%LOCALAPPDATA%\Zed\external_agents\registry\antigravity-acp\v_*`）中。
+
+#### 1. 手动检查与更新
+```powershell
+.\bin\acp-title-proxy.exe agy update          # 检查并更新到最新版（带进度条）
+.\bin\acp-title-proxy.exe agy update --check  # 仅检查版本，不执行下载
+.\bin\acp-title-proxy.exe agy update --force  # 强制重新下载并解压当前版本
+```
+
+#### 2. 后台静默自动更新
+在 `share` 后端常驻 daemon 运行时，后台将定期（默认每 4 小时）静默检测是否有新版发布：
+- 启动延时 15 秒触发，**绝不抢占前台 UI 资源**；
+- 发现新版自动拉取、校验 SHA-256 并解压入库；
+- 自动清理更早的旧版本（默认保留最新的 2 份，节省磁盘空间）；
+- 正在运行的旧 Worker 不会被强制掐断，将在空闲超时（`idle_ttl`）重启或下次打开面板时无缝切换至新版。
+
+---
+
 ### 会话归属迁移（`agy threads`）
 
 Zed 把每个会话的归属记在 `sidebar_threads.agent_id` 上，取值就是 `settings.json`
@@ -137,7 +159,17 @@ Zed 发 `session/load`，后端回放完整历史（agy 声明了 `loadSession: 
 
 # 只归档、不改归属
 .\bin\acp-title-proxy.exe agy threads archive --agent antigravity-acp --apply
+
+# 精确回迁：只把「快照里属于 antigravity-acp」的会话改回去，
+# 原本就在代理名下的、以及迁移后新建的会话保持不动
+.\bin\acp-title-proxy.exe agy threads adopt `
+  --from "Google Antigravity (auto-title)" --to antigravity-acp `
+  --snapshot "$env:APPDATA\language_projects\acp-title-proxy\backups\threads-<时间戳>\db.sqlite"
 ```
+
+`--snapshot` 用于「已经迁走、想按原样退回」：Zed 库里没有来源标记，`agent_id` 一旦
+改写就无法反推归属，只能拿迁移前的快照当证据（`--snapshot-agent` 指定在快照中按哪个
+`agent_id` 判定，默认取 `--to`）。不传 `--snapshot` 时行为不变，仍是全量过户。
 
 - 写库前必须**完全退出 Zed**（含托盘），否则改动会被内存缓存覆盖；
 - 写前用 `VACUUM INTO` 做一致性快照（自动合并 WAL），落在
@@ -145,6 +177,117 @@ Zed 发 `session/load`，后端回放完整历史（agy 声明了 `loadSession: 
 - 没有 `session_id` 的空 thread 会被跳过，需要时用 `archive` 单独处理；
 - 迁移**不降低内存**：每个打开的会话仍有独立 harness，省掉的是 `agy_acp_server`
   的重复实例；收益是历史会话统一由共享 daemon 承载、标题统一管理。
+
+#### 双向切换速查（官方 ⇄ 代理）
+
+两个条目可以反复来回切：`session_id` 与对话内容都不动，只改 `agent_id`。
+每次 `--apply` 都会自动存一份改动前快照，切错了能退回上一步。
+
+```powershell
+cd D:\Users\language_projects\go_projects\acp-title-proxy
+
+# 每次切换前必须为 0（Zed 完全退出，含托盘）
+@(Get-Process Zed -ErrorAction SilentlyContinue).Count
+```
+
+切到代理 `Google Antigravity (auto-title)`：
+
+```powershell
+.\bin\acp-title-proxy.exe agy threads adopt --from antigravity-acp --to "Google Antigravity (auto-title)" --apply
+.\bin\acp-title-proxy.exe agy threads archive --agent antigravity-acp --apply
+.\bin\acp-title-proxy.exe agy threads list
+```
+
+切回官方 `antigravity-acp`：
+
+```powershell
+.\bin\acp-title-proxy.exe agy threads adopt --from "Google Antigravity (auto-title)" --to antigravity-acp --apply
+.\bin\acp-title-proxy.exe agy threads archive --agent "Google Antigravity (auto-title)" --apply
+.\bin\acp-title-proxy.exe agy threads list
+```
+
+- `adopt` 换归属，有 `session_id` 的会话全部搬走；
+- `archive` 把搬不走的空白 thread（新建后还没发过消息）归档，让源条目彻底归零；
+- 想先看再动手就去掉 `--apply`，dry-run 会打印条数与样例。
+
+**三个容易误判的点**
+
+1. Zed 里那个 `New Google Antigravity (auto-title) Thread` 是「新建会话用哪个 agent」
+   的选择器，不会随数据库切换而改变；切完方向后要在面板顶部手动选一次 agent，
+   否则新建的会话仍落在上次那个条目下；
+2. 会话列表是**所有 agent 混排**，且两个条目的图标可能相同，肉眼分不出归属——
+   用 `agy threads list --archived active --limit 15` 确认；
+3. 切换**不会改写历史标题**：`session/load` 不触发标题生成，旧会话标题保持原样；
+   要测自动标题只能新建会话。
+
+**备份清理**（每份约 900KB，反复切换会堆积，保留最近 5 份）：
+
+```powershell
+Get-ChildItem "$env:APPDATA\language_projects\acp-title-proxy\backups" -Directory |
+  Sort-Object Name -Descending | Select-Object -Skip 5 |
+  Remove-Item -Recurse -Force
+```
+
+---
+
+## AGY 进程内存泄漏与孤儿回收（`agy reap`）
+
+### 现象
+
+Zed 每打开/切换一个 AGY 会话，就会拉起一整套 AGY 进程：
+
+| 进程 | 典型内存 | 说明 |
+| --- | --- | --- |
+| `agy_acp_server.exe` | 12 MB（主）/ 180 MB（直连） | ACP 服务端 |
+| `localharness_external.exe` | 120–160 MB / 个 | 每个 ACP 会话一个沙箱 harness |
+
+客户端（Zed panel / `acp-title-proxy` 客户端）退出后，这两个进程在 Windows 上**不会自行退出**。
+反复切换会话会在后台累积十几个 180 MB 的僵尸进程，把内存推到 90% 以上；
+同时 `~/.gemini/antigravity-acp/conversations` 会涌入大量空会话库。
+
+### 回收命令
+
+```powershell
+.\bin\acp-title-proxy.exe agy reap --dry-run   # 只扫描，列出可清理的孤儿
+.\bin\acp-title-proxy.exe agy reap             # 立即清理
+```
+
+判定规则（宁漏不误杀）：
+
+1. 直接父进程已退出（PID 不存在）→ 孤儿；
+2. 父进程就是 `acp-title-proxy` / Zed / 其他宿主 → 视为活跃，**绝不动**；
+3. 父进程本身也是 AGY 进程（父子一起泄漏的形态）→ 递归判断。
+
+### 根治：Job Object 进程级兜底
+
+所有会拉起 AGY 后端的路径（共享 daemon、直连回退、预热池 worker、stdio 代理）
+都会在 `cmd.Start()` 之后立即把后端进程绑定到 Windows Job Object
+（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`，见 `internal/procguard`）：
+
+- 宿主进程正常退出、崩溃、甚至被任务管理器强杀，**内核都会连带终止整棵进程树**
+  （`agy_acp_server` + 所有 `localharness_external`），不再依赖 agy 自己是否干净退出；
+- 实测：只杀 daemon 本身（不杀进程树），后端在 1 秒内全部消失；
+- attach 失败（例如被上层 Job 限制）只打印一行警告并降级，不影响启动，
+  此时由上面的 `agy reap` 巡检兜底。
+
+### 自动巡检
+
+`agy share` 常驻 daemon 启动后会自动开启孤儿巡检（复用 `reaper.enabled` 与
+`reaper.check_interval_minutes`，默认每 5 分钟一次，启动 30 秒后先跑一次），
+发现孤儿直接清理并写入 `acp-title-proxy.log`：
+
+```
+[OrphanReaper] 发现 3 个孤儿 AGY 进程（父进程已退出），合计约 430 MB，已清理 3 个
+```
+
+### 使用建议
+
+- **不要把十几个 AGY 历史会话同时开成 panel**：每个 panel 都是一套独立 harness，
+  共享后端只复用 `agy_acp_server`，不共享 harness；
+- 历史会话尽量统一过户到 `Google Antigravity (auto-title)`（见上节 `agy threads adopt`），
+  避免 Zed 用官方 `antigravity-acp` 直连拉起 180 MB 的独立后端；
+- 长时间不用 AGY 时关掉 panel，daemon 会在 `share.idle_ttl_minutes`（默认 30 分钟）
+  后整体退出并释放全部 harness。
 
 ---
 
@@ -178,6 +321,11 @@ Zed 发 `session/load`，后端回放完整历史（agy 声明了 `loadSession: 
         "timeout_ms": 4000
       }
     ]
+  },
+  "auto_update": {
+    "enabled": true,
+    "check_interval_hours": 4,
+    "keep_versions": 2
   }
 }
 ```
