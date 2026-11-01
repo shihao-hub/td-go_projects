@@ -32,9 +32,18 @@ func main() {
 
 	cmd := strings.ToLower(os.Args[1])
 
-	// 日志同时落盘到 %APPDATA%\language_projects\acp-title-proxy\acp-title-proxy.log，
+	// 日志同时落盘到 %APPDATA%\language_projects\acp-title-proxy\ 下的角色文件，
 	// 因为 Zed 不会转发 agent 子进程的 stderr，仅靠终端无法排查。
-	closeLog := applog.Init()
+	// 长驻 daemon 与多进程客户端分开落盘：前者独占文件走标准轮转，
+	// 后者可能被多个 panel 进程并发写，需要另一套轮转策略。
+	role := applog.RoleClient
+	switch cmd {
+	case "share":
+		role = applog.RoleShare
+	case "daemon":
+		role = applog.RolePool
+	}
+	closeLog := applog.Init(role)
 	defer closeLog()
 
 	cfg, cfgPath, err := config.LoadConfig()

@@ -45,11 +45,24 @@ Zed ACP (Agent Client Protocol) 智能标题增强工具。
 > 第 3 条同时承担"重启后在旧会话发『继续』不得覆写标题"的防护。
 
 #### 3. 故障排查
-所有运行日志（含每次模型调用、耗时、失败原因）落盘到：
-```
-%APPDATA%\language_projects\acp-title-proxy\acp-title-proxy.log
-```
-Zed 不会转发 agent 子进程的 stderr，排查标题问题请直接看该文件。
+所有运行日志落盘在 `%APPDATA%\language_projects\acp-title-proxy\`，按写者角色分成三个文件：
+
+| 文件 | 写者 | 说明 |
+| --- | --- | --- |
+| `acp-title-proxy.log` | 共享后端 daemon（顶层 `share`，单例） | 标题生成、模型调用、耗时、失败原因 |
+| `acp-title-proxy-pool.log` | 预热池 daemon（顶层 `daemon`，单例） | worker 预热与回收 |
+| `acp-title-proxy-client.log` | Zed 每个 panel 的客户端进程 | attach / 回退直连 / 直连模式的标题日志 |
+
+Zed 不会转发 agent 子进程的 stderr，排查标题问题请直接看这些文件（**首选 `acp-title-proxy.log`**）。
+
+轮转策略（两个 daemon 文件走标准 `lumberjack`）：
+- 单文件超过 **5 MB** 自动轮转；
+- 保留最近 **3 份**，超过 **14 天**自动删除；
+- 归档一律 **gzip 压缩**，文件名形如 `acp-title-proxy-2026-11-01T10-38-15.923.log.gz`。
+
+`acp-title-proxy-client.log` 由多个 panel 进程并发追加，Windows 下 Go 文件句柄不允许其他进程 rename，
+因此改用「复制为带时间戳的 gzip 归档 → 原地截断」轮转（同样 5 MB / 3 份 / 14 天），
+缺点只是归档名带进程号、极端并发下可能多出一两个历史份。
 
 ---
 
