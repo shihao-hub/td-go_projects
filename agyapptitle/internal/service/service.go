@@ -36,18 +36,6 @@ func (s *Service) SyncOnce(targetEnv string, dryRun bool) ([]model.RenameTask, e
 
 	var allTasks []model.RenameTask
 
-	// 探测语言服务器 ConnectRPC 接口
-	var lsInfo *rpc.LanguageServerInfo
-	for _, env := range envs {
-		if env.Name == "app" {
-			info, err := rpc.DetectRunningLanguageServer()
-			if err == nil {
-				lsInfo = info
-			}
-			break
-		}
-	}
-
 	for _, env := range envs {
 		records, err := store.QuerySessions(env)
 		if err != nil {
@@ -119,13 +107,26 @@ func (s *Service) SyncOnce(targetEnv string, dryRun bool) ([]model.RenameTask, e
 				}
 			}
 
-			// 5. 持久化完成后，再通过 ConnectRPC 实时热推送至 language_server 内存与 UI (仅 app 环境)
-			if env.Name == "app" && lsInfo != nil {
-				for cid, t := range updates {
-					if err := rpc.PushConversationTitle(lsInfo, cid, t); err != nil {
-						log.Printf("[%s] ConnectRPC 热推送失败 (%s): %v", env.Name, cid[:8], err)
-					} else {
-						log.Printf("[%s] ConnectRPC 实时热推送成功: %s -> %s", env.Name, cid[:8], t)
+			// 5. 仅当有更新需要推送时，才按需懒加载获取 LanguageServer 连接信息 (仅 app 环境)
+			if env.Name == "app" {
+				lsInfo, err := rpc.GetCachedOrDetectLanguageServer(false)
+				if err != nil {
+					log.Printf("[%s] 探测 LanguageServer 失败: %v", env.Name, err)
+				} else {
+					for cid, t := range updates {
+						if err := rpc.PushConversationTitle(lsInfo, cid, t); err != nil {
+							log.Printf("[%s] ConnectRPC 热推送初次失败 (%s)，尝试刷新缓存重试自愈: %v", env.Name, cid[:8], err)
+							if newInfo, refreshErr := rpc.GetCachedOrDetectLanguageServer(true); refreshErr == nil {
+								lsInfo = newInfo
+								if retryErr := rpc.PushConversationTitle(lsInfo, cid, t); retryErr == nil {
+									log.Printf("[%s] ConnectRPC 实时热推送重试自愈成功: %s -> %s", env.Name, cid[:8], t)
+									continue
+								}
+							}
+							log.Printf("[%s] ConnectRPC 热推送最终失败 (%s): %v", env.Name, cid[:8], err)
+						} else {
+							log.Printf("[%s] ConnectRPC 实时热推送成功: %s -> %s", env.Name, cid[:8], t)
+						}
 					}
 				}
 			}

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,9 @@ var (
 		Transport: insecureTransport,
 		Timeout:   3 * time.Second,
 	}
+
+	cachedInfoMu sync.RWMutex
+	cachedInfo   *LanguageServerInfo
 )
 
 // LanguageServerInfo 保存探测到的正在运行的语言服务器进程与鉴权信息。
@@ -32,6 +36,40 @@ type LanguageServerInfo struct {
 	CSRFToken string
 	Port      int
 	IsHTTPS   bool
+}
+
+// GetCachedOrDetectLanguageServer 优先从内存缓存中获取连接信息，避免高频轮询探测。
+// 仅当缓存为空或 forceRefresh 为 true（如探测到端口断连）时，才调用一次系统级探测。
+func GetCachedOrDetectLanguageServer(forceRefresh bool) (*LanguageServerInfo, error) {
+	cachedInfoMu.RLock()
+	if !forceRefresh && cachedInfo != nil {
+		info := cachedInfo
+		cachedInfoMu.RUnlock()
+		return info, nil
+	}
+	cachedInfoMu.RUnlock()
+
+	cachedInfoMu.Lock()
+	defer cachedInfoMu.Unlock()
+
+	// 双重检查
+	if !forceRefresh && cachedInfo != nil {
+		return cachedInfo, nil
+	}
+
+	info, err := DetectRunningLanguageServer()
+	if err != nil {
+		return nil, err
+	}
+	cachedInfo = info
+	return cachedInfo, nil
+}
+
+// InvalidateLanguageServerCache 主动使缓存失效（当网络请求彻底断开时）。
+func InvalidateLanguageServerCache() {
+	cachedInfoMu.Lock()
+	defer cachedInfoMu.Unlock()
+	cachedInfo = nil
 }
 
 // DetectRunningLanguageServer 探测系统中运行的 language_server.exe。
@@ -182,11 +220,13 @@ func PushConversationTitle(info *LanguageServerInfo, sessionID, newTitle string)
 
 	resp, err := rpcClient.Do(req)
 	if err != nil {
+		InvalidateLanguageServerCache()
 		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		InvalidateLanguageServerCache()
 		return fmt.Errorf("connectrpc returned status %d", resp.StatusCode)
 	}
 
