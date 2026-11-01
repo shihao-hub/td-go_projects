@@ -97,7 +97,8 @@ def base_version() -> str:
 
 
 def worktree_dirty() -> bool:
-    r = run_git("-c", "status.relativePaths=false", "status", "--porcelain", "--untracked-files=normal")
+    """当前子项目工作区是否含未提交改动。"""
+    r = run_git("status", "--porcelain", ".")
     if r.returncode != 0:
         return True
     for line in r.stdout.splitlines():
