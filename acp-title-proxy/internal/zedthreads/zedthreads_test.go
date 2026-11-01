@@ -59,7 +59,7 @@ func TestPlanAdoptSkipsArchivedAndEmpty(t *testing.T) {
 	insertThread(t, db, 4, "antigravity-acp", "", 0)      // 空 thread
 	insertThread(t, db, 5, "other", "sid-5", 0)           // 其它 agent
 
-	plan, err := PlanAdopt(db, "antigravity-acp", "proxy", false)
+	plan, err := PlanAdopt(db, "antigravity-acp", "proxy", false, nil)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestPlanAdoptSkipsArchivedAndEmpty(t *testing.T) {
 		t.Errorf("emptySID=%d, want 1", plan.EmptySID)
 	}
 
-	all, err := PlanAdopt(db, "antigravity-acp", "proxy", true)
+	all, err := PlanAdopt(db, "antigravity-acp", "proxy", true, nil)
 	if err != nil {
 		t.Fatalf("plan all: %v", err)
 	}
@@ -84,10 +84,10 @@ func TestPlanAdoptSkipsArchivedAndEmpty(t *testing.T) {
 
 func TestPlanAdoptRejectsSameAndEmpty(t *testing.T) {
 	db, _ := newTestDB(t)
-	if _, err := PlanAdopt(db, "a", "a", false); err == nil {
+	if _, err := PlanAdopt(db, "a", "a", false, nil); err == nil {
 		t.Error("expected error for same from/to")
 	}
-	if _, err := PlanAdopt(db, "", "b", false); err == nil {
+	if _, err := PlanAdopt(db, "", "b", false, nil); err == nil {
 		t.Error("expected error for empty from")
 	}
 }
@@ -97,7 +97,7 @@ func TestApplyTxAdopt(t *testing.T) {
 	insertThread(t, db, 1, "antigravity-acp", "sid-1", 0)
 	insertThread(t, db, 2, "antigravity-acp", "sid-2", 0)
 
-	plan, err := PlanAdopt(db, "antigravity-acp", "proxy", false)
+	plan, err := PlanAdopt(db, "antigravity-acp", "proxy", false, nil)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -179,5 +179,66 @@ func TestListFilters(t *testing.T) {
 
 	if _, err := List(db, ListOptions{Archived: "bogus"}); err == nil {
 		t.Error("expected error for invalid archived value")
+	}
+}
+
+func TestPlanAdoptWithSnapshotFilter(t *testing.T) {
+	cur, _ := newTestDB(t)
+	insertThread(t, cur, 1, "proxy", "sid-from-official", 0)  // 原本属于官方，迁移后挂在代理下
+	insertThread(t, cur, 2, "proxy", "sid-original-proxy", 0) // 原本就在代理下
+	insertThread(t, cur, 3, "proxy", "sid-created-later", 0)  // 迁移后新建
+
+	snap, snapPath := newTestDB(t)
+	insertThread(t, snap, 1, "pool", "sid-from-official", 0)
+
+	allowed, err := LoadSnapshotMembers(snapPath, "pool")
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if len(allowed) != 1 || !allowed["sid-from-official"] {
+		t.Fatalf("allowed=%v, want only sid-from-official", allowed)
+	}
+
+	plan, err := PlanAdopt(cur, "proxy", "pool", false, allowed)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if len(plan.Rows) != 1 {
+		t.Fatalf("rows=%d, want 1", len(plan.Rows))
+	}
+	if plan.Rows[0].SessionID != "sid-from-official" {
+		t.Errorf("picked %q, want sid-from-official", plan.Rows[0].SessionID)
+	}
+	if plan.Unmatched != 2 {
+		t.Errorf("unmatched=%d, want 2", plan.Unmatched)
+	}
+
+	n, err := applyTx(cur, plan)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("updated=%d, want 1", n)
+	}
+
+	var remaining int
+	if err := cur.QueryRow(
+		"SELECT COUNT(*) FROM sidebar_threads WHERE agent_id='proxy'").Scan(&remaining); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if remaining != 2 {
+		t.Errorf("proxy remaining=%d, want 2", remaining)
+	}
+}
+
+func TestLoadSnapshotMembersRejectsBadInput(t *testing.T) {
+	if _, err := LoadSnapshotMembers(filepath.Join(t.TempDir(), "missing.db"), "pool"); err == nil {
+		t.Error("expected error for missing snapshot file")
+	}
+	if _, err := LoadSnapshotMembers("any.db", ""); err == nil {
+		t.Error("expected error for empty agent id")
+	}
+	if _, err := LoadSnapshotMembers("", "pool"); err == nil {
+		t.Error("expected error for empty path")
 	}
 }

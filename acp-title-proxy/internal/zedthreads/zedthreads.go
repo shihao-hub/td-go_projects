@@ -54,12 +54,13 @@ type ListOptions struct {
 
 // Plan 是一次写操作的完整计划（dry-run 与 apply 共用同一份数据）。
 type Plan struct {
-	Kind     string // adopt | archive
-	From     string
-	To       string
-	Rows     []Thread
-	EmptySID int // 因无 session_id 被跳过的行数
-	Skipped  int // 因已归档/无变化被跳过的行数
+	Kind      string // adopt | archive
+	From      string
+	To        string
+	Rows      []Thread
+	EmptySID  int // 因无 session_id 被跳过的行数
+	Skipped   int // 因已归档/无变化被跳过的行数
+	Unmatched int // 因不在快照允许集合内被跳过的行数
 }
 
 // Result 是写操作的结果。
@@ -212,9 +213,10 @@ func List(db *sql.DB, opts ListOptions) ([]Thread, error) {
 
 // PlanAdopt 生成「把 from 名下会话过户到 to」的计划。
 //
-// 只处理有 session_id 的行：没有 session_id 的空 thread 无会话可载，单独计数后跳过，
-// 由调用方决定是否额外归档（archiveEmpty）。
-func PlanAdopt(db *sql.DB, from, to string, includeArchived bool) (*Plan, error) {
+// allowed 为 nil 时迁移全部；非 nil 时只迁移 session_id 落在集合内的会话
+// （用于依据历史快照做精确回迁，避免误伤原本就属于目标条目的会话）。
+// 没有 session_id 的空 thread 无会话可载，单独计数后跳过，由调用方决定是否额外归档。
+func PlanAdopt(db *sql.DB, from, to string, includeArchived bool, allowed map[string]bool) (*Plan, error) {
 	if from == "" || to == "" {
 		return nil, errors.New("--from 与 --to 不能为空")
 	}
@@ -229,6 +231,10 @@ func PlanAdopt(db *sql.DB, from, to string, includeArchived bool) (*Plan, error)
 
 	plan := &Plan{Kind: "adopt", From: from, To: to}
 	for _, t := range rows {
+		if allowed != nil && !allowed[t.SessionID] {
+			plan.Unmatched++
+			continue
+		}
 		if t.Archived && !includeArchived {
 			plan.Skipped++
 			continue
@@ -240,6 +246,48 @@ func PlanAdopt(db *sql.DB, from, to string, includeArchived bool) (*Plan, error)
 		plan.Rows = append(plan.Rows, t)
 	}
 	return plan, nil
+}
+
+// LoadSnapshotMembers 只读打开历史快照，返回该 agent 名下所有非空 session_id 集合。
+//
+// 用于精确回迁：现有数据没有来源标记，agent_id 改写后无法反推归属，
+// 只能以迁移前的快照作为「原本属于谁」的证据。
+func LoadSnapshotMembers(dbPath, agent string) (map[string]bool, error) {
+	if dbPath == "" {
+		return nil, errors.New("快照路径不能为空")
+	}
+	if agent == "" {
+		return nil, errors.New("快照归属 agent_id 不能为空")
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, fmt.Errorf("快照文件不可读: %w", err)
+	}
+
+	db, err := OpenRO(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	rows, err := db.Query(
+		"SELECT session_id FROM sidebar_threads"+
+			" WHERE agent_id = ? AND session_id IS NOT NULL AND session_id <> ''",
+		agent,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("查询快照失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]bool)
+	for rows.Next() {
+		var sid string
+		if err := rows.Scan(&sid); err != nil {
+			return nil, fmt.Errorf("读取快照行失败: %w", err)
+		}
+		out[sid] = true
+	}
+	return out, rows.Err()
 }
 
 // PlanArchive 生成「归档 agent 名下全部未归档会话」的计划。

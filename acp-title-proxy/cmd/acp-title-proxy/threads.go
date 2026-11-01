@@ -114,6 +114,8 @@ func threadsAdopt(args []string) int {
 	from := fs.String("from", "antigravity-acp", "原 agent_id（官方条目）")
 	to := fs.String("to", "Google Antigravity (auto-title)", "目标 agent_id（settings.json 里的键名）")
 	includeArchived := fs.Bool("include-archived", false, "连已归档的会话一起过户")
+	snapshot := fs.String("snapshot", "", "比对用的历史快照 db（精确回迁：只迁快照中属于目标 agent 的会话）")
+	snapshotAgent := fs.String("snapshot-agent", "", "快照中判定归属的 agent_id（默认同 --to）")
 	limit := fs.Int("limit", 0, "本次最多迁移条数（0 表示全部；建议先 1 条验证）")
 	apply := fs.Bool("apply", false, "真正写入（默认 dry-run）")
 	if err := fs.Parse(args); err != nil {
@@ -133,7 +135,25 @@ func threadsAdopt(args []string) int {
 		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 		return 1
 	}
-	plan, err := zedthreads.PlanAdopt(db, *from, *to, *includeArchived)
+	var allowed map[string]bool
+	if *snapshot != "" {
+		snapshotOwner := *snapshotAgent
+		if snapshotOwner == "" {
+			snapshotOwner = *to
+		}
+		allowed, err = zedthreads.LoadSnapshotMembers(*snapshot, snapshotOwner)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "错误: %v\n", err)
+			return 1
+		}
+		if len(allowed) == 0 {
+			fmt.Fprintf(os.Stderr, "错误: 快照中 agent_id=%q 没有任何会话，请检查 --snapshot 与 --snapshot-agent\n", snapshotOwner)
+			return 1
+		}
+		fmt.Printf("快照: %s（agent_id=%q，%d 条）\n", *snapshot, snapshotOwner, len(allowed))
+	}
+
+	plan, err := zedthreads.PlanAdopt(db, *from, *to, *includeArchived, allowed)
 	_ = db.Close()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
@@ -142,6 +162,9 @@ func threadsAdopt(args []string) int {
 
 	fmt.Printf("计划：把 %s 的会话过户到 %s\n", *from, *to)
 	fmt.Printf("  可迁移 %d 条\n", len(plan.Rows))
+	if plan.Unmatched > 0 {
+		fmt.Printf("  快照未命中 %d 条（保持原样，不属于目标 agent）\n", plan.Unmatched)
+	}
 	if *limit > 0 && len(plan.Rows) > *limit {
 		fmt.Printf("  本次仅取最近 %d 条（--limit），剩余 %d 条留待下次\n", *limit, len(plan.Rows)-*limit)
 		plan.Rows = plan.Rows[:*limit]
@@ -240,13 +263,16 @@ func printThreadsUsage() {
 	fmt.Fprint(os.Stderr, `agy threads - 管理 Zed 会话的 agent 归属与归档
 
   agy threads list    [--agent ID] [--archived all|active|archived] [--limit N] [--db PATH]
-  agy threads adopt   --from ID --to ID [--include-archived] [--limit N] [--apply] [--db PATH]
+  agy threads adopt   --from ID --to ID [--snapshot PATH] [--snapshot-agent ID]
+                      [--include-archived] [--limit N] [--apply] [--db PATH]
   agy threads archive --agent ID [--apply] [--db PATH]
 
 说明：
   adopt    把 --from 名下的会话（session_id 不变的）过户到 --to，之后由该 agent 加载。
            目标必须是 settings.json 中 agent_servers 的键名，例如
            "Google Antigravity (auto-title)"。
+           加 --snapshot 时只迁「该快照里属于 --to（或 --snapshot-agent）名下」的会话，
+           用于把此前迁走的会话精确回迁，不误伤原本就属于目标条目的会话。
   写操作默认 dry-run，加 --apply 才写库；写前必须完全退出 Zed，且自动做一致性备份。
 `)
 }
