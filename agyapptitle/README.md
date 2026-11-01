@@ -28,6 +28,20 @@
 
 ---
 
+## 构建与通道隔离 (Dev vs Release)
+
+严格遵循 Monorepo《各语言子仓约定》中的 dev/release 隔离规范：
+
+| 维度 | 开发版 (Dev) | 正式版 (Release) |
+|---|---|---|
+| **构建命令** | `uv run scripts/build.py` | `uv run scripts/build.py --release` |
+| **产物文件** | `agyapptitle-dev.exe` / `agyapptitlew-dev.exe` | `agyapptitle.exe` / `agyapptitlew.exe` |
+| **版本号** | 带 `-dev` / `-dirty` 标识（如 `v1.0.0-dev`） | 纯净正式版本号（如 `v1.0.0`） |
+| **数据目录** | `%APPDATA%\language_projects\agyapptitle\dev` | `%APPDATA%\language_projects\agyapptitle\prod` |
+| **开机自启** | **强校验拦截**（禁止注册，防止污染系统） | **允许注册**（绑定无黑框 `agyapptitlew.exe`） |
+
+---
+
 ## 命令速查 (CLI Reference)
 
 ```powershell
@@ -52,7 +66,14 @@ agyapptitle status
 # 7. 停止后台守护进程
 agyapptitle stop
 
-# 8. 零 I/O 静态导出 JSON Schema 契约
+# 8. 一键开启 Windows 开机自启（自动绑定无黑框版本 agyapptitlew.exe）
+agyapptitle autostart enable
+
+# 9. 查看与关闭开机自启
+agyapptitle autostart
+agyapptitle autostart disable
+
+# 10. 零 I/O 静态导出 JSON Schema 契约
 agyapptitle schema
 ```
 

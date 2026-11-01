@@ -3,6 +3,7 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,6 +16,14 @@ import (
 
 var (
 	csrfTokenRegex = regexp.MustCompile(`--csrf_token\s+([a-zA-Z0-9\-]+)`)
+
+	insecureTransport = &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	rpcClient = &http.Client{
+		Transport: insecureTransport,
+		Timeout:   3 * time.Second,
+	}
 )
 
 // LanguageServerInfo 保存探测到的正在运行的语言服务器进程与鉴权信息。
@@ -22,6 +31,7 @@ type LanguageServerInfo struct {
 	PID       int
 	CSRFToken string
 	Port      int
+	IsHTTPS   bool
 }
 
 // DetectRunningLanguageServer 探测系统中运行的 language_server.exe。
@@ -35,7 +45,8 @@ $ports = Get-NetTCPConnection -OwningProcess $p.ProcessId -State Listen | Select
 [PSCustomObject]@{ PID = $p.ProcessId; Token = $token; Ports = $ports } | ConvertTo-Json -Compress
 `
 
-	cmd := exec.Command("powershell", "-NoProfile", "-Command", psScript)
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psScript)
+	prepareCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
 		return nil, fmt.Errorf("language_server.exe is not running")
@@ -71,38 +82,64 @@ $ports = Get-NetTCPConnection -OwningProcess $p.ProcessId -State Listen | Select
 		}
 	}
 
-	// 探测哪个端口提供 HTTP 200 服务
-	httpClient := &http.Client{Timeout: 500 * time.Millisecond}
-	var matchedPort int
+	// 优先探测 HTTPS 的 LanguageServerService/Heartbeat 接口
+	probeClient := &http.Client{
+		Transport: insecureTransport,
+		Timeout:   600 * time.Millisecond,
+	}
 
 	for _, p := range ports {
-		url := fmt.Sprintf("http://127.0.0.1:%d/", p)
-		req, _ := http.NewRequest("GET", url, nil)
-		req.Header.Set("User-Agent", "antigravity")
-		resp, err := httpClient.Do(req)
+		// 1. 尝试 HTTPS
+		httpsURL := fmt.Sprintf("https://127.0.0.1:%d/exa.language_server_pb.LanguageServerService/Heartbeat", p)
+		req, err := http.NewRequest("POST", httpsURL, bytes.NewReader([]byte("{}")))
 		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == 200 {
-				matchedPort = p
-				break
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("x-codeium-csrf-token", raw.Token)
+			req.Header.Set("User-Agent", "antigravity")
+			if resp, err := probeClient.Do(req); err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return &LanguageServerInfo{
+						PID:       raw.PID,
+						CSRFToken: raw.Token,
+						Port:      p,
+						IsHTTPS:   true,
+					}, nil
+				}
+			}
+		}
+
+		// 2. 尝试 HTTP 回退
+		httpURL := fmt.Sprintf("http://127.0.0.1:%d/exa.language_server_pb.LanguageServerService/Heartbeat", p)
+		req2, err := http.NewRequest("POST", httpURL, bytes.NewReader([]byte("{}")))
+		if err == nil {
+			req2.Header.Set("Content-Type", "application/json")
+			req2.Header.Set("x-codeium-csrf-token", raw.Token)
+			req2.Header.Set("User-Agent", "antigravity")
+			if resp, err := probeClient.Do(req2); err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return &LanguageServerInfo{
+						PID:       raw.PID,
+						CSRFToken: raw.Token,
+						Port:      p,
+						IsHTTPS:   false,
+					}, nil
+				}
 			}
 		}
 	}
 
-	if matchedPort == 0 && len(ports) > 0 {
-		// 回退第一个端口
-		matchedPort = ports[0]
+	if len(ports) > 0 {
+		return &LanguageServerInfo{
+			PID:       raw.PID,
+			CSRFToken: raw.Token,
+			Port:      ports[0],
+			IsHTTPS:   true,
+		}, nil
 	}
 
-	if matchedPort == 0 {
-		return nil, fmt.Errorf("no active HTTP port found for language_server.exe")
-	}
-
-	return &LanguageServerInfo{
-		PID:       raw.PID,
-		CSRFToken: raw.Token,
-		Port:      matchedPort,
-	}, nil
+	return nil, fmt.Errorf("no active RPC port found for language_server.exe")
 }
 
 // PushConversationTitle 通过 ConnectRPC 实时热推送单条会话标题至 language_server.exe 内存。
@@ -111,7 +148,12 @@ func PushConversationTitle(info *LanguageServerInfo, sessionID, newTitle string)
 		return fmt.Errorf("invalid language server connection info")
 	}
 
-	rpcURL := fmt.Sprintf("http://127.0.0.1:%d/exa.language_server_pb.LanguageServerService/UpdateConversationAnnotations", info.Port)
+	scheme := "https"
+	if !info.IsHTTPS {
+		scheme = "http"
+	}
+
+	rpcURL := fmt.Sprintf("%s://127.0.0.1:%d/exa.language_server_pb.LanguageServerService/UpdateConversationAnnotations", scheme, info.Port)
 
 	payload := map[string]interface{}{
 		"cascadeIds": []string{sessionID},
@@ -138,7 +180,7 @@ func PushConversationTitle(info *LanguageServerInfo, sessionID, newTitle string)
 	req.Header.Set("x-codeium-csrf-token", info.CSRFToken)
 	req.Header.Set("User-Agent", "antigravity")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rpcClient.Do(req)
 	if err != nil {
 		return err
 	}

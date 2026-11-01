@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"language_projects/go_projects/agyapptitle/internal/buildinfo"
 )
 
 // ProviderConfig 定义单个模型提供方配置。
@@ -25,14 +27,15 @@ type Config struct {
 	Providers       []ProviderConfig `json:"providers"`
 }
 
-// GetAppDataDir 获取符合全局约束的运行时配置与数据存放目录。
+// GetAppDataDir 获取符合全局约束的运行时配置与数据存放目录，严格按 dev/prod 隔离。
 func GetAppDataDir() string {
+	channel := buildinfo.ChannelName()
 	appData := os.Getenv("APPDATA")
 	if appData == "" {
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".language_projects", "agyapptitle")
+		return filepath.Join(home, ".language_projects", "agyapptitle", channel)
 	}
-	return filepath.Join(appData, "language_projects", "agyapptitle")
+	return filepath.Join(appData, "language_projects", "agyapptitle", channel)
 }
 
 // GetConfigPath 获取 config.json 完整绝对路径。

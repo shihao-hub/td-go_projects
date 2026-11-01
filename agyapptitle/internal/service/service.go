@@ -87,14 +87,7 @@ func (s *Service) SyncOnce(targetEnv string, dryRun bool) ([]model.RenameTask, e
 		}
 
 		if len(updates) > 0 && !dryRun {
-			// 0. ConnectRPC 实时热推送 (仅 app 环境)
-			if env.Name == "app" && lsInfo != nil {
-				for cid, t := range updates {
-					_ = rpc.PushConversationTitle(lsInfo, cid, t)
-				}
-			}
-
-			// 1-4. 执行四重原子更新 (SQLite + raw_summary + .pb + annotations + WAL TRUNCATE)
+			// 1-4. 先执行四重原子更新 (SQLite + raw_summary + .pb + annotations + WAL TRUNCATE)
 			count, err := store.ApplyBatchRename(env, updates)
 			if err != nil {
 				log.Printf("[%s] 写入四重持久化异常: %v", env.Name, err)
@@ -102,6 +95,17 @@ func (s *Service) SyncOnce(targetEnv string, dryRun bool) ([]model.RenameTask, e
 				log.Printf("[%s] 成功原子写入 %d 条会话中文标题", env.Name, count)
 				for cid, t := range updates {
 					s.state.RecordSuccess(cid, t)
+				}
+			}
+
+			// 5. 持久化完成后，再通过 ConnectRPC 实时热推送至 language_server 内存与 UI (仅 app 环境)
+			if env.Name == "app" && lsInfo != nil {
+				for cid, t := range updates {
+					if err := rpc.PushConversationTitle(lsInfo, cid, t); err != nil {
+						log.Printf("[%s] ConnectRPC 热推送失败 (%s): %v", env.Name, cid[:8], err)
+					} else {
+						log.Printf("[%s] ConnectRPC 实时热推送成功: %s -> %s", env.Name, cid[:8], t)
+					}
 				}
 			}
 		}

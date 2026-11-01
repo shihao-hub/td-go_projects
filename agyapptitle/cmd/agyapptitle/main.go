@@ -4,24 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"language_projects/go_projects/agyapptitle/internal/buildinfo"
 	"language_projects/go_projects/agyapptitle/internal/config"
 	"language_projects/go_projects/agyapptitle/internal/model"
 	"language_projects/go_projects/agyapptitle/internal/service"
 	"language_projects/go_projects/agyapptitle/internal/store"
 	"language_projects/go_projects/agyapptitle/internal/watcher"
-)
-
-var (
-	version = "1.0.0"
-	commit  = "none"
-	date    = "unknown"
 )
 
 func main() {
@@ -30,7 +28,7 @@ func main() {
 		Short: "Google Antigravity 会话标题智能汉化与后台守护进程",
 		Long: `agyapptitle 是专为 Google Antigravity (App & CLI) 打造的本地后台守护与会话标题治理工具。
 支持监听新会话落盘、调用极速大模型生成精简中文标题，并通过 ConnectRPC 实时热推送与 SQLite/Protobuf 四重原子持久化。`,
-		Version: fmt.Sprintf("%s (commit: %s, date: %s)", version, commit, date),
+		Version: fmt.Sprintf("%s (channel: %s, buildID: %s)", buildinfo.Version, buildinfo.BuildMode, buildinfo.BuildID),
 	}
 
 	// 1. sync 命令
@@ -102,6 +100,18 @@ func main() {
 				return err
 			}
 
+			_ = watcher.EnsureAppDataDir()
+
+			// 确保日志落盘到 daemon.log
+			logPath := filepath.Join(config.GetAppDataDir(), "daemon.log")
+			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+				log.SetOutput(logFile)
+			}
+
+			pidFile := filepath.Join(config.GetAppDataDir(), "daemon.pid")
+			_ = os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644)
+			defer os.Remove(pidFile)
+
 			svc := service.NewService(cfg, st)
 			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
@@ -150,6 +160,7 @@ func main() {
 		Short: "查看后台守护进程与会话汉化状态",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			running, pid := watcher.CheckDaemonRunning()
+			autostartEnabled, autostartTarget, _ := watcher.GetAutostartStatus()
 			st, _ := store.LoadState()
 
 			titledCount := 0
@@ -161,11 +172,15 @@ func main() {
 
 			if statusJSON {
 				out := map[string]interface{}{
-					"status":       "ok",
-					"running":      running,
-					"pid":          pid,
-					"titled_count": titledCount,
-					"last_scan":    lastScan,
+					"status":            "ok",
+					"channel":           buildinfo.BuildMode,
+					"app_data_dir":      config.GetAppDataDir(),
+					"running":           running,
+					"pid":               pid,
+					"autostart_enabled": autostartEnabled,
+					"autostart_target":  autostartTarget,
+					"titled_count":      titledCount,
+					"last_scan":         lastScan,
 				}
 				b, _ := json.MarshalIndent(out, "", "  ")
 				fmt.Println(string(b))
@@ -173,10 +188,17 @@ func main() {
 			}
 
 			fmt.Println("\n[agyapptitle 运行状态]")
+			fmt.Printf("  构建通道:   [%s]\n", buildinfo.BuildMode)
+			fmt.Printf("  数据目录:   %s\n", config.GetAppDataDir())
 			if running {
 				fmt.Printf("  后台进程:   [运行中] (PID: %d)\n", pid)
 			} else {
 				fmt.Println("  后台进程:   [未运行]")
+			}
+			if autostartEnabled {
+				fmt.Println("  开机自启:   [已开启]")
+			} else {
+				fmt.Println("  开机自启:   [未开启] (运行 'agyapptitle autostart enable' 开启)")
 			}
 			fmt.Printf("  已汉化会话: %d 个\n", titledCount)
 			if lastScan != "" {
@@ -188,7 +210,53 @@ func main() {
 	}
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "输出标准 JSON 格式")
 
-	// 6. schema 命令
+	// 6. autostart 命令
+	autostartCmd := &cobra.Command{
+		Use:   "autostart",
+		Short: "管理 Windows 开机自启动设置 (enable / disable / status)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			enabled, target, _ := watcher.GetAutostartStatus()
+			fmt.Println("\n[开机自启状态]")
+			if enabled {
+				fmt.Println("  状态: [已开启]")
+				fmt.Printf("  命令: %s\n\n", target)
+			} else {
+				fmt.Println("  状态: [未开启]")
+				fmt.Println("  提示: 使用 'agyapptitle autostart enable' 一键开启开机自启。")
+			}
+			return nil
+		},
+	}
+
+	autostartEnableCmd := &cobra.Command{
+		Use:   "enable",
+		Short: "开启 Windows 开机自启动（自动绑定无黑框版本 agyapptitlew.exe）",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmdLine, err := watcher.EnableAutostart()
+			if err != nil {
+				return err
+			}
+			fmt.Println("[成功] 已开启 Windows 开机自启动！")
+			fmt.Printf("注册命令: %s\n", cmdLine)
+			return nil
+		},
+	}
+
+	autostartDisableCmd := &cobra.Command{
+		Use:   "disable",
+		Short: "关闭 Windows 开机自启动",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := watcher.DisableAutostart(); err != nil {
+				return err
+			}
+			fmt.Println("[成功] 已关闭 Windows 开机自启动。")
+			return nil
+		},
+	}
+
+	autostartCmd.AddCommand(autostartEnableCmd, autostartDisableCmd)
+
+	// 7. schema 命令
 	schemaCmd := &cobra.Command{
 		Use:   "schema",
 		Short: "零 I/O 极速导出输出数据的 JSON Schema 契约",
@@ -197,7 +265,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(syncCmd, watchCmd, startCmd, stopCmd, statusCmd, schemaCmd)
+	rootCmd.AddCommand(syncCmd, watchCmd, startCmd, stopCmd, statusCmd, autostartCmd, schemaCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
