@@ -148,3 +148,31 @@ func CheckDaemonRunning() (bool, int) {
 
 	return false, 0
 }
+
+// AcquireWatchMutex 获取 watch 进程全局单一实例互斥锁。
+// 若系统内已存在正在运行的 watch 实例，返回 alreadyExists=true，避免并发多开竞争。
+func AcquireWatchMutex() (windows.Handle, bool, error) {
+	mutexName := fmt.Sprintf("Local\\agyapptitle_watch_mutex_%s", buildinfo.ChannelName())
+	u16, err := windows.UTF16PtrFromString(mutexName)
+	if err != nil {
+		return 0, false, err
+	}
+
+	h, err := windows.CreateMutex(nil, false, u16)
+	if err != nil {
+		if err == windows.ERROR_ALREADY_EXISTS {
+			return h, true, nil
+		}
+		return 0, false, err
+	}
+	return h, false, nil
+}
+
+// ReleaseWatchMutex 释放互斥锁句柄。
+func ReleaseWatchMutex(h windows.Handle) {
+	if h != 0 {
+		_ = windows.CloseHandle(h)
+	}
+}
+
+

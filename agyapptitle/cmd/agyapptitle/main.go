@@ -91,21 +91,46 @@ func main() {
 		Use:   "watch",
 		Short: "在前台以监听模式运行，持续捕获新会话并自动汉化",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// 全局 Panic 兜底防御，确保致命异常也能写入日志
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[FATAL PANIC] 守护进程发生未捕获异常: %v", r)
+				}
+			}()
+
+			// 1. 第一时间确保数据目录存在并接管日志，彻底防止早期静默退出无从排查
+			_ = watcher.EnsureAppDataDir()
+			logPath := filepath.Join(config.GetAppDataDir(), "daemon.log")
+			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
+				log.SetOutput(logFile)
+			}
+
+			// 2. 工作目录规范化：切换至可执行文件所在目录，避免开机自启等场景下 CWD 漂移
+			if exePath, err := os.Executable(); err == nil {
+				_ = os.Chdir(filepath.Dir(exePath))
+			}
+
+			// 3. 内核级单实例互斥锁守卫：防止计划任务与自启动项或手工启动产生多实例互踩与锁竞争
+			hMutex, alreadyExists, err := watcher.AcquireWatchMutex()
+			if err == nil && alreadyExists {
+				log.Println("[agyapptitle] 检测到后台 watch 实例已在运行中，本实例优雅退出。")
+				watcher.ReleaseWatchMutex(hMutex)
+				return nil
+			}
+			if hMutex != 0 {
+				defer watcher.ReleaseWatchMutex(hMutex)
+			}
+
+			// 4. 加载配置与状态
 			cfg, err := config.LoadConfig()
 			if err != nil {
+				log.Printf("[启动失败] 加载配置文件异常: %v", err)
 				return err
 			}
 			st, err := store.LoadState()
 			if err != nil {
+				log.Printf("[启动失败] 加载运行状态异常: %v", err)
 				return err
-			}
-
-			_ = watcher.EnsureAppDataDir()
-
-			// 确保日志落盘到 daemon.log
-			logPath := filepath.Join(config.GetAppDataDir(), "daemon.log")
-			if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644); err == nil {
-				log.SetOutput(logFile)
 			}
 
 			pidFile := filepath.Join(config.GetAppDataDir(), "daemon.pid")
