@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"language_projects/go_projects/acp-title-proxy/internal/pool"
 	"language_projects/go_projects/acp-title-proxy/internal/procguard"
@@ -33,12 +34,13 @@ type StateTracker interface {
 }
 
 type Runner struct {
-	ExePath  string
-	Args     []string
-	Titler   Titler
-	SkillMgr SkillManager
-	Tracker  StateTracker
-	Stdin    io.Reader
+	ExePath       string
+	Args          []string
+	Titler        Titler
+	SkillMgr      SkillManager
+	Tracker       StateTracker
+	MaxHarnesses  int // 若 > 0，代理会自动维持该 worker 下的 localharness 数量不超过此限制（超出则安全休眠）
+	Stdin         io.Reader
 
 	mu             sync.Mutex
 	pendingPrompts map[string]struct{}
@@ -112,6 +114,22 @@ func (r *Runner) Run(inj *Injector) error {
 		})
 	}
 	defer abort()
+
+	// 若开启了 harness 配额守卫，启动轻量周期巡检兜底（每 30 秒执行一次空闲休眠检查）
+	if r.MaxHarnesses > 0 {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					pool.HibernateIdleHarnesses(r.MaxHarnesses)
+				}
+			}
+		}()
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -246,6 +264,11 @@ func (r *Runner) processInbound(line []byte) []byte {
 		return line
 	}
 
+	// 任何来自 Zed 的入向请求或消息到达前，确保所有挂起的 harness 已无感唤醒
+	if msg.Method == "session/prompt" || msg.Method == "session/load" || msg.Method == "session/resume" {
+		pool.ResumeAllHarnesses()
+	}
+
 	if msg.Method == "session/prompt" {
 		if msg.ID != nil {
 			idStr := protocol.IDString(*msg.ID)
@@ -338,6 +361,14 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 			}
 			if r.Tracker != nil {
 				r.Tracker.OnSessionID(res.SessionID)
+			}
+
+			// 新会话创建时，若开启了配额，稍候等新 harness 起来后，将超出配额的最旧空闲 harness 休眠
+			if r.MaxHarnesses > 0 {
+				go func(limit int) {
+					time.Sleep(1 * time.Second)
+					pool.HibernateIdleHarnesses(limit)
+				}(r.MaxHarnesses)
 			}
 
 			// 将官方思维命令与自定义技能合并进 availableCommands，并过滤裸 skill

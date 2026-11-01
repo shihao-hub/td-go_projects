@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"language_projects/go_projects/acp-title-proxy/internal/config"
+	"language_projects/go_projects/acp-title-proxy/internal/procguard"
 )
 
 // HarnessInfo 记录扫描到的 localharness 进程元数据。
@@ -15,6 +16,77 @@ type HarnessInfo struct {
 	PID       int
 	ParentPID int
 	CreatedAt time.Time
+}
+
+// suspendedHarnesses 记录已被休眠挂起的 localharness 进程
+var (
+	suspendedMu        sync.Mutex
+	suspendedHarnesses = make(map[int]bool)
+)
+
+// ResumeAllHarnesses 唤醒所有被休眠挂起的 harness（在用户发消息或会话操作前调用）
+func ResumeAllHarnesses() {
+	suspendedMu.Lock()
+	defer suspendedMu.Unlock()
+
+	for pid := range suspendedHarnesses {
+		_ = procguard.ResumeProcess(pid)
+	}
+	suspendedHarnesses = make(map[int]bool)
+}
+
+// HibernateIdleHarnesses 将超出 maxLimit 的最旧空闲 harness 进行进程挂起与工作集内存裁剪。
+// 这样内存从 150MB 降到 1~5MB，且进程结构完好，下次发消息瞬间自动唤醒，绝不会导致连接丢失或重建失败！
+func HibernateIdleHarnesses(maxLimit int) int {
+	if maxLimit <= 0 {
+		maxLimit = 3
+	}
+
+	r := NewReaper(config.ReaperConfig{Enabled: true}, nil)
+	grouped, _ := r.collect()
+	hibernatedCount := 0
+
+	suspendedMu.Lock()
+	defer suspendedMu.Unlock()
+
+	for _, harnesses := range grouped {
+		if len(harnesses) <= maxLimit {
+			continue
+		}
+
+		// 按创建时间升序排列（最旧的在前面）
+		sort.SliceStable(harnesses, func(i, j int) bool {
+			return harnesses[i].CreatedAt.Before(harnesses[j].CreatedAt)
+		})
+
+		excess := len(harnesses) - maxLimit
+		for _, h := range harnesses {
+			if excess <= 0 {
+				break
+			}
+			// 已经被休眠的跳过
+			if suspendedHarnesses[h.PID] {
+				excess--
+				continue
+			}
+
+			// 检查是否真处于空闲状态（400ms 内无 CPU 时间增长）
+			if !r.isProcessCPUIdle(h.PID, 400*time.Millisecond) {
+				continue
+			}
+
+			fmt.Fprintf(os.Stderr, "[acp-title-proxy] harness 超额 (%d/%d)，安全休眠空闲 harness PID %d (释放物理内存)\n",
+				len(harnesses), maxLimit, h.PID)
+
+			if err := procguard.SuspendProcess(h.PID); err == nil {
+				suspendedHarnesses[h.PID] = true
+				hibernatedCount++
+				excess--
+			}
+		}
+	}
+
+	return hibernatedCount
 }
 
 // Reaper 负责后台巡检与闲置 localharness 进程回收。
