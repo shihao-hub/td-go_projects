@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"language_projects/go_projects/acp-title-proxy/internal/pool"
 	"language_projects/go_projects/acp-title-proxy/internal/procguard"
@@ -33,12 +34,13 @@ type StateTracker interface {
 }
 
 type Runner struct {
-	ExePath  string
-	Args     []string
-	Titler   Titler
-	SkillMgr SkillManager
-	Tracker  StateTracker
-	Stdin    io.Reader
+	ExePath       string
+	Args          []string
+	Titler        Titler
+	SkillMgr      SkillManager
+	Tracker       StateTracker
+	MaxHarnesses  int // 若 > 0，代理会自动维持该 worker 下的 localharness 数量不超过此限制
+	Stdin         io.Reader
 
 	mu             sync.Mutex
 	pendingPrompts map[string]struct{}
@@ -112,6 +114,22 @@ func (r *Runner) Run(inj *Injector) error {
 		})
 	}
 	defer abort()
+
+	// 若开启了 harness 配额守卫，启动轻量周期巡检兜底（每 30 秒执行一次配额裁剪）
+	if r.MaxHarnesses > 0 {
+		go func() {
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					pool.EnforceHarnessLimit(r.MaxHarnesses)
+				}
+			}
+		}()
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -338,6 +356,15 @@ func (r *Runner) processOutbound(line []byte, inj *Injector) []byte {
 			}
 			if r.Tracker != nil {
 				r.Tracker.OnSessionID(res.SessionID)
+			}
+
+			// 新会话创建时，若开启了 harness 配额，立即执行一次超额空闲 harness 清理
+			if r.MaxHarnesses > 0 {
+				go func(limit int) {
+					// 稍等 1 秒等官方新 harness 进程拉起完毕后，再检查并淘汰超额的最旧空闲 harness
+					time.Sleep(1 * time.Second)
+					pool.EnforceHarnessLimit(limit)
+				}(r.MaxHarnesses)
 			}
 
 			// 将官方思维命令与自定义技能合并进 availableCommands，并过滤裸 skill

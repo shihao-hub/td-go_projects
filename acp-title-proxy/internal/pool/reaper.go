@@ -144,6 +144,55 @@ func (r *Reaper) RunOnce() int {
 	return reapedCount
 }
 
+// EnforceHarnessLimit 严格维持 harness 数量在 maxLimit 之内。
+// 当某个 worker 下的 harness 数量超过 maxLimit 时，按创建时间排序，
+// 优先淘汰最旧的、且 CPU 处于空闲状态的 harness。
+// 如果 harness 正在活跃运行（CPU 变动中），绝不强杀。
+func EnforceHarnessLimit(maxLimit int) int {
+	if maxLimit <= 0 {
+		maxLimit = 3
+	}
+
+	r := NewReaper(config.ReaperConfig{Enabled: true}, nil)
+	grouped, _ := r.collect()
+	reapedCount := 0
+
+	for _, harnesses := range grouped {
+		if len(harnesses) <= maxLimit {
+			continue
+		}
+
+		// 按创建时间升序排序（最旧的在前面）
+		sort.SliceStable(harnesses, func(i, j int) bool {
+			return harnesses[i].CreatedAt.Before(harnesses[j].CreatedAt)
+		})
+
+		// 需要被削减的数量
+		excess := len(harnesses) - maxLimit
+		for _, h := range harnesses {
+			if excess <= 0 {
+				break
+			}
+
+			// 检查是否空闲（400ms 内无 CPU 增长）
+			if !r.isProcessCPUIdle(h.PID, 400*time.Millisecond) {
+				// 正在执行任务中，跳过不强杀
+				continue
+			}
+
+			fmt.Fprintf(os.Stderr, "[acp-title-proxy] harness 超额 (%d/%d)，自动淘汰空闲 harness PID %d (创建于 %s)\n",
+				len(harnesses)-reapedCount, maxLimit, h.PID, h.CreatedAt.Format("15:04:05"))
+
+			if err := KillProcessTree(h.PID); err == nil {
+				reapedCount++
+				excess--
+			}
+		}
+	}
+
+	return reapedCount
+}
+
 // observe 记录本次 CPU 采样并返回该 harness 最近一次活跃的时刻。
 //
 // 首次见到的进程一律给满一个完整宽限期（busy=now），避免 daemon 刚启动/
