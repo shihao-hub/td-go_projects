@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"language_projects/go_projects/agyapptitle/internal/config"
@@ -55,11 +57,12 @@ func (s *Service) SyncOnce(targetEnv string, dryRun bool) ([]model.RenameTask, e
 
 		updates := make(map[string]string)
 		for _, r := range records {
-			if r.IsChinese {
+			// 1. 如果标题是合格中文且不是异常占位语，则无需改写
+			if r.IsChinese && !strings.Contains(r.Title, "请提供") {
 				continue
 			}
 
-			// 检查持久化状态中是否已处理过或已熔断
+			// 2. 检查持久化状态中是否已处理过或已熔断
 			if s.state.IsTitled(r.ID) {
 				continue
 			}
@@ -67,8 +70,26 @@ func (s *Service) SyncOnce(targetEnv string, dryRun bool) ([]model.RenameTask, e
 				continue
 			}
 
-			// 生成中文标题
-			newTitle, err := titler.GenerateTitle(s.cfg, r.Preview, r.Title)
+			// 3. 确定提问文本：优先使用 Preview，若为空或为占位语，尝试从本地 transcript.jsonl 中提取真实首问
+			prompt := r.Preview
+			if strings.TrimSpace(prompt) == "" || strings.Contains(prompt, "请提供") {
+				transcriptPath := filepath.Join(env.Path, "brain", r.ID, ".system_generated", "logs", "transcript.jsonl")
+				if realPrompt := store.ExtractUserPrompt(transcriptPath); realPrompt != "" {
+					prompt = realPrompt
+				}
+			}
+
+			// 4. 空会话竞争守卫（关键防御）：
+			// 当用户刚点击 "+ New Conversation" 时，用户尚未输入任何请求，
+			// 此时 preview 为空且无有效旧标题，绝对不能向大模型发送空提示词，直接跳过等待用户首问
+			cleanPrompt := strings.TrimSpace(prompt)
+			cleanOldTitle := strings.TrimSpace(r.Title)
+			if cleanPrompt == "" && (cleanOldTitle == "" || strings.EqualFold(cleanOldTitle, "New Conversation") || strings.EqualFold(cleanOldTitle, "New Chat") || strings.Contains(cleanOldTitle, "请提供")) {
+				continue
+			}
+
+			// 5. 生成中文标题
+			newTitle, err := titler.GenerateTitle(s.cfg, prompt, r.Title)
 			if err != nil || newTitle == "" {
 				fails := s.state.RecordFailure(r.ID)
 				log.Printf("[%s] 会话 %s 第 %d/%d 次生成标题失败: %v", env.Name, r.ID[:8], fails, s.cfg.MaxAttempts, err)
@@ -79,7 +100,7 @@ func (s *Service) SyncOnce(targetEnv string, dryRun bool) ([]model.RenameTask, e
 				SessionID: r.ID,
 				OldTitle:  r.Title,
 				NewTitle:  newTitle,
-				Preview:   r.Preview,
+				Preview:   prompt,
 				Env:       env.Name,
 			}
 			allTasks = append(allTasks, task)
@@ -114,28 +135,34 @@ func (s *Service) SyncOnce(targetEnv string, dryRun bool) ([]model.RenameTask, e
 	return allTasks, nil
 }
 
-// Watch 启动前台持续监听，并在捕获到新会话时自动执行汉化与推送。
+// Watch 启动持续轮询守护。
 func (s *Service) Watch(ctx context.Context, interval time.Duration) {
+	log.Printf("[agyapptitle] 后台监听已就绪，轮询间隔: %v", interval)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	log.Printf("[agyapptitle] 后台监听已就绪，轮询间隔: %v", interval)
-
-	// 启动立即执行一次初始化同步
-	_, _ = s.SyncOnce("all", false)
+	// 启动立即执行首轮全量扫描
+	if tasks, err := s.SyncOnce("all", false); err == nil && len(tasks) > 0 {
+		for _, t := range tasks {
+			log.Printf("[初始扫描] [%s] %s: %s -> %s", t.Env, t.SessionID[:8], t.OldTitle, t.NewTitle)
+		}
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("[agyapptitle] 监听器优雅停止")
+			log.Println("[agyapptitle] 正在优雅关停后台监听...")
 			return
 		case <-ticker.C:
 			tasks, err := s.SyncOnce("all", false)
 			if err != nil {
+				log.Printf("[轮询异常] %v", err)
 				continue
 			}
-			for _, t := range tasks {
-				log.Printf("[实时捕获] [%s] %s: %s -> %s", t.Env, t.SessionID[:8], t.OldTitle, t.NewTitle)
+			if len(tasks) > 0 {
+				for _, t := range tasks {
+					log.Printf("[实时捕获] [%s] %s: %s -> %s", t.Env, t.SessionID[:8], t.OldTitle, t.NewTitle)
+				}
 			}
 		}
 	}

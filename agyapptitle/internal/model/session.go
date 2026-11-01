@@ -41,6 +41,11 @@ func IsChineseTitle(title string) bool {
 		return false
 	}
 
+	// 排除模型在空提问下产生的异常幻觉提示语
+	if strings.Contains(title, "请提供") || strings.Contains(title, "无法生成") || strings.Contains(title, "未提供") || strings.Contains(title, "抱歉") {
+		return false
+	}
+
 	stripped := tagPattern.ReplaceAllString(title, "")
 	stripped = strings.TrimSpace(stripped)
 	if stripped == "" {

@@ -44,9 +44,12 @@ func GenerateTitle(cfg *config.Config, prompt, oldTitle string) (string, error) 
 		return "", fmt.Errorf("no LLM providers configured in config.json")
 	}
 
-	content := prompt
-	if content == "" {
-		content = oldTitle
+	content := strings.TrimSpace(prompt)
+	if content == "" || strings.Contains(content, "请提供") {
+		content = strings.TrimSpace(oldTitle)
+	}
+	if content == "" || strings.Contains(content, "请提供") || strings.EqualFold(content, "New Conversation") || strings.EqualFold(content, "New Chat") {
+		return "", fmt.Errorf("empty or invalid prompt/title for title generation")
 	}
 
 	var lastErr error
@@ -116,7 +119,6 @@ func callProvider(p *config.ProviderConfig, prompt string) (string, error) {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
-	req.Header.Set("x-api-key", p.APIKey)
 	req.Header.Set("User-Agent", "agyapptitle/1.0.0")
 
 	client := &http.Client{Timeout: timeout}
@@ -141,7 +143,12 @@ func callProvider(p *config.ProviderConfig, prompt string) (string, error) {
 	}
 
 	raw := chatResp.Choices[0].Message.Content
-	return SanitizeTitle(raw), nil
+	title := SanitizeTitle(raw)
+	if strings.Contains(title, "请提供") || strings.Contains(title, "无法生成") || strings.Contains(title, "未提供") || strings.Contains(title, "抱歉") {
+		return "", fmt.Errorf("LLM returned non-title message: %s", title)
+	}
+
+	return title, nil
 }
 
 // SanitizeTitle 清洗模型返回的标题字符串。

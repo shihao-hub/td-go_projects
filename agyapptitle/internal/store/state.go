@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,8 +45,15 @@ func LoadState() (*State, error) {
 func (s *State) IsTitled(sessionID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.TitledSessions[sessionID]
-	return ok
+	t, ok := s.TitledSessions[sessionID]
+	if !ok {
+		return false
+	}
+	// 如果历史记录的标题包含异常提示词，视为未完成有效汉化，允许重新汉化
+	if strings.Contains(t, "请提供") || strings.Contains(t, "无法生成") || strings.Contains(t, "未提供") || strings.Contains(t, "抱歉") {
+		return false
+	}
+	return true
 }
 
 // CanAttempt 检查会话是否未超过最大重试失败次数（熔断机制）。
