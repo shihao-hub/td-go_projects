@@ -46,11 +46,30 @@ Zed panel 3 ──stdio──> agy-share serve ──TCP──┤
 
 ### 4.1 共享粒度：1 worker / N session
 
-- 默认 1 个 worker；`max_sessions` 限制并发 session 数。
+- 默认 1 个 worker；`max_sessions` 限制**活跃会话**数（见 4.1.1）。
 - 超限策略 `overflow`：
   - `reject`（默认）：新 `session/new` 返回错误，Zed 显示可读错误；
   - `spawn`：启动第二个 worker（内存回到线性增长，仅作应急）。
 - 不按 cwd 拆 worker：实测不同 cwd 的 session 可在同一 worker 共存。
+
+#### 4.1.1 配额口径修正（实现）
+
+初版把 `max_sessions` 直接套在路由表条数上，但 ACP 没有 `session/close` 事件，
+而 Zed 恢复 panel 时会批量 `session/load` 历史线程——只读会话因此永久占用名额，
+表现为「client 只有 1 个，sessions 却已满」。
+
+现实现按「是否真的在干活」计量：
+
+- 会话首次发 `session/prompt`（或 `session/new`）时才标记为活跃，记录 `lastActiveAt`；
+  之后 client↔worker 的任意消息都会续期；
+- `session/load` / `session/resume` 只建立路由，并置 `replaying` 标记，
+  回放期间产生的 `session/update` 不刷新活跃时间——「打开旧对话看一眼」不占名额；
+- 只有 `active_window_minutes`（默认 15）内活跃过的会话才计入 `max_sessions`（默认 12）；
+- 历史会话仍保留在路由表里，反向请求照常可达，只是不再占名额；
+- 路由表另有 `sessionTableHardCap`（256）兜底，防止单 client 长期在线时无限累积。
+
+未采用 LRU 强制驱逐：ACP 没有会话失效通知，驱逐会让该 panel 后续消息失去路由，
+比拒绝新建更糟。
 
 ### 4.2 initialize：init-on-first-client
 
@@ -169,7 +188,8 @@ agy-share restart           重启 daemon
   "share": {
     "enabled": true,
     "port": 47600,
-    "max_sessions": 6,
+    "max_sessions": 12,
+    "active_window_minutes": 15,
     "overflow": "reject",
     "idle_ttl_minutes": 30,
     "allow_mixed_capabilities": false,

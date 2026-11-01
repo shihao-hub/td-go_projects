@@ -45,6 +45,10 @@ type workerReq struct {
 	workerID json.RawMessage
 }
 
+// sessionTableHardCap 是路由表条数的硬上限，防止单个 client 长期在线时
+// 无限累积历史会话映射。它只兜底，不参与正常配额判断。
+const sessionTableHardCap = 256
+
 // Daemon 持有唯一的后端 worker，并把 N 个 ACP client 的会话复用到它上面。
 type Daemon struct {
 	cfg     *config.Config
@@ -63,6 +67,13 @@ type Daemon struct {
 	clientSeq uint64
 	titler    Titler
 	skillMgr  SkillManager
+
+	// sessionActivity 记录每个会话最近一次消息往返时间，用于区分
+	// 「正在干活的活跃会话」与「只是被 load 出来看着的历史会话」。
+	sessionActivity map[string]time.Time
+	// replaying 标记正在回放历史的会话；回放期间的反向消息不计入活跃，
+	// 否则「打开旧对话看一眼」又会把配额吃满。
+	replaying map[string]bool
 
 	initResult  json.RawMessage
 	initCaps    string
@@ -83,15 +94,17 @@ func NewDaemon(cfg *config.Config, logger *log.Logger, factory BackendFactory) *
 		factory = defaultFactory(cfg, logger)
 	}
 	return &Daemon{
-		cfg:          cfg,
-		logger:       logger,
-		factory:      factory,
-		clients:      make(map[*Client]bool),
-		sessions:     make(map[string]*Client),
-		pending:      make(map[string]*pendingReq),
-		wreq:         make(map[string]*workerReq),
-		stopCh:       make(chan struct{}),
-		lastClientAt: time.Now(),
+		cfg:             cfg,
+		logger:          logger,
+		factory:         factory,
+		clients:         make(map[*Client]bool),
+		sessions:        make(map[string]*Client),
+		pending:         make(map[string]*pendingReq),
+		wreq:            make(map[string]*workerReq),
+		sessionActivity: make(map[string]time.Time),
+		replaying:       make(map[string]bool),
+		stopCh:          make(chan struct{}),
+		lastClientAt:    time.Now(),
 	}
 }
 
@@ -128,7 +141,7 @@ func (d *Daemon) Run() error {
 	}
 	d.ln = ln
 	d.startedAt = time.Now()
-	d.logger.Printf("listening on %s (max_sessions=%d)", addr, d.cfg.Share.MaxSessions)
+	d.logger.Printf("listening on %s (max_sessions=%d active, window=%s)", addr, d.cfg.Share.MaxSessions, d.activeWindow())
 
 	if err := d.startBackend(); err != nil {
 		d.logger.Printf("backend start failed: %v", err)
@@ -263,6 +276,8 @@ func (d *Daemon) OnExit(err error) {
 	}
 	d.clients = make(map[*Client]bool)
 	d.sessions = make(map[string]*Client)
+	d.sessionActivity = make(map[string]time.Time)
+	d.replaying = make(map[string]bool)
 	d.pending = make(map[string]*pendingReq)
 	d.wreq = make(map[string]*workerReq)
 	d.mu.Unlock()
@@ -358,6 +373,7 @@ func (d *Daemon) fromBackendResponse(m protocol.Message) {
 			if sid := protocol.ExtractSessionID(m.Result); sid != "" {
 				d.mu.Lock()
 				d.sessions[sid] = pr.client
+				d.touchSessionLocked(sid)
 				t := d.titler
 				d.mu.Unlock()
 				if t != nil {
@@ -375,14 +391,18 @@ func (d *Daemon) fromBackendResponse(m protocol.Message) {
 			if pr.sessionID != "" {
 				d.mu.Lock()
 				delete(d.sessions, pr.sessionID)
+				delete(d.sessionActivity, pr.sessionID)
+				delete(d.replaying, pr.sessionID)
 				d.mu.Unlock()
 			}
 			d.logger.Printf("%s %s failed: %s", pr.method, pr.sessionID, m.Error)
 		} else if sid != "" {
 			d.mu.Lock()
 			d.sessions[sid] = pr.client
+			// 回放结束：仍然不算活跃，等用户真正发 prompt 再计时。
+			delete(d.replaying, sid)
 			d.mu.Unlock()
-			d.logger.Printf("session %s loaded -> client %s", sid, pr.client.id)
+			d.logger.Printf("session %s loaded -> client %s (idle until prompted)", sid, pr.client.id)
 		}
 	}
 
@@ -395,6 +415,9 @@ func (d *Daemon) fromBackendRequest(m protocol.Message) {
 
 	d.mu.Lock()
 	c := d.sessions[sid]
+	if c != nil && !d.replaying[sid] {
+		d.touchSessionLocked(sid)
+	}
 	d.mu.Unlock()
 
 	if c == nil {
@@ -418,6 +441,9 @@ func (d *Daemon) fromBackendNotification(m protocol.Message, raw []byte) {
 
 	d.mu.Lock()
 	c := d.sessions[sid]
+	if c != nil && !d.replaying[sid] {
+		d.touchSessionLocked(sid)
+	}
 	sm := d.skillMgr
 	d.mu.Unlock()
 
@@ -443,6 +469,10 @@ func (d *Daemon) fromClient(c *Client, line []byte) {
 		d.logger.Printf("client %s non-json: %.200s", c.id, line)
 		return
 	}
+	// session/load 只是打开历史，不算活跃；其余带 sessionId 的消息都会刷新活跃时间。
+	if m.Method != "session/load" && m.Method != "session/resume" {
+		d.markSessionActive(m.SessionID())
+	}
 	switch {
 	case m.IsRequest():
 		d.clientRequest(c, m)
@@ -451,6 +481,19 @@ func (d *Daemon) fromClient(c *Client, line []byte) {
 	case m.IsResponse():
 		d.clientResponse(m)
 	}
+}
+
+// markSessionActive 只对已挂载的会话刷新活跃时间，
+// 避免未知 sessionId 在活动表里留下垃圾条目。
+func (d *Daemon) markSessionActive(sid string) {
+	if sid == "" {
+		return
+	}
+	d.mu.Lock()
+	if _, ok := d.sessions[sid]; ok {
+		d.touchSessionLocked(sid)
+	}
+	d.mu.Unlock()
 }
 
 func (d *Daemon) clientRequest(c *Client, m protocol.Message) {
@@ -468,6 +511,9 @@ func (d *Daemon) clientRequest(c *Client, m protocol.Message) {
 		if sid := m.SessionID(); sid != "" {
 			d.mu.Lock()
 			d.sessions[sid] = c
+			// 只是「打开来看」，不刷新活跃时间；回放期间的消息也不计入配额，
+			// 等用户真正发 prompt 时才算这个会话开始干活。
+			d.replaying[sid] = true
 			d.mu.Unlock()
 			d.logger.Printf("session %s optimistically attached to client %s (%s)", sid, c.id, m.Method)
 		}
@@ -508,18 +554,70 @@ func (d *Daemon) handleInitialize(c *Client, m protocol.Message) {
 	d.forwardRequest(c, m, "initialize", caps)
 }
 
+// touchSessionLocked 记录会话最近一次消息往返时间；调用方需持有 d.mu。
+func (d *Daemon) touchSessionLocked(sid string) {
+	if sid == "" {
+		return
+	}
+	d.sessionActivity[sid] = time.Now()
+}
+
+// activeWindow 返回判定会话活跃的时间窗口。
+func (d *Daemon) activeWindow() time.Duration {
+	minutes := d.cfg.Share.ActiveWindowMinutes
+	if minutes <= 0 {
+		minutes = 15
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// allowNewSession 只按「活跃会话」判定配额。
+//
+// 历史会话（用户只是 load 出来看）超过 activeWindow 后不再计数，
+// 因此翻看旧对话不会把配额永久吃满；它们仍留在路由表里，
+// 反向请求照常可达，只是不再占用新建名额。
 func (d *Daemon) allowNewSession(c *Client, m protocol.Message) bool {
 	max := d.cfg.Share.MaxSessions
 	if max <= 0 {
 		return true
 	}
+	window := d.activeWindow()
+
 	d.mu.Lock()
-	n := len(d.sessions)
+	now := time.Now()
+	active := 0
+	for sid := range d.sessions {
+		at, ok := d.sessionActivity[sid]
+		if !ok {
+			// 没有活动记录的会话（理论上不存在）按非活跃处理，
+			// 避免旧数据永久占位。
+			continue
+		}
+		if now.Sub(at) <= window {
+			active++
+		} else {
+			// 顺手清理过期的活动时间，防止 map 随历史会话无限增长。
+			delete(d.sessionActivity, sid)
+		}
+	}
+	total := len(d.sessions)
 	d.mu.Unlock()
-	if n < max {
+
+	if total >= sessionTableHardCap {
+		c.send(protocol.ErrorResponse(m.ID, -32002, fmt.Sprintf(
+			"session table full (%d entries); restart the share daemon with `acp-title-proxy share-restart`",
+			sessionTableHardCap)))
+		return false
+	}
+	if active < max {
 		return true
 	}
-	c.send(protocol.ErrorResponse(m.ID, -32002, fmt.Sprintf("max_sessions (%d) reached", max)))
+
+	d.logger.Printf("reject session/new: %d active session(s) in last %s (max %d), table has %d entr(ies)",
+		active, window, max, total)
+	c.send(protocol.ErrorResponse(m.ID, -32002, fmt.Sprintf(
+		"max_sessions (%d) reached: %d session(s) active within %s; %d historical session(s) loaded but idle",
+		max, active, window, total-active)))
 	return false
 }
 
@@ -599,6 +697,8 @@ func (d *Daemon) removeClient(c *Client) {
 		if owner == c {
 			orphan = append(orphan, sid)
 			delete(d.sessions, sid)
+			delete(d.sessionActivity, sid)
+			delete(d.replaying, sid)
 		}
 	}
 	for key, pr := range d.pending {
@@ -698,9 +798,18 @@ func promptText(params json.RawMessage) string {
 }
 
 func (d *Daemon) statusJSON() []byte {
+	window := d.activeWindow()
+	now := time.Now()
+
 	d.mu.Lock()
 	clients := len(d.clients)
 	sessions := len(d.sessions)
+	active := 0
+	for sid := range d.sessions {
+		if at, ok := d.sessionActivity[sid]; ok && now.Sub(at) <= window {
+			active++
+		}
+	}
 	initialized := d.initialized
 	b := d.backend
 	d.mu.Unlock()
@@ -711,15 +820,17 @@ func (d *Daemon) statusJSON() []byte {
 	}
 
 	status := map[string]any{
-		"status":         "ok",
-		"pid":            os.Getpid(),
-		"port":           d.cfg.Share.Port,
-		"clients":        clients,
-		"sessions":       sessions,
-		"initialized":    initialized,
-		"backend_pid":    workerPID,
-		"max_sessions":   d.cfg.Share.MaxSessions,
-		"uptime_seconds": int(time.Since(d.startedAt).Seconds()),
+		"status":                "ok",
+		"pid":                   os.Getpid(),
+		"port":                  d.cfg.Share.Port,
+		"clients":               clients,
+		"sessions":              sessions,
+		"active_sessions":       active,
+		"initialized":           initialized,
+		"backend_pid":           workerPID,
+		"max_sessions":          d.cfg.Share.MaxSessions,
+		"active_window_minutes": int(window.Minutes()),
+		"uptime_seconds":        int(time.Since(d.startedAt).Seconds()),
 	}
 	buf, _ := json.Marshal(status)
 	return buf

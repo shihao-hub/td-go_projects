@@ -99,6 +99,10 @@ Zed 不会转发 agent 子进程的 stderr，排查标题问题请直接看该�
 - `serve` 保留为内部别名，效果与 `agy share` 相同；
 - 所有 panel 关闭后，daemon 空闲 `share.idle_ttl_minutes`（默认 30）分钟会自动退出并释放 worker/harness；
   下次打开 panel 时 `serve` 自动拉起 daemon（冷启动几秒），旧 thread 的历史仍从本地会话库回放。
+- `share.max_sessions`（默认 12）限制的是**活跃会话**数，不是历史会话总数：
+  只有真正发过 prompt、且在最近 `share.active_window_minutes`（默认 15）分钟内有消息往返的会话才计入配额。
+  Zed 恢复面板时会批量 `session/load` 历史线程，这类只读回放完全不占名额，
+  不会再出现「翻了几个旧对话就 Failed to Launch: max_sessions reached」。
 
 ---
 

@@ -17,9 +17,14 @@ type Config struct {
 
 // ShareConfig 控制 ACP 多会话共享后端（agy-share）。
 type ShareConfig struct {
-	Enabled                bool   `json:"enabled"`
-	Port                   int    `json:"port"`
-	MaxSessions            int    `json:"max_sessions"`
+	Enabled bool `json:"enabled"`
+	Port    int  `json:"port"`
+	// MaxSessions 限制「活跃会话」数量，而非路由表里挂载过的历史会话总数。
+	// 只有在 ActiveWindowMinutes 内有消息往返的会话才计入配额，
+	// 避免用户翻看历史对话（session/load）把配额永久吃满。
+	MaxSessions int `json:"max_sessions"`
+	// ActiveWindowMinutes 是判定会话「活跃」的时间窗口，默认 15 分钟。
+	ActiveWindowMinutes    int    `json:"active_window_minutes"`
 	Overflow               string `json:"overflow"`
 	IdleTTLMinutes         int    `json:"idle_ttl_minutes"`
 	AllowMixedCapabilities bool   `json:"allow_mixed_capabilities"`
@@ -110,12 +115,13 @@ func DefaultConfig() *Config {
 			CheckIntervalMinutes: 5,
 		},
 		Share: ShareConfig{
-			Enabled:        true,
-			Port:           47600,
-			MaxSessions:    6,
-			Overflow:       "reject",
-			IdleTTLMinutes: 30,
-			FallbackDirect: true,
+			Enabled:             true,
+			Port:                47600,
+			MaxSessions:         12,
+			ActiveWindowMinutes: 15,
+			Overflow:            "reject",
+			IdleTTLMinutes:      30,
+			FallbackDirect:      true,
 		},
 	}
 }
@@ -247,7 +253,10 @@ func LoadConfig() (*Config, string, error) {
 		cfg.Share.Port = 47600
 	}
 	if cfg.Share.MaxSessions <= 0 {
-		cfg.Share.MaxSessions = 6
+		cfg.Share.MaxSessions = 12
+	}
+	if cfg.Share.ActiveWindowMinutes <= 0 {
+		cfg.Share.ActiveWindowMinutes = 15
 	}
 	if cfg.Share.Overflow == "" {
 		cfg.Share.Overflow = "reject"

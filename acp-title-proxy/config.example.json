@@ -43,7 +43,8 @@
   "share": {
     "enabled": true,
     "port": 47600,
-    "max_sessions": 6,
+    "max_sessions": 12,
+    "active_window_minutes": 15,
     "overflow": "reject",
     "idle_ttl_minutes": 30,
     "allow_mixed_capabilities": false,

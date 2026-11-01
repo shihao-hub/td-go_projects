@@ -497,3 +497,87 @@ func TestMaxSessionsRejected(t *testing.T) {
 		t.Fatalf("unexpected error: %s", resp.Error)
 	}
 }
+
+// 只是 load 出来阅读的历史会话完全不占配额。
+func TestLoadedHistoryDoesNotOccupyQuota(t *testing.T) {
+	d, _, port := startTestDaemon(t, 1)
+
+	a := newTestClient(t, port)
+	defer a.conn.Close()
+	if resp := a.request("initialize", initParams()); len(resp.Error) > 0 {
+		t.Fatalf("A initialize failed: %s", resp.Error)
+	}
+
+	histID := "11111111-2222-3333-4444-555555555555"
+	if resp := a.request("session/load", map[string]any{"sessionId": histID, "cwd": `C:\a`}); len(resp.Error) > 0 {
+		t.Fatalf("session/load failed: %s", resp.Error)
+	}
+
+	// 路由表里有这条历史，但它不该占用活跃名额。
+	d.mu.Lock()
+	if d.sessions[histID] == nil {
+		d.mu.Unlock()
+		t.Fatalf("expected historical session to stay routable")
+	}
+	replaying := d.replaying[histID]
+	d.mu.Unlock()
+	if replaying {
+		t.Fatalf("replay flag should be cleared after load response")
+	}
+
+	b := newTestClient(t, port)
+	defer b.conn.Close()
+	if resp := b.request("initialize", initParams()); len(resp.Error) > 0 {
+		t.Fatalf("B initialize failed: %s", resp.Error)
+	}
+	if resp := b.request("session/new", map[string]any{"cwd": `C:\b`, "mcpServers": []any{}}); len(resp.Error) > 0 {
+		t.Fatalf("read-only history should not block new session: %s", resp.Error)
+	}
+}
+
+// 真正发过 prompt 的会话才算活跃，并占用配额。
+func TestPromptedSessionOccupiesQuota(t *testing.T) {
+	d, _, port := startTestDaemon(t, 1)
+
+	a := newTestClient(t, port)
+	defer a.conn.Close()
+	if resp := a.request("initialize", initParams()); len(resp.Error) > 0 {
+		t.Fatalf("A initialize failed: %s", resp.Error)
+	}
+	respNew := a.request("session/new", map[string]any{"cwd": `C:\a`, "mcpServers": []any{}})
+	if len(respNew.Error) > 0 {
+		t.Fatalf("A session/new failed: %s", respNew.Error)
+	}
+	sid := protocol.ExtractSessionID(respNew.Result)
+	if sid == "" {
+		t.Fatalf("missing sessionId in %s", respNew.Result)
+	}
+
+	// 清掉新建时记的活跃时间，确认配额只由 prompt 驱动。
+	d.mu.Lock()
+	delete(d.sessionActivity, sid)
+	d.mu.Unlock()
+
+	b := newTestClient(t, port)
+	defer b.conn.Close()
+	if resp := b.request("initialize", initParams()); len(resp.Error) > 0 {
+		t.Fatalf("B initialize failed: %s", resp.Error)
+	}
+	if resp := b.request("session/new", map[string]any{"cwd": `C:\b`, "mcpServers": []any{}}); len(resp.Error) > 0 {
+		t.Fatalf("B should pass while A is idle: %s", resp.Error)
+	}
+
+	// 模拟 A 刚发过 prompt：会话进入活跃状态。
+	d.mu.Lock()
+	d.touchSessionLocked(sid)
+	d.mu.Unlock()
+
+	c := newTestClient(t, port)
+	defer c.conn.Close()
+	if resp := c.request("initialize", initParams()); len(resp.Error) > 0 {
+		t.Fatalf("C initialize failed: %s", resp.Error)
+	}
+	if resp := c.request("session/new", map[string]any{"cwd": `C:\c`, "mcpServers": []any{}}); len(resp.Error) == 0 {
+		t.Fatalf("expected active session to occupy quota")
+	}
+}
