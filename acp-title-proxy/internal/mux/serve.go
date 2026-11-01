@@ -13,6 +13,7 @@ import (
 
 	"language_projects/go_projects/acp-title-proxy/internal/config"
 	"language_projects/go_projects/acp-title-proxy/internal/finder"
+	"language_projects/go_projects/acp-title-proxy/internal/procguard"
 )
 
 // RunServe 是 Zed 每个 agent panel 启动的轻量入口：
@@ -110,5 +111,14 @@ func runDirect(cfg *config.Config, logger *log.Logger) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// 直连后端绑定 Job Object：客户端退出（甚至被强杀）时，内核连带终止后端与其 harness。
+	if guard, gerr := procguard.Attach(cmd.Process.Pid); gerr != nil {
+		logger.Printf("job object attach failed (direct backend pid %d): %v", cmd.Process.Pid, gerr)
+	} else {
+		defer guard.Close()
+	}
+	return cmd.Wait()
 }

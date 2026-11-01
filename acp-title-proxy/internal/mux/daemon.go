@@ -13,8 +13,10 @@ import (
 
 	"language_projects/go_projects/acp-title-proxy/internal/config"
 	"language_projects/go_projects/acp-title-proxy/internal/finder"
+	"language_projects/go_projects/acp-title-proxy/internal/pool"
 	"language_projects/go_projects/acp-title-proxy/internal/protocol"
 	"language_projects/go_projects/acp-title-proxy/internal/skill"
+	"language_projects/go_projects/acp-title-proxy/internal/updater"
 )
 
 // BackendFactory 启动一个后端连接；测试中可注入 mock。
@@ -147,6 +149,12 @@ func (d *Daemon) Run() error {
 		d.logger.Printf("backend start failed: %v", err)
 	}
 	go d.runIdleExit()
+	go d.runOrphanWatch()
+
+	if d.cfg.AutoUpdate.Enabled {
+		interval := time.Duration(d.cfg.AutoUpdate.CheckIntervalHours) * time.Hour
+		updater.StartBackgroundLoop(d.logger, interval, d.stopCh)
+	}
 
 	for {
 		conn, err := ln.Accept()
@@ -331,6 +339,43 @@ func (d *Daemon) runIdleExit() {
 				d.Shutdown()
 				return
 			}
+		}
+	}
+}
+
+// runOrphanWatch 定期清理父进程已退出的 AGY 孤儿进程。
+// 背景：Zed 每打开一个 AGY 会话就会拉起 agy_acp_server（约 12MB）与其 localharness_external
+// 子进程（120MB 以上）；客户端退出后这两个进程在 Windows 上不会自行退出，
+// 反复切换会话会把内存推到十几 GB。父进程仍存活的进程一律不动，因此不会影响活跃会话。
+func (d *Daemon) runOrphanWatch() {
+	if d.cfg == nil || !d.cfg.Reaper.Enabled {
+		return
+	}
+	interval := time.Duration(d.cfg.Reaper.CheckIntervalMinutes) * time.Minute
+	if interval < time.Minute {
+		interval = time.Minute
+	}
+
+	runOnce := func() {
+		res := pool.ReapOrphans(false)
+		res.Logf(d.logger)
+	}
+
+	select {
+	case <-d.stopCh:
+		return
+	case <-time.After(30 * time.Second):
+		runOnce()
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-d.stopCh:
+			return
+		case <-ticker.C:
+			runOnce()
 		}
 	}
 }

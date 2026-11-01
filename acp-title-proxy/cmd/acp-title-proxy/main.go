@@ -86,6 +86,10 @@ func main() {
 		}
 		fmt.Println("[acp-title-proxy] share daemon restarted in background.")
 
+	case "update", "update-agy":
+		// 顶层别名：检查并下载 AGY 官方最新版本
+		os.Exit(runUpdate(os.Args[2:]))
+
 	case "sync":
 		// 模式 A：一次性同步（完全外部化，不改动 settings.json）
 		fmt.Printf("[acp-title-proxy] Running one-shot sync (Config: %s)...\n", cfgPath)
@@ -204,6 +208,58 @@ func main() {
 			return
 		}
 
+		// agy reap：清理父进程已退出的 AGY 孤儿进程（内存泄漏兜底）
+		if len(os.Args) > 2 && strings.EqualFold(os.Args[2], "reap") {
+			dryRun := false
+			for _, a := range os.Args[3:] {
+				if a == "--dry-run" || a == "-n" {
+					dryRun = true
+				}
+			}
+			res := pool.ReapOrphans(dryRun)
+			if len(res.Orphans) == 0 {
+				fmt.Println("[agy reap] 未发现孤儿 AGY 进程")
+				return
+			}
+			for _, p := range res.Orphans {
+				fmt.Printf("  %s pid=%d parent=%d %dMB created=%s\n", p.Name, p.PID, p.Parent, p.MemoryMB, p.Created)
+			}
+			if dryRun {
+				fmt.Printf("[agy reap] dry-run：可清理 %d 个，约 %d MB\n", len(res.Orphans), res.FreedMB)
+				return
+			}
+			fmt.Printf("[agy reap] 已清理 %d 个，释放约 %d MB\n", res.Reaped, res.FreedMB)
+			for _, f := range res.Failures {
+				fmt.Fprintf(os.Stderr, "[agy reap] 失败: %s\n", f)
+			}
+			return
+		}
+
+		// agy reap-idle：只读诊断——按 worker 分组列出全部 harness 及其活跃状态
+		if len(os.Args) > 2 && strings.EqualFold(os.Args[2], "reap-idle") {
+			r := pool.NewReaper(cfg.Reaper, nil)
+			groups := r.Collect()
+			total := 0
+			for owner, list := range groups {
+				total += len(list)
+				fmt.Printf("worker %d: %d harness\n", owner, len(list))
+				for _, h := range list {
+					fmt.Printf("   pid=%d parent=%d created=%s\n", h.PID, h.ParentPID, h.CreatedAt.Format("15:04:05"))
+				}
+			}
+			fmt.Printf("[reap-idle] %d harness；daemon 按每个 harness（含工具子进程树）的 CPU 活跃度回收，连续 %dm 无增长才动手\n",
+				total, cfg.Reaper.IdleMinutes)
+			return
+		}
+
+		// agy update / upgrade：检查并下载更新 AGY 官方二进制
+		if len(os.Args) > 2 && (strings.EqualFold(os.Args[2], "update") || strings.EqualFold(os.Args[2], "upgrade")) {
+			if code := runUpdate(os.Args[3:]); code != 0 {
+				os.Exit(code)
+			}
+			return
+		}
+
 		// 模式 B：带预热池加速的 AGY stdio 代理
 		inj := proxy.NewInjector(os.Stdout)
 		titler := agy.NewTitler(&cfg.AGY, inj, nil)
@@ -305,6 +361,12 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy share-status  - Query shared backend status\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy share-stop    - Stop shared backend and its worker\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy share-restart - Restart shared backend in background\n\n")
+	fmt.Fprintf(os.Stderr, "AGY binary auto-update:\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy update          - Check & download latest AGY binary to Zed registry\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy update --check  - Only check for newer version\n\n")
+	fmt.Fprintf(os.Stderr, "AGY orphan process reclaim (memory leak fallback):\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy reap            - Kill AGY processes whose parent has exited\n")
+	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy reap --dry-run  - Only scan and list orphans\n\n")
 	fmt.Fprintf(os.Stderr, "Zed thread management (agent ownership / archive):\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy threads list    - Show sessions grouped by agent_id\n")
 	fmt.Fprintf(os.Stderr, "  acp-title-proxy agy threads adopt   - Move sessions from one agent to another (dry-run)\n")

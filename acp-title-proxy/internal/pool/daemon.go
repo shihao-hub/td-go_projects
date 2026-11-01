@@ -343,7 +343,7 @@ func (d *Daemon) splice(conn net.Conn, reader io.Reader, worker *Worker) {
 		}()
 
 		// 直接从 reader 拷贝，已预缓冲的字节会被自动带走
-		_, _ = io.Copy(worker.Stdin, reader)
+		_, _ = io.Copy(worker.Stdin, touchReader{r: reader, w: worker})
 	}()
 
 	// 出向：worker.Stdout（经 StdoutReader）-> 客户端连接
@@ -351,7 +351,7 @@ func (d *Daemon) splice(conn net.Conn, reader io.Reader, worker *Worker) {
 		defer wg.Done()
 		defer abort()
 
-		_, _ = io.Copy(conn, worker.StdoutReader)
+		_, _ = io.Copy(touchWriter{w: conn, track: worker}, worker.StdoutReader)
 	}()
 
 	// 等待任一方向结束
@@ -400,6 +400,32 @@ func (d *Daemon) removeWorker(w *Worker) {
 	d.mu.Unlock()
 }
 
+// idleWorkerPids 返回 ACP 流量静默超过 reaper.idle_minutes 的 worker PID。
+//
+// 只把这些 worker 交给 reaper：仍有可能在跑任务的 worker 必须整组排除。
+// 单看进程 CPU 会误判——等待模型响应、等待用户批准工具调用、等待子代理
+// 返回时 harness 都是 0 CPU，此时被杀会让当前 turn 永久卡死。
+func (d *Daemon) idleWorkerPids() []int {
+	if d.cfg == nil || d.cfg.Reaper.IdleMinutes <= 0 {
+		return nil
+	}
+	cutoff := time.Now().Add(-time.Duration(d.cfg.Reaper.IdleMinutes) * time.Minute)
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	var pids []int
+	for w := range d.workers {
+		if w == nil || w.Cmd == nil || w.Cmd.Process == nil {
+			continue
+		}
+		if w.LastActive().Before(cutoff) {
+			pids = append(pids, w.Cmd.Process.Pid)
+		}
+	}
+	return pids
+}
+
 func (d *Daemon) getWorkerPids() []int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -420,4 +446,32 @@ func sendResponse(w io.Writer, resp PoolResponse) error {
 	data = append(data, '\n')
 	_, err = w.Write(data)
 	return err
+}
+
+// touchReader / touchWriter 在转发 ACP 字节流时刷新 worker 的最近活跃时间，
+// 供 reaper 判断整个 worker 是否真的静默（而不是仅看进程 CPU）。
+type touchReader struct {
+	r io.Reader
+	w *Worker
+}
+
+func (t touchReader) Read(p []byte) (int, error) {
+	n, err := t.r.Read(p)
+	if n > 0 {
+		t.w.Touch()
+	}
+	return n, err
+}
+
+type touchWriter struct {
+	w     io.Writer
+	track *Worker
+}
+
+func (t touchWriter) Write(p []byte) (int, error) {
+	n, err := t.w.Write(p)
+	if n > 0 {
+		t.track.Touch()
+	}
+	return n, err
 }

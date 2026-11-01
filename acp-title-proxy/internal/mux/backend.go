@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+
+	"language_projects/go_projects/acp-title-proxy/internal/procguard"
 )
 
 // Handler 接收后端进程的每一行输出与退出事件。
@@ -30,6 +32,10 @@ type Backend struct {
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
 	stderr io.ReadCloser
+
+	// guard 是 Windows Job Object 守护句柄：Close 或宿主进程退出时，
+	// 内核会连带终止后端及其 localharness 子进程，避免产生孤儿泄漏。
+	guard *procguard.Guard
 
 	writeMu   sync.Mutex
 	closeOnce sync.Once
@@ -72,6 +78,14 @@ func StartBackend(exe string, args []string, env []string, h Handler) (*Backend,
 		stdin:  stdin,
 		stdout: bufio.NewReaderSize(stdout, 4*1024*1024),
 		stderr: stderr,
+	}
+
+	// 把后端进程绑定到 Job Object：宿主（daemon/客户端）一旦退出，
+	// agy_acp_server 与它派生的 localharness_external 会被内核连带终止。
+	if guard, gerr := procguard.Attach(cmd.Process.Pid); gerr != nil {
+		fmt.Fprintf(os.Stderr, "[acp-title-proxy] job object attach failed (backend pid %d): %v\n", cmd.Process.Pid, gerr)
+	} else {
+		b.guard = guard
 	}
 
 	go b.readLoop(h)
@@ -118,6 +132,12 @@ func (b *Backend) Close() error {
 		}
 		if b.cmd != nil && b.cmd.Process != nil {
 			_ = KillTree(b.cmd.Process.Pid)
+		}
+		// Job 关闭会连带回收后端整棵进程树（含 localharness），
+		// 即使 taskkill 未能覆盖的子进程也会被内核终止。
+		if b.guard != nil {
+			_ = b.guard.Close()
+			b.guard = nil
 		}
 		if b.stderr != nil {
 			_ = b.stderr.Close()

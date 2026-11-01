@@ -62,6 +62,45 @@ func TestFilterCandidatesPure_UnsortedInput(t *testing.T) {
 	}
 }
 
+func TestWorkerAncestor_OneFileChildProcess(t *testing.T) {
+	// agy_acp_server.exe(onefile 引导壳) -> agy_acp_server.exe(真身) -> localharness
+	// daemon 记录的 worker PID 是引导壳，harness 的直接父进程是真身，
+	// 必须沿父链追溯才能命中。
+	workers := map[int]bool{23188: true}
+	parents := map[int]int{
+		23188: 41008, // 引导壳，父为 daemon
+		36704: 23188, // 真身
+		33224: 36704, // harness
+	}
+
+	owner, ok := WorkerAncestor(33224, workers, parents)
+	if !ok || owner != 23188 {
+		t.Fatalf("expected harness to resolve to worker 23188, got %d ok=%v", owner, ok)
+	}
+}
+
+func TestWorkerAncestor_UnrelatedProcessIgnored(t *testing.T) {
+	// 官方 registry 直连的 harness（父链里没有本 daemon 的 worker）必须被忽略，
+	// 否则 daemon 会误杀别的 agent 进程。
+	workers := map[int]bool{23188: true}
+	parents := map[int]int{
+		39412: 44692, // 官方 agy 真身，父为 powershell
+		42556: 39412, // 官方 harness
+	}
+
+	if _, ok := WorkerAncestor(42556, workers, parents); ok {
+		t.Fatalf("expected unrelated harness to be ignored")
+	}
+}
+
+func TestWorkerAncestor_CycleGuard(t *testing.T) {
+	workers := map[int]bool{100: true}
+	parents := map[int]int{200: 201, 201: 200} // 异常环
+	if _, ok := WorkerAncestor(200, workers, parents); ok {
+		t.Fatalf("expected cycle to terminate without match")
+	}
+}
+
 func TestReaperConfigDefaults(t *testing.T) {
 	cfg := config.DefaultConfig()
 	if !cfg.Reaper.Enabled {

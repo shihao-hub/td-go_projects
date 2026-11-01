@@ -51,5 +51,10 @@
     "fallback_direct": true,
     "executable": "",
     "log_path": "%APPDATA%/acp-title-proxy/agy-share.log"
+  },
+  "auto_update": {
+    "enabled": true,
+    "check_interval_hours": 4,
+    "keep_versions": 2
   }
 }

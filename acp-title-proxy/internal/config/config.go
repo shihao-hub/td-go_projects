@@ -8,11 +8,19 @@ import (
 )
 
 type Config struct {
-	OpenCode OpenCodeConfig `json:"opencode"`
-	AGY      AGYConfig      `json:"agy"`
-	Skills   SkillsConfig   `json:"skills"`
-	Reaper   ReaperConfig   `json:"reaper"`
-	Share    ShareConfig    `json:"share"`
+	OpenCode   OpenCodeConfig   `json:"opencode"`
+	AGY        AGYConfig        `json:"agy"`
+	Skills     SkillsConfig     `json:"skills"`
+	Reaper     ReaperConfig     `json:"reaper"`
+	Share      ShareConfig      `json:"share"`
+	AutoUpdate AutoUpdateConfig `json:"auto_update"`
+}
+
+// AutoUpdateConfig 控制 AGY 版本自动更新与旧版清理。
+type AutoUpdateConfig struct {
+	Enabled            bool `json:"enabled"`
+	CheckIntervalHours int  `json:"check_interval_hours"`
+	KeepVersions       int  `json:"keep_versions"`
 }
 
 // ShareConfig 控制 ACP 多会话共享后端（agy-share）。
@@ -122,6 +130,11 @@ func DefaultConfig() *Config {
 			Overflow:            "reject",
 			IdleTTLMinutes:      30,
 			FallbackDirect:      true,
+		},
+		AutoUpdate: AutoUpdateConfig{
+			Enabled:            true,
+			CheckIntervalHours: 4,
+			KeepVersions:       2,
 		},
 	}
 }
@@ -268,6 +281,14 @@ func LoadConfig() (*Config, string, error) {
 		if appData := os.Getenv("APPDATA"); appData != "" {
 			cfg.Share.LogPath = filepath.Join(appData, "acp-title-proxy", "agy-share.log")
 		}
+	}
+
+	// 自动更新默认值
+	if cfg.AutoUpdate.CheckIntervalHours <= 0 {
+		cfg.AutoUpdate.CheckIntervalHours = 4
+	}
+	if cfg.AutoUpdate.KeepVersions <= 0 {
+		cfg.AutoUpdate.KeepVersions = 2
 	}
 
 	return cfg, foundPath, nil

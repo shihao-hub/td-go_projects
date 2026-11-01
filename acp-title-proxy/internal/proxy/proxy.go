@@ -3,12 +3,14 @@ package proxy
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"sync"
 
 	"language_projects/go_projects/acp-title-proxy/internal/pool"
+	"language_projects/go_projects/acp-title-proxy/internal/procguard"
 	"language_projects/go_projects/acp-title-proxy/internal/protocol"
 	"language_projects/go_projects/acp-title-proxy/internal/skill"
 )
@@ -73,6 +75,14 @@ func (r *Runner) Run(inj *Injector) error {
 		return err
 	}
 
+	// 子进程绑定 Job Object：代理进程退出（含被强杀）时内核连带终止整棵 AGY 进程树。
+	var guard *procguard.Guard
+	if g, gerr := procguard.Attach(cmd.Process.Pid); gerr != nil {
+		fmt.Fprintf(os.Stderr, "[acp-title-proxy] job object attach failed (pid %d): %v\n", cmd.Process.Pid, gerr)
+	} else {
+		guard = g
+	}
+
 	done := make(chan struct{})
 	var closeOnce sync.Once
 	abort := func() {
@@ -82,6 +92,10 @@ func (r *Runner) Run(inj *Injector) error {
 			if cmd.Process != nil {
 				_ = pool.KillProcessTree(cmd.Process.Pid)
 				_ = cmd.Process.Kill()
+			}
+			if guard != nil {
+				_ = guard.Close()
+				guard = nil
 			}
 		})
 	}
