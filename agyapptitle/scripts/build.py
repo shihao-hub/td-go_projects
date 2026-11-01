@@ -43,6 +43,20 @@ GENERATED_FILES = (
 )
 
 
+def setup_console() -> None:
+    """统一控制台流编码，避免 GBK 环境乱码或 Emoji 崩溃。"""
+    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if sys.stderr.encoding and sys.stderr.encoding.lower() not in ("utf-8", "utf8"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def run_git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
@@ -97,6 +111,8 @@ def get_commit_sha() -> str:
 
 
 def main() -> int:
+    setup_console()
+
     parser = argparse.ArgumentParser(description="构建 agyapptitle 双通道二进制（严格遵循 Monorepo 规范）")
     parser.add_argument("--release", action="store_true", help="声明发布构建；tag 或工作区条件不满足时直接报错")
     parser.add_argument("--version", default="", help="覆盖版本基线")
@@ -111,7 +127,7 @@ def main() -> int:
 
     if args.release and not release:
         reason = "当前 HEAD 未命中项目 tag" if exact_tag is None else "工作区存在未提交改动"
-        print(f"❌ 拒绝发布构建：{reason}（release 需同时满足 精确 tag + 工作区干净）", file=sys.stderr)
+        print(f"[-] 拒绝发布构建：{reason}（release 需同时满足 精确 tag + 工作区干净）", file=sys.stderr)
         return 2
 
     # 2. 版本号解析与派生
@@ -158,7 +174,7 @@ def main() -> int:
 
     # 3. 编译控制台 CLI 版
     cli_out = BIN_DIR / cli_name
-    print(f"🔨 正在构建 CLI 全能版: {cli_name} ...")
+    print(f"[*] 正在构建 CLI 全能版: {cli_name} ...")
     cmd_cli = [
         "go",
         "build",
@@ -169,13 +185,13 @@ def main() -> int:
     ]
     res_cli = subprocess.run(cmd_cli, cwd=PROJECT_ROOT)
     if res_cli.returncode != 0:
-        print("❌ CLI 构建失败", file=sys.stderr)
+        print("[-] CLI 构建失败", file=sys.stderr)
         return res_cli.returncode
-    print(f"✅ CLI 构建成功 -> {cli_out}")
+    print(f"[+] CLI 构建成功 -> {cli_out}")
 
     # 4. 编译无黑框后台守护版 (-H=windowsgui)
     daemon_out = BIN_DIR / daemon_name
-    print(f"🔨 正在构建无黑框守护版: {daemon_name} ...")
+    print(f"[*] 正在构建无黑框守护版: {daemon_name} ...")
     cmd_daemon = [
         "go",
         "build",
@@ -186,11 +202,11 @@ def main() -> int:
     ]
     res_daemon = subprocess.run(cmd_daemon, cwd=PROJECT_ROOT)
     if res_daemon.returncode != 0:
-        print("❌ 后台版构建失败", file=sys.stderr)
+        print("[-] 后台版构建失败", file=sys.stderr)
         return res_daemon.returncode
-    print(f"✅ 后台版构建成功 -> {daemon_out}")
+    print(f"[+] 后台版构建成功 -> {daemon_out}")
 
-    print(f"\n🎉 agyapptitle [{mode.upper()}] 双二进制构建全部完成！\n")
+    print(f"\n[OK] agyapptitle [{mode.upper()}] 双二进制构建全部完成！\n")
     return 0
 
 
