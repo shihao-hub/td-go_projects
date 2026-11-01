@@ -331,7 +331,6 @@ func main() {
 
 			runner := proxy.NewRunner(exePath, args, titler, skillMgr)
 			runner.Tracker = gov
-			runner.MaxHarnesses = maxSessions
 			if err := runner.Run(inj); err != nil {
 				gov.Release()
 				os.Exit(1)
@@ -348,7 +347,6 @@ func main() {
 		conn, err := pool.TryAcquire(pool.DefaultPort, 400*time.Millisecond)
 		if err == nil {
 			runner := proxy.NewRunner("", nil, titler, skillMgr)
-			runner.MaxHarnesses = maxSessions
 			if err := runner.RunStream(conn, inj); err != nil {
 				os.Exit(1)
 			}
@@ -375,7 +373,6 @@ func main() {
 			args = append(args, os.Args[2:]...)
 		}
 		runner := proxy.NewRunner(exePath, args, titler, skillMgr)
-		runner.MaxHarnesses = maxSessions
 		if err := runner.Run(inj); err != nil {
 			os.Exit(1)
 		}
