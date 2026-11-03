@@ -24,9 +24,13 @@ type RunOptions struct {
 }
 
 type App struct {
-	app     *application.App
-	winMu   sync.Mutex
-	win     *application.WebviewWindow
+	app   *application.App
+	winMu sync.Mutex
+	win   *application.WebviewWindow
+
+	// ensureMu 串行化窗口的唤起/重建，防止托盘连点并发双建窗。
+	ensureMu sync.Mutex
+
 	exiting atomic.Bool
 	tray    *application.SystemTray
 	icon    []byte
@@ -79,10 +83,14 @@ func Run(opts RunOptions) {
 	a.app = app
 	logx.Infof("初始化 GUI 通道=%s 单实例ID=%s webview2=%s", env.ModeName(), env.SingleInstanceID(), webviewDataPath)
 
-	// Always pre-create window before app.Run() (hidden if started with --hidden)
-	// This guarantees WebView2 environment is properly initialized and avoids
-	// runtime creation deadlocks on Windows message loops.
-	a.buildWindow(opts.Hidden)
+	// 仅非 hidden 首窗在 Run 前预建；--hidden 静默启动不初始化 WebView2，
+	// 纯 Go 托盘常驻，托盘唤起时才首次建窗。
+	// 原「预建避免运行时建窗死锁」的注释不成立：死锁的真实条件是「在 Wails
+	// 事件回调里同步建窗、卡住消息泵」，与是否预建无关——唤起路径一律走
+	// ensureMainWindow 的 goroutine 异步建窗即可规避（家族同款）。
+	if !opts.Hidden {
+		a.buildWindow(false)
+	}
 	a.buildTray()
 
 	if err := app.Run(); err != nil {
@@ -116,14 +124,17 @@ func (a *App) createWindowLocked(hidden bool) {
 		opts.Y = state.Y
 	}
 
-	a.win = a.app.Window.NewWithOptions(opts)
+	win := a.app.Window.NewWithOptions(opts)
+	a.win = win
 	logx.Infof("主窗口已创建 width=%d height=%d hasPosition=%v maximised=%v hidden=%v",
 		state.Width, state.Height, state.HasPos, state.Maximised, hidden)
 
-	a.win.RegisterHook(events.Common.WindowShow, func(event *application.WindowEvent) {
-		a.ensureWindowOnScreen(a.win)
-		if a.currentWindowState().Maximised && !a.win.IsMaximised() {
-			a.win.Maximise()
+	// 钩子闭包一律捕获局部 win：懒重建后 a.win 指向新窗，旧钩子若解引用
+	// a.win 字段会错指新窗。
+	win.RegisterHook(events.Common.WindowShow, func(*application.WindowEvent) {
+		a.ensureWindowOnScreen(win)
+		if a.currentWindowState().Maximised && !win.IsMaximised() {
+			win.Maximise()
 		}
 	})
 
@@ -133,22 +144,27 @@ func (a *App) createWindowLocked(hidden bool) {
 		events.Common.WindowMaximise,
 		events.Common.WindowUnMaximise,
 	} {
-		a.win.OnWindowEvent(evt, func(event *application.WindowEvent) {
-			a.scheduleSaveWindowState(a.win)
+		win.OnWindowEvent(evt, func(*application.WindowEvent) {
+			a.scheduleSaveWindowState(win)
 		})
 	}
 
-	a.win.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+	win.RegisterHook(events.Common.WindowClosing, func(*application.WindowEvent) {
 		// 窗口销毁后 Size() 会归零，必须在关闭路径上同步落盘一次。
 		a.stopWindowStateTimer()
-		a.saveWindowState(a.win)
+		a.saveWindowState(win)
 
 		if a.exiting.Load() {
-			return
+			return // 托盘「退出」路径放行全局退出，指针已由 quit() 清空
 		}
-		// Cancel destruction so window can be summoned back instantly from tray
-		event.Cancel()
-		a.win.Hide()
+
+		// 放行销毁：不调用 event.Cancel()，让 Wails 彻底销毁原生窗口并卸载
+		// WebView2，Chromium 子进程全部退出；托盘唤起时再毫秒级懒重建。
+		a.winMu.Lock()
+		if a.win == win {
+			a.win = nil
+		}
+		a.winMu.Unlock()
 
 		go func() {
 			time.Sleep(300 * time.Millisecond)
@@ -158,22 +174,66 @@ func (a *App) createWindowLocked(hidden bool) {
 	})
 }
 
+// ensureMainWindow 供 UI 回调（托盘点击/双击、第二实例唤醒）调用。
+// 绝不在 Wails 事件回调里同步建窗——WebView2 初始化需要消息泵继续运转，
+// 回调内同步建窗会卡死消息泵（窗口只建不显、托盘无响应），唤起一律异步。
 func (a *App) ensureMainWindow() {
-	a.winMu.Lock()
-	defer a.winMu.Unlock()
+	go a.showMainWindow()
+}
 
-	if a.win == nil {
+// showMainWindow 唤出或按需懒重建主窗口；ensureMu 串行化防托盘连点双建。
+func (a *App) showMainWindow() {
+	a.ensureMu.Lock()
+	defer a.ensureMu.Unlock()
+
+	if a.exiting.Load() {
 		return
 	}
 
-	if a.win.IsMinimised() {
-		a.win.UnMinimise()
+	// 热态：窗口指针仍存活（GetByID 复核，悬垂指针顺手清理）。
+	if win := a.aliveWindow(); win != nil {
+		if win.IsMinimised() {
+			win.UnMinimise()
+		}
+		win.Show()
+		win.Focus()
+		if a.currentWindowState().Maximised && !win.IsMaximised() {
+			win.Maximise()
+		}
+		return
 	}
-	a.win.Show()
-	a.win.Focus()
-	if a.currentWindowState().Maximised && !a.win.IsMaximised() {
-		a.win.Maximise()
+
+	// 深度休眠态：窗口已被 X 销毁，winMu 内按需重建 WebView2。
+	a.winMu.Lock()
+	a.createWindowLocked(false)
+	win := a.win
+	a.winMu.Unlock()
+	if win == nil {
+		logx.Errorf("主窗口重建失败")
+		return
 	}
+
+	win.Show()
+	win.Focus()
+	if a.currentWindowState().Maximised && !win.IsMaximised() {
+		win.Maximise()
+	}
+}
+
+// aliveWindow 返回当前存活的主窗口；已销毁时顺手清空悬垂引用。
+func (a *App) aliveWindow() *application.WebviewWindow {
+	a.winMu.Lock()
+	defer a.winMu.Unlock()
+
+	win := a.win
+	if win == nil {
+		return nil
+	}
+	if _, exists := a.app.Window.GetByID(win.ID()); !exists {
+		a.win = nil
+		return nil
+	}
+	return win
 }
 
 func (a *App) quit() {

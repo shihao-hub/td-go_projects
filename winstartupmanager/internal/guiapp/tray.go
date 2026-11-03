@@ -48,7 +48,8 @@ func (a *App) buildTray() {
 
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(ctx *application.Context) {
-		a.quit()
+		// 异步退出，避免在 UI 消息泵回调里同步执行清理（家族同款）。
+		go a.quit()
 	})
 
 	tray.SetMenu(menu)
