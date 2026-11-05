@@ -13,8 +13,10 @@
 
 混合模式（Hybrid）：
 - 大多数通用 CLI/练习工具仍作为 monorepo 平铺在根目录下统一维护。
-- **已迁移为 Submodule 的项目**：
-  - `glmquotawatch-gui`（`git@github.com:shihao-hub/td-go_projects-glmquotawatch-gui.git`）：独立托盘桌面 GUI，具备独立 CI、发版及跨设备共享需求，已于 2026-09-26 依照本方案成功转为二级 Submodule 挂载。
+- **当前挂载为 Submodule 的项目**：
+  - `nginx-ai-proxy`（`git@github.com:shihao-hub/td-go_projects-nginx-ai-proxy.git`）：独立代理服务，挂载策略同为 `branch = main` + `ignore = all`。
+- **已撤销挂载的项目**：
+  - `glmquotawatch`（原 `glmquotawatch-gui`，`git@github.com:shihao-hub/td-go_projects-glmquotawatch.git`）：曾于 2026-09-26 转为二级 Submodule 挂载（具备独立 CI、发版及跨设备共享需求）；项目停更后于 2026-11-06 归档至父仓 `.archived/projects/go_projects/glmquotawatch/`，submodule 挂载已摘除，远端仓库保留。
 
 ## 参考实现：creativault260820（`C:\WorkingProjects\creativault260820`）
 
