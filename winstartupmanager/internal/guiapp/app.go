@@ -83,25 +83,19 @@ func Run(opts RunOptions) {
 	a.app = app
 	logx.Infof("初始化 GUI 通道=%s 单实例ID=%s webview2=%s", env.ModeName(), env.SingleInstanceID(), webviewDataPath)
 
-	// 仅非 hidden 首窗在 Run 前预建；--hidden 静默启动不初始化 WebView2，
-	// 纯 Go 托盘常驻，托盘唤起时才首次建窗。
-	// 原「预建避免运行时建窗死锁」的注释不成立：死锁的真实条件是「在 Wails
-	// 事件回调里同步建窗、卡住消息泵」，与是否预建无关——唤起路径一律走
-	// ensureMainWindow 的 goroutine 异步建窗即可规避（家族同款）。
-	if !opts.Hidden {
-		a.buildWindow(false)
-	}
 	a.buildTray()
+
+	// 首窗与后续唤起统一走 ensureMainWindow（goroutine 异步建窗）：绝不在
+	// Wails 事件回调或主线程同步建窗——WebView2 初始化需要消息泵继续运转，
+	// 同步建窗会让消息泵卡死。--hidden 下完全不建窗，纯 Go 托盘常驻，
+	// 托盘唤起时才首次建窗（家族同款）。
+	if !opts.Hidden {
+		a.ensureMainWindow()
+	}
 
 	if err := app.Run(); err != nil {
 		panic(err)
 	}
-}
-
-func (a *App) buildWindow(hidden bool) {
-	a.winMu.Lock()
-	defer a.winMu.Unlock()
-	a.createWindowLocked(hidden)
 }
 
 // createWindowLocked 按持久化几何建窗，并接入几何采集与屏幕可见性兜底。
@@ -240,13 +234,20 @@ func (a *App) quit() {
 	logx.Infof("收到退出请求")
 	a.exiting.Store(true)
 	a.stopWindowStateTimer()
+
+	// 锁内只取指针并清空，保存与关闭一律在锁外执行（家族同款）：避免持
+	// winMu 调用 Wails API，也杜绝关闭钩子与 quit 的锁序耦合。
 	a.winMu.Lock()
-	if a.win != nil {
-		a.saveWindowState(a.win)
-		a.win.Close()
-	}
+	win := a.win
 	a.win = nil
 	a.winMu.Unlock()
+
+	if win != nil {
+		// 窗口销毁后 Size() 会归零，必须在关闭前同步落盘。
+		a.saveWindowState(win)
+		win.Close()
+	}
+
 	a.app.Quit()
 }
 
