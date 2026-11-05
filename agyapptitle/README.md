@@ -9,7 +9,7 @@
 ## 核心特性
 
 - 🚀 **极速响应与零配凭据**：
-  - 复用 `acp-title-proxy` 成熟的模型链方案，优先通过 OpenCode Go 网关（`deepseek-v4.1-flash`，0 思考）实现 **1 秒极速生成**；
+  - 模型链方案沿用前期已验证的设计（原 `acp-title-proxy`，该项目现已归档），优先通过 OpenCode Go 网关（`deepseek-v4.1-flash`，0 思考）实现 **1 秒极速生成**；
   - 自动读取本机 `~/.local/share/opencode/auth.json`，无需反复搬运或配置 API Key。
 - ⚡ **官方 ConnectRPC 实时热推送**：
   - 动态探测正在运行的 `language_server.exe` 进程与 `--csrf_token`，扫描监听端口；

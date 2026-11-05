@@ -70,8 +70,7 @@ func DefaultConfig() *Config {
 	}
 }
 
-// LoadConfig 加载配置；优先读取当前应用 config.json，若不存在则尝试借用 acp-title-proxy 的配置，
-// 都不存在时写入并返回默认配置。
+// LoadConfig 加载配置；优先读取当前应用 config.json，不存在时写入并返回默认配置。
 func LoadConfig() (*Config, error) {
 	cfgPath := GetConfigPath()
 	if b, err := os.ReadFile(cfgPath); err == nil {
@@ -80,14 +79,6 @@ func LoadConfig() (*Config, error) {
 			resolveAutoKeys(&cfg)
 			return &cfg, nil
 		}
-	}
-
-	// 尝试借用已有的 acp-title-proxy 配置
-	if proxyCfg := tryBorrowAcpTitleProxyConfig(); proxyCfg != nil {
-		resolveAutoKeys(proxyCfg)
-		// 保存一份到本工具目录
-		_ = SaveConfig(proxyCfg)
-		return proxyCfg, nil
 	}
 
 	// 回退默认配置
@@ -108,31 +99,6 @@ func SaveConfig(cfg *Config) error {
 		return err
 	}
 	return os.WriteFile(GetConfigPath(), b, 0644)
-}
-
-func tryBorrowAcpTitleProxyConfig() *Config {
-	candidates := []string{
-		`D:\Users\language_projects\go_projects\acp-title-proxy\config.json`,
-		filepath.Join(os.Getenv("APPDATA"), "language_projects", "acp-title-proxy", "config.json"),
-	}
-
-	for _, p := range candidates {
-		if b, err := os.ReadFile(p); err == nil {
-			var raw struct {
-				AGY struct {
-					Providers []ProviderConfig `json:"providers"`
-				} `json:"agy"`
-			}
-			if err := json.Unmarshal(b, &raw); err == nil && len(raw.AGY.Providers) > 0 {
-				return &Config{
-					PollIntervalSec: 4,
-					MaxAttempts:     3,
-					Providers:       raw.AGY.Providers,
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func resolveAutoKeys(cfg *Config) {
