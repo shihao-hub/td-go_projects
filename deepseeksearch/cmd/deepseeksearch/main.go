@@ -19,13 +19,7 @@ import (
 func main() {
 	defer app.Recover(true)
 
-	hidden := false
-	for _, arg := range os.Args[1:] {
-		switch arg {
-		case "--hidden", "--tray":
-			hidden = true
-		}
-	}
+	hidden := app.IsSilentStart(os.Args)
 
 	if err := app.LaunchGUI("", 0, hidden); err != nil {
 		fallbackServe(!hidden)

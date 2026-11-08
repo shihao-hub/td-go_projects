@@ -43,35 +43,15 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
 	}
-	logf("启动 version=%s mode=%s", Version, BuildMode)
-	store, err := storage.NewStore(dbPath)
-	if err != nil {
-		return fmt.Errorf("打开数据库失败: %w", err)
-	}
-
-	listener, err := api.Listen(port)
-	if err != nil {
-		return fmt.Errorf("启动 HTTP 监听失败: %w", err)
-	}
-	serverURL := api.URL(listener)
-	logf("WebUI 已启动: %s", serverURL)
-	logf("数据通道: %s，数据库: %s", Channel(), dbPath)
-
-	server := api.NewServer(store, api.Meta{
-		Channel:   Channel(),
-		BuildMode: BuildMode,
-		Version:   Version,
-		DataDir:   DataDir(),
-		DBPath:    dbPath,
-	})
-	go func() {
-		_ = server.Serve(listener)
-	}()
+	logf("启动 version=%s mode=%s hidden=%t", Version, BuildMode, hidden)
 
 	var appInstance *App
 
 	singleInstanceID := guiSingleInstanceID(IsRelease())
 
+	// 必须先抢占单实例锁，再初始化重资源：
+	// application.New 在检测到同通道实例已运行时，会向首实例投递 SecondInstanceData 后
+	// 直接 os.Exit，此时本进程不应也已经打开过 SQLite 并占用随机端口。
 	wailsApp := application.New(application.Options{
 		Logger:      wailsLogger(),
 		Name:        appName,
@@ -92,6 +72,12 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 			UniqueID: singleInstanceID,
 			ExitCode: 0,
 			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
+				// 静默启动（开机自启 / 托盘驻留）重复触发时，绝不能唤醒主窗口：
+				// 否则托盘里安静待着的窗口会被系统自启项“炸”出来。
+				if IsSilentStart(data.Args) {
+					logf("忽略静默第二实例唤醒（保持托盘驻留）: %v", data.Args)
+					return
+				}
 				if appInstance != nil {
 					appInstance.ensureMainWindow()
 				}
@@ -100,11 +86,39 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 	})
 
 	appInstance = &App{
-		app:       wailsApp,
-		serverURL: serverURL,
-		store:     store,
-		winState:  loadWindowState(),
+		app:      wailsApp,
+		winState: loadWindowState(),
 	}
+
+	// 走到这里说明本进程已持有单实例锁，可以安全占用数据库与端口。
+	store, err := storage.NewStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("打开数据库失败: %w", err)
+	}
+
+	listener, err := api.Listen(port)
+	if err != nil {
+		_ = store.Close()
+		return fmt.Errorf("启动 HTTP 监听失败: %w", err)
+	}
+	serverURL := api.URL(listener)
+
+	server := api.NewServer(store, api.Meta{
+		Channel:   Channel(),
+		BuildMode: BuildMode,
+		Version:   Version,
+		DataDir:   DataDir(),
+		DBPath:    dbPath,
+	})
+	go func() {
+		_ = server.Serve(listener)
+	}()
+
+	appInstance.serverURL = serverURL
+	appInstance.store = store
+
+	logf("WebUI 已启动: %s", serverURL)
+	logf("数据通道: %s，数据库: %s", Channel(), dbPath)
 
 	appInstance.buildTray()
 	if !hidden {
