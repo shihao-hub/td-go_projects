@@ -18,6 +18,26 @@ import (
 // WAL 模式允许读写互不阻塞；busy_timeout 5s 避免并发写报 database is locked。
 const sqliteDSNParams = "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 
+// dbTimeLayout 与 SQLite CURRENT_TIMESTAMP 的墙钟格式一致。
+// 关键约束：CURRENT_TIMESTAMP 恒为 UTC，本地侧所有比较与解析必须显式 UTC——
+// 若混入本地时区，UTC+8 机器上的缓存时效窗口会漂移 ±8 小时。
+const dbTimeLayout = "2006-01-02 15:04:05"
+
+// dbCutoff 计算往前回溯 maxAge 的 UTC 墙钟串，供 SQL 字符串比较（>= cutoff）使用。
+func dbCutoff(maxAge time.Duration) string {
+	return time.Now().UTC().Add(-maxAge).Format(dbTimeLayout)
+}
+
+// parseDBTime 解析 SQLite 写入的 UTC 墙钟时间；
+// 历史库兼容少量以 RFC3339 落盘的字符串。返回的时间恒为 UTC 时刻，
+// 对外展示前由调用方按需 .Local() 转本地时区。
+func parseDBTime(s string) (time.Time, error) {
+	if t, err := time.ParseInLocation(dbTimeLayout, s, time.UTC); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
 type AppConfig struct {
 	APIKey       string `json:"apiKey"`
 	BaseURL      string `json:"baseUrl"`
@@ -227,7 +247,7 @@ func (s *Store) GetCachedSearch(query string, count int, needContent bool, maxAg
 		needVal = 1
 	}
 
-	cutoff := time.Now().Add(-maxAge).Format("2006-01-02 15:04:05")
+	cutoff := dbCutoff(maxAge)
 
 	row := s.db.QueryRow(`
 		SELECT id, query, count, need_content, result_count, results_json, created_at
@@ -250,12 +270,31 @@ func (s *Store) GetCachedSearch(query string, count int, needContent bool, maxAg
 	if resJSON.Valid {
 		r.ResultsJSON = resJSON.String
 	}
-	t, parseErr := time.Parse("2006-01-02 15:04:05", createdAt)
-	if parseErr != nil {
-		t, _ = time.Parse(time.RFC3339, createdAt)
+	r.CreatedAt, _ = parseDBTime(createdAt)
+
+	// 宽缓存截断：历史记录允许 count 更宽（WHERE count >= ?），命中后统一把
+	// 结果列表截到本次请求条数，保证“返回结果数 == 请求条数”的调用契约。
+	if r.ResultsJSON != "" {
+		r.ResultsJSON, r.ResultCount = truncateResultsJSON(r.ResultsJSON, count)
 	}
-	r.CreatedAt = t
 	return &r, nil
+}
+
+// truncateResultsJSON 把 results 数组的 JSON 串截断为前 count 条；
+// 解析失败或本就不足 count 条时原样返回，交由上层容错。
+func truncateResultsJSON(raw string, count int) (string, int) {
+	if count <= 0 || raw == "" {
+		return raw, 0
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &items); err != nil || len(items) <= count {
+		return raw, len(items)
+	}
+	trimmed, err := json.Marshal(items[:count])
+	if err != nil {
+		return raw, len(items)
+	}
+	return string(trimmed), count
 }
 
 func (s *Store) ListSearchHistory(limit int) ([]SearchRecord, error) {
@@ -288,11 +327,7 @@ func (s *Store) ListSearchHistory(limit int) ([]SearchRecord, error) {
 		if resJSON.Valid {
 			r.ResultsJSON = resJSON.String
 		}
-		t, parseErr := time.Parse("2006-01-02 15:04:05", createdAt)
-		if parseErr != nil {
-			t, _ = time.Parse(time.RFC3339, createdAt)
-		}
-		r.CreatedAt = t
+		r.CreatedAt, _ = parseDBTime(createdAt)
 		records = append(records, r)
 	}
 	return records, nil
@@ -318,7 +353,7 @@ func (s *Store) GetCachedFetch(url string, maxAge time.Duration) (*FetchRecord, 
 	defer s.mu.RUnlock()
 
 	url = strings.TrimSpace(url)
-	cutoff := time.Now().Add(-maxAge).Format("2006-01-02 15:04:05")
+	cutoff := dbCutoff(maxAge)
 
 	row := s.db.QueryRow(`
 		SELECT id, url, title, content, fetched_at
@@ -335,11 +370,7 @@ func (s *Store) GetCachedFetch(url string, maxAge time.Duration) (*FetchRecord, 
 		}
 		return nil, err
 	}
-	t, parseErr := time.Parse("2006-01-02 15:04:05", fetchedAt)
-	if parseErr != nil {
-		t, _ = time.Parse(time.RFC3339, fetchedAt)
-	}
-	r.FetchedAt = t
+	r.FetchedAt, _ = parseDBTime(fetchedAt)
 	return &r, nil
 }
 
@@ -367,33 +398,8 @@ func (s *Store) ListFetchHistory(limit int) ([]FetchRecord, error) {
 		if err := rows.Scan(&r.ID, &r.URL, &r.Title, &r.Content, &fetchedAt); err != nil {
 			continue
 		}
-		t, parseErr := time.Parse("2006-01-02 15:04:05", fetchedAt)
-		if parseErr != nil {
-			t, _ = time.Parse(time.RFC3339, fetchedAt)
-		}
-		r.FetchedAt = t
+		r.FetchedAt, _ = parseDBTime(fetchedAt)
 		records = append(records, r)
 	}
 	return records, nil
-}
-
-func (s *Store) GetFetchRecordByID(id int64) (*FetchRecord, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	row := s.db.QueryRow("SELECT id, url, title, content, fetched_at FROM fetch_history WHERE id = ?", id)
-	var r FetchRecord
-	var fetchedAt string
-	if err := row.Scan(&r.ID, &r.URL, &r.Title, &r.Content, &fetchedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	t, parseErr := time.Parse("2006-01-02 15:04:05", fetchedAt)
-	if parseErr != nil {
-		t, _ = time.Parse(time.RFC3339, fetchedAt)
-	}
-	r.FetchedAt = t
-	return &r, nil
 }

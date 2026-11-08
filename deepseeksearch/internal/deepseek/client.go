@@ -130,10 +130,16 @@ func (c *Client) doRequest(ctx context.Context, method, path string, reqBody int
 			return fmt.Errorf("请求 DeepSeek 服务端网络异常: %w", err)
 		}
 
-		respBytes, err := io.ReadAll(resp.Body)
+		// 10MB 上限：正常搜索/抓取响应（need_content 50 条）远小于该值，
+		// BaseURL 指向异常服务时无界读取 GB 级响应会直接拖垮进程。
+		const maxRespBytes = 10 << 20
+		respBytes, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxRespBytes)+1))
 		_ = resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("读取响应失败: %w", err)
+		}
+		if len(respBytes) > maxRespBytes {
+			return fmt.Errorf("响应体超过 %d MB 上限，BaseURL 返回异常数据", maxRespBytes>>20)
 		}
 
 		// 遇到 429 (限流) 或 502/503 (服务端短暂不可用) 时进行退避重试

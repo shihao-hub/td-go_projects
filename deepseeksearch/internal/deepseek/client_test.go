@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -70,5 +71,27 @@ func TestDoRequestRetryOn503(t *testing.T) {
 	}
 	if atomic.LoadInt32(&attempts) != 2 {
 		t.Errorf("预期尝试 2 次，实际尝试了 %d 次", attempts)
+	}
+}
+
+// BaseURL 可被用户指向任意代理，异常服务返回超大响应时必须在读取层截停，
+// 而不是把内存吃穿
+func TestDoRequestRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		chunk := make([]byte, 1<<20) // 1MB/块，共写 12MB 超过 10MB 上限
+		for i := 0; i < 12; i++ {
+			_, _ = w.Write(chunk)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("sk-test-key-123456", server.URL)
+	_, err := client.Search(context.Background(), SearchRequest{Query: "test"})
+	if err == nil {
+		t.Fatalf("超过 10MB 上限的响应应被拒绝")
+	}
+	if !strings.Contains(err.Error(), "响应体超过") {
+		t.Errorf("预期报出响应体大小上限错误，实际: %v", err)
 	}
 }

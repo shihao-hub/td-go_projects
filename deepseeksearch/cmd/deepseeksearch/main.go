@@ -39,8 +39,6 @@ func fallbackServe(openBrowser bool) {
 		Channel:   app.Channel(),
 		BuildMode: app.BuildMode,
 		Version:   app.Version,
-		DataDir:   app.DataDir(),
-		DBPath:    dbPath,
 	})
 	if _, err := server.Start(0, openBrowser); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "服务异常终止: %v\n", err)

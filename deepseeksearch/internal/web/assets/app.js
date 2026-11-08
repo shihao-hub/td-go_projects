@@ -300,7 +300,7 @@ document.addEventListener("DOMContentLoaded", () => {
       cacheBadge.style.border = "1px solid rgba(46,160,67,0.3)";
       cacheBadge.style.marginLeft = "8px";
       cacheBadge.textContent = "本地缓存 (0 元消耗)";
-      cacheBadge.title = cachedAt ? `缓存于: ${cachedAt}` : "近期搜索缓存";
+      cacheBadge.title = cachedAt ? `缓存于: ${fmtLocalTime(cachedAt)}` : "近期搜索缓存";
     } else {
       cacheBadge.style.display = "none";
     }
@@ -322,11 +322,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const hasContent = !!(item.content && item.content.trim().length > 0);
 
+      const itemHref = safeUrl(item.url);
+
       card.innerHTML = `
         <div class="card-top">
           <div class="card-title-group">
             <h3 class="card-title">
-              <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title || "无标题网页")}</a>
+              <a href="${escapeHtml(itemHref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title || "无标题网页")}</a>
             </h3>
             <div class="card-url">${escapeHtml(item.url)}</div>
           </div>
@@ -356,9 +358,9 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
 
         <div class="card-footer">
-          <button class="btn btn-sm btn-outline copy-url-btn" data-url="${escapeHtml(item.url)}">复制链接</button>
+          <button class="btn btn-sm btn-outline copy-url-btn" data-url="${escapeHtml(itemHref)}">复制链接</button>
           <button class="btn btn-sm btn-outline copy-md-btn" data-index="${index}">复制引用</button>
-          <button class="btn btn-sm btn-primary jump-fetch-btn" data-url="${escapeHtml(item.url)}">${hasContent ? '直读正文 (0 元)' : '提取为 Markdown'}</button>
+          <button class="btn btn-sm btn-primary jump-fetch-btn" data-url="${escapeHtml(itemHref)}">${hasContent ? '直读正文 (0 元)' : '提取为 Markdown'}</button>
         </div>
       `;
 
@@ -496,7 +498,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function renderFetchResult(data, fromCache) {
     fetchTitle.textContent = data.title;
-    fetchSourceLink.href = data.url;
+    fetchSourceLink.href = safeUrl(data.url);
     fetchMetaBar.style.display = "flex";
 
     let fetchCacheBadge = document.getElementById("fetchCacheBadge");
@@ -636,6 +638,20 @@ document.addEventListener("DOMContentLoaded", () => {
       .replace(/'/g, "&#039;");
   }
 
+  // URL scheme 白名单：搜索结果与外部网页正文都是不可信输入，
+  // 非 http(s):// 的链接（如 javascript:）一律退回 "#"，杜绝 href 注入。
+  function safeUrl(u) {
+    const s = String(u || "").trim();
+    return /^https?:\/\//i.test(s) ? s : "#";
+  }
+
+  // 缓存时间为 UTC 时刻串（ISO），展示前转本地时区可读格式
+  function fmtLocalTime(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? String(iso) : d.toLocaleString();
+  }
+
   function showTempToast(el, text) {
     const orig = el.textContent;
     el.textContent = text;
@@ -714,8 +730,8 @@ document.addEventListener("DOMContentLoaded", () => {
     s = s.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
     // 行内代码
     s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
-    // 链接
-    s = s.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    // 链接（href 走 scheme 白名单，堵 javascript: 直通）
+    s = s.replace(/\[(.*?)\]\((.*?)\)/g, (m, text, href) => `<a href="${safeUrl(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`);
     return s;
   }
 

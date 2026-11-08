@@ -107,8 +107,6 @@ func LaunchGUI(dbPath string, port int, hidden bool) error {
 		Channel:   Channel(),
 		BuildMode: BuildMode,
 		Version:   Version,
-		DataDir:   DataDir(),
-		DBPath:    dbPath,
 	})
 	go func() {
 		_ = server.Serve(listener)

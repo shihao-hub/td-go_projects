@@ -117,7 +117,11 @@ func handleSearch(args []string) {
 
 	// 1. 若非强制刷新，优先检查 24 小时内的本地搜索缓存（0 元消耗）
 	if !*refresh {
-		if cached, _ := store.GetCachedSearch(query, *count, *content, 24*time.Hour); cached != nil && cached.ResultsJSON != "" {
+		cached, cacheErr := store.GetCachedSearch(query, *count, *content, 24*time.Hour)
+		if cacheErr != nil {
+			// 缓存读取失败不拦截请求，但必须留痕——静默 miss 会直接打到付费 API
+			fmt.Fprintf(os.Stderr, "警告: 读取本地搜索缓存失败，将直接请求远端: %v\n", cacheErr)
+		} else if cached != nil && cached.ResultsJSON != "" {
 			var items []deepseek.SearchResultItem
 			if err := json.Unmarshal([]byte(cached.ResultsJSON), &items); err == nil && len(items) > 0 {
 				resp := deepseek.SearchResponse{
@@ -131,7 +135,7 @@ func handleSearch(args []string) {
 					_ = enc.Encode(resp)
 					return
 				}
-				fmt.Printf("📦 [本地缓存命中] (检索于 %s，消耗 0 元，加 --refresh 强制刷新远端)\n", cached.CreatedAt.Format("2006-01-02 15:04:05"))
+				fmt.Printf("📦 [本地缓存命中] (检索于 %s，消耗 0 元，加 --refresh 强制刷新远端)\n", cached.CreatedAt.Local().Format("2006-01-02 15:04:05"))
 				fmt.Printf("🔍 检索到 %d 条结果 (Query: %q):\n\n", len(items), query)
 				for i, r := range items {
 					scoreStr := fmt.Sprintf("%.2f", r.RerankScore)
@@ -155,7 +159,11 @@ func handleSearch(args []string) {
 		}
 	}
 
-	cfg, _ := store.GetConfig()
+	cfg, cfgErr := store.GetConfig()
+	if cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "读取配置失败: %v\n", cfgErr)
+		os.Exit(1)
+	}
 	apiKey := cfg.APIKey
 	if *key != "" {
 		apiKey = *key
@@ -181,7 +189,9 @@ func handleSearch(args []string) {
 	}
 
 	// 记录到本地
-	_, _ = store.AddSearchHistory(query, *count, *content, len(resp.Results), resp.Results)
+	if _, histErr := store.AddSearchHistory(query, *count, *content, len(resp.Results), resp.Results); histErr != nil {
+		fmt.Fprintf(os.Stderr, "警告: 记录搜索历史失败: %v\n", histErr)
+	}
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -234,7 +244,10 @@ func handleFetch(args []string) {
 
 	// 1. 若非强制刷新，优先检查 7 天内的本地网页抓取缓存（0 元消耗）
 	if !*refresh {
-		if cached, _ := store.GetCachedFetch(url, 7*24*time.Hour); cached != nil && cached.Content != "" {
+		cached, cacheErr := store.GetCachedFetch(url, 7*24*time.Hour)
+		if cacheErr != nil {
+			fmt.Fprintf(os.Stderr, "警告: 读取网页抓取缓存失败，将直接请求远端: %v\n", cacheErr)
+		} else if cached != nil && cached.Content != "" {
 			resp := deepseek.FetchResponse{
 				Title:     cached.Title,
 				Content:   cached.Content,
@@ -255,14 +268,18 @@ func handleFetch(args []string) {
 				_ = enc.Encode(resp)
 				return
 			}
-			fmt.Printf("📦 [本地缓存命中] (抓取于 %s，消耗 0 元，加 --refresh 强制刷新远端)\n", cached.FetchedAt.Format("2006-01-02 15:04:05"))
+			fmt.Printf("📦 [本地缓存命中] (抓取于 %s，消耗 0 元，加 --refresh 强制刷新远端)\n", cached.FetchedAt.Local().Format("2006-01-02 15:04:05"))
 			fmt.Printf("# %s\n\n来源: %s\n\n", resp.Title, url)
 			fmt.Println(resp.Content)
 			return
 		}
 	}
 
-	cfg, _ := store.GetConfig()
+	cfg, cfgErr := store.GetConfig()
+	if cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "读取配置失败: %v\n", cfgErr)
+		os.Exit(1)
+	}
 	apiKey := cfg.APIKey
 	if *key != "" {
 		apiKey = *key
@@ -283,7 +300,9 @@ func handleFetch(args []string) {
 	}
 
 	// 记录到本地
-	_, _ = store.AddFetchHistory(url, resp.Title, resp.Content)
+	if _, histErr := store.AddFetchHistory(url, resp.Title, resp.Content); histErr != nil {
+		fmt.Fprintf(os.Stderr, "警告: 记录抓取历史失败: %v\n", histErr)
+	}
 
 	if *savePath != "" {
 		if err := os.WriteFile(*savePath, []byte(resp.Content), 0644); err != nil {
@@ -318,7 +337,11 @@ func handleConfig(args []string) {
 	}
 	defer store.Close()
 
-	cfg, _ := store.GetConfig()
+	cfg, cfgErr := store.GetConfig()
+	if cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "读取配置失败: %v\n", cfgErr)
+		os.Exit(1)
+	}
 
 	switch args[0] {
 	case "show":
@@ -407,7 +430,7 @@ func handleHistory(args []string) {
 		}
 		fmt.Printf("最近网页抓取历史 (%d 条):\n", len(fetches))
 		for _, f := range fetches {
-			fmt.Printf("- [%s] %s (%s)\n", f.FetchedAt.Format("2006-01-02 15:04"), f.Title, f.URL)
+			fmt.Printf("- [%s] %s (%s)\n", f.FetchedAt.Local().Format("2006-01-02 15:04"), f.Title, f.URL)
 		}
 		return
 	}
@@ -419,7 +442,7 @@ func handleHistory(args []string) {
 	}
 	fmt.Printf("最近搜索历史 (%d 条):\n", len(searches))
 	for _, s := range searches {
-		fmt.Printf("- [%s] %q (返回 %d 条)\n", s.CreatedAt.Format("2006-01-02 15:04"), s.Query, s.ResultCount)
+		fmt.Printf("- [%s] %q (返回 %d 条)\n", s.CreatedAt.Local().Format("2006-01-02 15:04"), s.Query, s.ResultCount)
 	}
 }
 
@@ -442,8 +465,6 @@ func handleServe(args []string) {
 		Channel:   app.Channel(),
 		BuildMode: app.BuildMode,
 		Version:   app.Version,
-		DataDir:   app.DataDir(),
-		DBPath:    realDBPath,
 	})
 
 	url, err := server.Start(*port, *openBrowser)

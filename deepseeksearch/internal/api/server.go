@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"os/exec"
@@ -26,8 +27,6 @@ type Meta struct {
 	Channel   string `json:"channel"`
 	BuildMode string `json:"buildMode"`
 	Version   string `json:"version"`
-	DataDir   string `json:"dataDir"`
-	DBPath    string `json:"dbPath"`
 }
 
 func NewServer(store *storage.Store, meta Meta) *Server {
@@ -54,7 +53,28 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("/", http.FileServer(http.FS(subFS)))
 	}
 
-	return mux
+	return localHostGuard(mux)
+}
+
+// localHostGuard 只放行 Host 头指向本机的请求：
+// API 携带明文 API Key 且允许改写 BaseURL，DNS rebinding 后恶意页面会以
+// “同源”身份读取/劫持配置，故一律基于 Host 白名单拒绝，403 返回。
+func localHostGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		} else {
+			// 无端口时统一剥掉 IPv6 的方括号尾巴
+			host = strings.Trim(host, "[]")
+		}
+		switch strings.ToLower(host) {
+		case "localhost", "127.0.0.1", "::1":
+			next.ServeHTTP(w, r)
+		default:
+			http.Error(w, "仅允许本机访问", http.StatusForbidden)
+		}
+	})
 }
 
 func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +156,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// 1. 若非强制刷新，优先检查 24 小时内的本地搜索缓存（0 元消耗）
 	if !req.Refresh {
-		if cached, _ := s.store.GetCachedSearch(req.Query, req.Count, req.NeedContent, 24*time.Hour); cached != nil && cached.ResultsJSON != "" {
+		cached, err := s.store.GetCachedSearch(req.Query, req.Count, req.NeedContent, 24*time.Hour)
+		if err != nil {
+			// 缓存读取失败不拦截请求，但必须留痕——静默 miss 会直接打到付费 API
+			log.Printf("读取本地搜索缓存失败（忽略缓存直达远端）: %v", err)
+		} else if cached != nil && cached.ResultsJSON != "" {
 			var items []deepseek.SearchResultItem
 			if err := json.Unmarshal([]byte(cached.ResultsJSON), &items); err == nil && len(items) > 0 {
 				writeJSON(w, http.StatusOK, deepseek.SearchResponse{
@@ -176,7 +200,9 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 记录搜索历史与缓存
-	_, _ = s.store.AddSearchHistory(req.Query, req.Count, req.NeedContent, len(resp.Results), resp.Results)
+	if _, err := s.store.AddSearchHistory(req.Query, req.Count, req.NeedContent, len(resp.Results), resp.Results); err != nil {
+		log.Printf("记录搜索历史失败: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -200,7 +226,10 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 
 	// 1. 若非强制刷新，优先检查 7 天内的本地网页抓取缓存（0 元消耗）
 	if !req.Refresh {
-		if cached, _ := s.store.GetCachedFetch(req.URL, 7*24*time.Hour); cached != nil && cached.Content != "" {
+		cached, err := s.store.GetCachedFetch(req.URL, 7*24*time.Hour)
+		if err != nil {
+			log.Printf("读取网页抓取缓存失败（忽略缓存直达远端）: %v", err)
+		} else if cached != nil && cached.Content != "" {
 			writeJSON(w, http.StatusOK, deepseek.FetchResponse{
 				Title:     cached.Title,
 				Content:   cached.Content,
@@ -232,7 +261,9 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 记录抓取历史与缓存
-	_, _ = s.store.AddFetchHistory(req.URL, resp.Title, resp.Content)
+	if _, err := s.store.AddFetchHistory(req.URL, resp.Title, resp.Content); err != nil {
+		log.Printf("记录抓取历史失败: %v", err)
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
