@@ -1,0 +1,7 @@
+# 构建生成物（scripts/build.py 自动重建，不入库）
+/bin/
+/cmd/rebootremind/rsrc_windows_amd64.syso
+
+# Python 运行缓存
+__pycache__/
+*.pyc
