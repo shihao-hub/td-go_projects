@@ -50,6 +50,24 @@ func (s *StartupAppService) SaveItem(source model.StartupSource, name string, ex
 	return engine.SaveItem(source, name, exePath, args)
 }
 
+// ToggleTask 启停计划任务（翻转 Definition.Enabled 并回写定义）。
+func (s *StartupAppService) ToggleTask(taskPath string, enable bool) error {
+	if err := engine.ToggleTask(taskPath, enable); err != nil {
+		logx.Errorf("计划任务启停失败 path=%s enable=%v: %v", taskPath, enable, err)
+		return err
+	}
+	return nil
+}
+
+// DeleteTask 删除计划任务；engine 层先落任务 XML 备份，失败中止删除。
+func (s *StartupAppService) DeleteTask(taskPath string) error {
+	if err := engine.DeleteTask(taskPath); err != nil {
+		logx.Errorf("计划任务删除失败 path=%s: %v", taskPath, err)
+		return err
+	}
+	return nil
+}
+
 // LocateInExplorer opens file explorer and highlights the executable.
 func (s *StartupAppService) LocateInExplorer(exePath string) error {
 	return engine.LocateInExplorer(exePath)

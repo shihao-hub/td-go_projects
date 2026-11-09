@@ -28,7 +28,8 @@
     4) 图标检查（release 用 build/icon.ico，dev 用 build/icon_dev.ico，缺失时调
        scripts/render_icon.py 生成）
     5) go-winres 生成 PE 资源（图标 + manifest + VERSIONINFO），go build 后即删除
-    6) go build 注入 internal/env.{Version,Commit,BuildMode}
+    6) go build 注入 internal/env.{Version,Commit,BuildMode}；因 CGO 外链会吞掉
+       -H windowsgui，ldflags 同步携带 -Wl,--subsystem,windows 交由 gcc 写子系统
 
 每次变更本脚本时必须同步更新本使用说明。
 """
@@ -193,6 +194,23 @@ def make_syso(mode: str, version: str) -> tuple[Path, Path]:
     return PROJECT_ROOT / "rsrc_windows_amd64.syso", json_path
 
 
+def patch_gui_subsystem(out: Path) -> None:
+    """PE 子系统兜底补丁：确保 OptionalHeader.Subsystem = 3 (WINDOWS_GUI)。
+
+    本机实测（Go 1.26 默认 -buildmode=pie）下 -H windowsgui 无法写入子系统位，
+    buildmode=exe 外链同样无效，故构建收尾直接改 PE 头字段；已是 GUI 时跳过。
+    """
+    data = bytearray(out.read_bytes())
+    e_lfanew = int.from_bytes(data[0x3C:0x40], "little")
+    off = e_lfanew + 24 + 68  # COFF 头 + OptionalHeader.Subsystem 偏移
+    cur = int.from_bytes(data[off : off + 2], "little")
+    if cur == 3:
+        return
+    data[off : off + 2] = (3).to_bytes(2, "little")
+    out.write_bytes(data)
+    info(f"PE 子系统补丁: {cur} -> 3 (WINDOWS_GUI)")
+
+
 def go_build(mode: str, version: str) -> Path:
     commit = git("rev-parse", "--short", "HEAD") or "unknown"
     build_mode = "dev" if mode == "dev" else "release"
@@ -203,12 +221,15 @@ def go_build(mode: str, version: str) -> Path:
     )
     out = BUILD_DIR / (f"{APP_NAME}-dev.exe" if mode == "dev" else f"{APP_NAME}.exe")
     cmd = ["go", "build", "-trimpath"]
+    # CGO_ENABLED=1 时走 gcc 外部链接，-H windowsgui 会被静默忽略（gcc 默认
+    # console 子系统），必须同步给外部链接器补 --subsystem,windows 才真正生效。
     if mode == "release":
-        cmd += ["-ldflags", f"-s -w -H windowsgui {ld}"]
+        cmd += ["-ldflags", f"-s -w -H windowsgui -extldflags \"-Wl,--subsystem,windows\" {ld}"]
     else:
-        cmd += ["-tags", "dev", "-ldflags", f"-H windowsgui {ld}"]
+        cmd += ["-tags", "dev", "-ldflags", f"-H windowsgui -extldflags \"-Wl,--subsystem,windows\" {ld}"]
     cmd += ["-o", str(out), "."]
     run(cmd, cwd=PROJECT_ROOT)
+    patch_gui_subsystem(out)
     return out
 
 

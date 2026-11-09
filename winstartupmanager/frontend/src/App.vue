@@ -116,6 +116,19 @@ async function handleToggle(item: StartupItem) {
   }
 }
 
+async function handleToggleTask(item: StartupItem) {
+  const targetState = !item.is_enabled;
+  if (!item.task_path) return;
+
+  try {
+    await service.ToggleTask(item.task_path, targetState);
+    item.is_enabled = targetState;
+    showToast(`已${targetState ? "启用" : "停用"}计划任务: ${item.name}`, "success");
+  } catch (err: any) {
+    showToast("切换计划任务状态失败: " + (err?.message || err), "error");
+  }
+}
+
 async function handleRestartAsAdmin() {
   try {
     await service.RestartAsAdmin();
@@ -181,8 +194,13 @@ async function confirmDelete() {
   if (!itemToDelete.value) return;
   const item = itemToDelete.value;
   try {
-    await service.DeleteItem(item.source as any, item.name);
-    showToast(`已安全删除 "${item.name}"，快照备份已生成`, "success");
+    if (item.source === "TaskScheduler" && item.task_path) {
+      // 计划任务：engine 层先落任务 XML 快照，再删除
+      await service.DeleteTask(item.task_path);
+    } else {
+      await service.DeleteItem(item.source as any, item.name);
+    }
+    showToast(`已安全删除 "${item.name}"，快照备份已保存到 backups 目录`, "success");
     showDeleteModal.value = false;
     itemToDelete.value = null;
     await loadAll();
@@ -280,7 +298,7 @@ async function importBackup() {
           class="px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-1.5 cursor-pointer"
           :class="activeTab === 'task' ? 'bg-blue-50 text-blue-700 font-semibold shadow-2xs' : 'text-slate-600 hover:bg-slate-100'"
         >
-          <span>计划任务 (只读)</span>
+          <span>计划任务</span>
           <span
             class="px-1.5 py-0.2 rounded-full text-2xs"
             :class="activeTab === 'task' ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-500'"
@@ -378,6 +396,8 @@ async function importBackup() {
         v-else-if="activeTab === 'task'"
         :items="taskItems"
         @locate-file="locateFile"
+        @toggle="handleToggleTask"
+        @delete="promptDelete"
       />
     </main>
 

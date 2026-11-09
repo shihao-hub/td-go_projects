@@ -22,7 +22,12 @@
   - 一键在注册表编辑器中跳转并高亮目标项 (`regedit.exe` via `LastKey`)。
 - **只读审计扩展看板**：
   - 启动文件夹（`%APPDATA%` 与 `%ProgramData%` Startup 快捷方式解析）。
-  - 计划任务（只读扫描开机 Boot 与登录 Logon 触发的任务）。
+- **计划任务管理面板**：
+  - 扫描采集范围：自启动（Boot/Logon）与定时周期触发（每小时/每天/周期间隔的 TimeTrigger，第三方任务区，跳过 `\Microsoft\` 系统维护子树）；
+  - 展示触发描述（「开机时/登录时/每小时」）、下次/上次运行时间与退出码、发布商签名与无效残留标记；
+  - **无损启停**：经 `schtasks /Change` 只翻转 Enabled 位，完全不触碰任务定义其余配置（COM 回写路径在 go-ole 上存在 `VT_EMPTY` 参数限制，见 `internal/engine/task_actions.go` 注释）；
+  - **删除前安全快照**：任务完整定义 XML 落 `backups/`（`backup_TaskScheduler_<路径>_<时间戳>.xml`），备份失败拒绝删除；
+  - 一键在资源管理器定位任务执行体。
 - **极简低内存常驻架构（手记 071 实战标准）**：
   - Chromium 启动参数剪枝（砍掉独立 GPU 与网络进程）。
   - × 关窗放行销毁：窗口与 WebView2 彻底卸载，Chromium 子进程全部退出，异步 GC 归还系统堆内存；主进程留托盘常驻。

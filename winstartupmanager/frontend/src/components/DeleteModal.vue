@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { StartupItem } from "../types";
 
-defineProps<{
+const props = defineProps<{
   show: boolean;
   item: StartupItem | null;
 }>();
@@ -10,6 +11,9 @@ const emit = defineEmits<{
   (e: "close"): void;
   (e: "confirm"): void;
 }>();
+
+// 计划任务条目走独立的删除话术（XML 快照，非注册表 .reg）
+const isTask = computed(() => props.item?.source === "TaskScheduler");
 </script>
 
 <template>
@@ -22,9 +26,10 @@ const emit = defineEmits<{
           </svg>
         </div>
         <div>
-          <h3 class="font-bold text-slate-900 text-sm">确认彻底删除该启动项？</h3>
+          <h3 class="font-bold text-slate-900 text-sm">确认彻底删除{{ isTask ? "该计划任务" : "该启动项" }}？</h3>
           <p class="text-xs text-slate-500 mt-1">
-            您即将从注册表移除启动项 <span class="font-semibold text-slate-800">"{{ item.name }}"</span>。
+            您即将{{ isTask ? "从任务计划程序移除计划任务" : "从注册表移除启动项" }}
+            <span class="font-semibold text-slate-800">"{{ item.name }}"</span>。
           </p>
         </div>
       </div>
@@ -37,7 +42,12 @@ const emit = defineEmits<{
           <span>预删除安全快照防护 (FR-4)</span>
         </div>
         <p class="mt-1 text-2xs text-emerald-700 leading-relaxed">
-          执行删除前系统将自动在本地备份目录生成标准的 <code class="bg-emerald-100/60 px-1 py-0.5 rounded">.reg</code> 恢复脚本，彻底杜绝误删风险。
+          <template v-if="isTask">
+            执行删除前系统将自动在本地备份目录生成该任务的 <code class="bg-emerald-100/60 px-1 py-0.5 rounded">XML</code> 完整定义快照，彻底杜绝误删风险。
+          </template>
+          <template v-else>
+            执行删除前系统将自动在本地备份目录生成标准的 <code class="bg-emerald-100/60 px-1 py-0.5 rounded">.reg</code> 恢复脚本，彻底杜绝误删风险。
+          </template>
         </p>
       </div>
 
