@@ -26,7 +26,11 @@
   - [1. 支持款式说明](#1-支持款式说明-3)
   - [2. 各款式手动切换命令](#2-各款式手动切换命令-3)
   - [3. 恢复官方原始状态](#3-恢复官方原始状态-2)
-- [七、执行须知与安全准则](#七执行须知与安全准则)
+- [七、Codex 模块 (MSIX 商店包 · 默认禁用)](#七codex-模块-msix-商店包--默认禁用)
+  - [1. 支持款式说明](#1-支持款式说明-4)
+  - [2. 各款式手动切换命令](#2-各款式手动切换命令-4)
+  - [3. 恢复官方原始状态](#3-恢复官方原始状态-3)
+- [八、执行须知与安全准则](#八执行须知与安全准则)
 
 ---
 
@@ -258,7 +262,68 @@ uv run scripts/antigravity/patch_antigravity_icon.py --restore
 
 ---
 
-## 七、执行须知与安全准则
+## 七、Codex 模块 (MSIX 商店包 · 默认禁用)
+
+模块路径：`go_projects\taskbarguard\scripts\codex\`
+
+> **状态：默认禁用（`enabled: false`）**
+> Codex（包名 `OpenAI.Codex`，主进程 `ChatGPT.exe`）是 Microsoft Store 打包应用，
+> 任务栏只认包清单 `assets/` 下的图标资产。但 **Windows 11 24H2/25H2 对商店包文件
+> 启用了文件对象级完整性保护**（`bindflt` / `UCPD` / `WdFilter` 等过滤驱动）：
+> 管理员 + `takeown`/`icacls` + `SeRestorePrivilege` + `FILE_FLAG_BACKUP_SEMANTICS`
+> 均返回 `ACCESS_DENIED`，同卷硬链接旁路也被拒绝。因此本模块在本机无法落盘，
+> 仅保留资产与通道，供允许写入商店包的系统版本使用；`scripts/README` 中的命令在
+> 25H2 上会打印明确诊断并退出。
+
+Codex 的图标构建：`uv run scripts/codex/build_codex_icons.py`
+（Edge 无头分层渲染底板与 OpenAI 绳结，Pillow 高斯泛光 + 暗投影合成，
+避开 Chromium 对叠加 `feDropShadow` 的 filter 区域残影）。
+
+### 1. 支持款式说明
+
+所有图标均保存在 `custom_icons/` 目录下（底板尺寸 `1024x1024`，988 底板 + `rx=160`
+圆角 + 14px 金属边框，与 Zed / DSH / WT / Antigravity 1:1 绝对对齐）：
+
+| 款式参数 (`--style`) | 图标文件路径 | 特色说明 |
+| :--- | :--- | :--- |
+| **`bright_titanium` (白金亮钛款 · 默认首选 ⭐)** | `custom_icons/bright_titanium.ico` | **与 Antigravity 当前款式同源**。纯白高对比 OpenAI 绳结 + 克制的白色泛光，黑曜石底板，与相邻任务栏图标无缝统一 |
+| **`underlit_chrome` (环形底光铬金属款)** | `custom_icons/underlit_chrome.ico` | **与 DeepSeek 8号底光款 / IDEA / WT 同源**。顶部天光纯白 ➔ 中腹银灰收敛 ➔ 底部反弹光重新打亮，金属通透感最强 |
+| **`pure_dark` (纯黑哑光款)** | `custom_icons/pure_dark.ico` | 更深邃的黑曜石底板 + 纯白绳结，泛光最弱，极致克制 |
+
+### 2. 各款式手动切换命令（仅限允许写入的系统版本）
+
+```powershell
+# 【默认首选 ⭐】白金亮钛款（与 Antigravity 完全一致）
+uv run scripts/codex/patch_codex_icon.py --style bright_titanium --kill
+
+# 环形底光铬金属款
+uv run scripts/codex/patch_codex_icon.py --style underlit_chrome --kill
+
+# 纯黑哑光款（任务栏缓存顽固时顺带深度重建图标缓存）
+uv run scripts/codex/patch_codex_icon.py --style pure_dark --restart-explorer
+
+# 只预览将写入的资产，不写盘、不提权
+uv run scripts/codex/patch_codex_icon.py --style bright_titanium --dry-run
+```
+
+### 3. 恢复官方原始状态
+
+```powershell
+uv run scripts/codex/patch_codex_icon.py --restore
+```
+
+> **MSIX 通道须知**
+> 1. 写入目标位于 `C:\Program Files\WindowsApps`，首次写入会弹一次 UAC；脚本只尝试
+>    以 `SeRestorePrivilege` 打开目标 PNG 写句柄，**不修改 ACL**，失败即退出。
+> 2. 官方原始 PNG 按 `PackageFullName` 备份到
+>    `%APPDATA%\language_projects\taskbarguard\codex-backups\`，`--restore` 可无损还原。
+> 3. 商店更新会换新版本目录并覆盖资产；允许写入的系统上重新执行即可。
+> 4. 资产哈希已匹配时脚本完全跳过提权；`--no-elevate` 供登录计划任务等非交互场景使用。
+> 5. 任务栏图标缓存顽固时加 `--restart-explorer`，或在允许写入的系统上取消 / 重新固定一次 Codex。
+
+---
+
+## 八、执行须知与安全准则
 
 1. **零黑屏安全刷新**：
    坚决不调用 `taskkill explorer.exe`。补丁写入后，脚本仅会触碰任务栏 `.lnk` 快捷方式时间戳 + 调用系统原生 `ie4uinit.exe -show` + 广播系统外壳 API `SHChangeNotify(SHCNE_ASSOCCHANGED)`。

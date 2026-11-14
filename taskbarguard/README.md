@@ -62,10 +62,12 @@ go_projects/taskbarguard/
 ```json
 {
   "apps": {
+    "antigravity": { "enabled": true, "style": "bright_titanium" },
+    "codex": { "enabled": false, "style": "bright_titanium" },
     "deepseek_harness": { "enabled": true, "style": "8_underlit_chrome" },
     "idea": { "enabled": false, "style": "underlit_chrome" },
-    "vscode": { "enabled": true, "style": "silver" },
-    "wt": { "enabled": true, "style": "pure_dark" }
+    "vscode": { "enabled": false, "style": "silver" },
+    "wt": { "enabled": true, "style": "titanium" }
   }
 }
 ```
@@ -153,6 +155,15 @@ VS Code、DeepSeek Harness 等应用后台静默更新后会覆盖 PE 图标资�
 .\bin\taskbarguard-cli-dev.exe apply
 ```
 
+**Codex / ChatGPT 桌面版（MSIX 商店包）**：它是打包应用，任务栏只认包清单
+`assets/` 下的图标 PNG，不能通过改 EXE / 快捷方式实现。`scripts/codex/` 保留了
+MSIX 资产替换通道（自动定位包版本、按版本备份/还原、UAC 自提权），但
+**Windows 11 24H2/25H2 对商店包文件启用了文件对象级完整性保护**（`bindflt` /
+`UCPD` / `WdFilter` 等过滤驱动），管理员 + `SeRestorePrivilege` 也只能拿到
+`ACCESS_DENIED`，因此该模块在本机**默认禁用**（`enabled: false`），仅作资产与
+其他允许写入的系统版本备用。三套 Codex 图标仍保留在
+`scripts/codex/custom_icons/` 供手动取用。
+
 **Windows Terminal 独立版（wt）**：免安装版不带自动更新器。升级请用幂等命令 —— 已是最新则退出 0，失败自动回滚：
 
 ```powershell
@@ -203,6 +214,14 @@ uv run scripts/idea/patch_idea_icon.py --restore
 uv run scripts/vscode/patch_vscode_icon.py --style blue --kill
 uv run scripts/vscode/patch_vscode_icon.py --style silver --kill
 uv run scripts/vscode/patch_vscode_icon.py --restore
+```
+
+### Codex / ChatGPT 桌面版（MSIX，默认禁用）
+```powershell
+# 仅适用于允许写入商店包的系统版本；Windows 11 24H2/25H2 会明确报 ACCESS_DENIED
+uv run scripts/codex/patch_codex_icon.py --style bright_titanium --kill
+uv run scripts/codex/patch_codex_icon.py --style underlit_chrome --restart-explorer
+uv run scripts/codex/patch_codex_icon.py --restore
 ```
 
 ---

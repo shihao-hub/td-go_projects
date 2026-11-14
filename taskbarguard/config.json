@@ -4,6 +4,10 @@
       "enabled": true,
       "style": "bright_titanium"
     },
+    "codex": {
+      "enabled": false,
+      "style": "bright_titanium"
+    },
     "deepseek_harness": {
       "enabled": true,
       "style": "8_underlit_chrome"

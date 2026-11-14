@@ -90,6 +90,31 @@ func TestFindAppAlias(t *testing.T) {
 			t.Fatalf("expected antigravity, got %q", app.Name)
 		}
 	}
+
+	codexDir := filepath.Join(root, "codex")
+	if err := os.Mkdir(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "patch_codex_icon.py"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	codexIcons := filepath.Join(codexDir, "custom_icons")
+	if err := os.Mkdir(codexIcons, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codexIcons, "bright_titanium.ico"), []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, alias := range []string{"codex", "chatgpt", "openai", "ChatGPT.exe", "OpenAI-Codex"} {
+		app, err := FindApp(root, alias)
+		if err != nil {
+			t.Fatalf("alias %q failed: %v", alias, err)
+		}
+		if app.Name != "codex" {
+			t.Fatalf("expected codex, got %q", app.Name)
+		}
+	}
 }
 
 func TestResolvePathsPrefersExplicitOverrides(t *testing.T) {

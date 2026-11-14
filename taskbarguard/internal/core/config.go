@@ -30,6 +30,7 @@ func DefaultConfig() Config {
 		"idea":             {Enabled: false, Style: "underlit_chrome"},
 		"wt":               {Enabled: true, Style: "pure_dark"},
 		"antigravity":      {Enabled: true, Style: "underlit_chrome"},
+		"codex":            {Enabled: false, Style: "bright_titanium"},
 	}}
 }
 

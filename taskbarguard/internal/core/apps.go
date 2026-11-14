@@ -33,7 +33,7 @@ func DiscoverApps(scriptsDir string) ([]AppInfo, error) {
 	return apps, nil
 }
 
-// NormalizeAppName 把常见别名归一为脚本目录名（wt / terminal / powershell, antigravity / agy）。
+// NormalizeAppName 把常见别名归一为脚本目录名（wt / terminal / powershell, antigravity / agy, codex / chatgpt）。
 func NormalizeAppName(name string) string {
 	normalized := strings.ToLower(strings.TrimSuffix(name, ".exe"))
 	switch normalized {
@@ -41,6 +41,8 @@ func NormalizeAppName(name string) string {
 		return "wt"
 	case "antigravity", "agy":
 		return "antigravity"
+	case "codex", "chatgpt", "openai", "openai-codex", "openai_codex":
+		return "codex"
 	default:
 		return name
 	}
