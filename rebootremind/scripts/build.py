@@ -13,6 +13,14 @@ dev 与 release 产物名不同，互不覆盖。
 构建前会用 rsrc 把图标与 manifest（启用 Common Controls v6）写入
 cmd/rebootremind/rsrc_windows_amd64.syso。
 
+GUI 子系统决策（-H=windowsgui）：
+  - 计划任务等无控制台宿主拉起 CUI exe 时，Windows 会强制为其新建
+    可见控制台，即告警巡检时凭空弹出终端黑窗的根源（机制同 kb-084）；
+    链接为 GUI 子系统后不再弹窗。
+  - 代价是终端裸跑失去 stdout/stderr，由启动期 attachParentConsole
+    （cmd/rebootremind/console_windows.go）挂回父终端恢复；
+    重定向与管道输出契约不受影响。
+
 用法：
   uv run scripts/build.py              # dev 构建
   uv run scripts/build.py --release    # 发布构建（条件不满足 exit 2）
@@ -176,6 +184,7 @@ def main() -> int:
     out_exe = OUT_DIR / ("rebootremind.exe" if release else "rebootremind-dev.exe")
     ldflags = " ".join(
         [
+            "-H=windowsgui",
             "-s",
             "-w",
             f"-X rebootremind/internal/buildinfo.Version={version}",

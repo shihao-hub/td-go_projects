@@ -44,6 +44,9 @@ type envelope struct {
 }
 
 func main() {
+	// 必须先于 run() 调用：run 的参数会取走 os.Stdout 快照，
+	// attachParentConsole 需在此之前完成标准流重绑。
+	attachParentConsole()
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
