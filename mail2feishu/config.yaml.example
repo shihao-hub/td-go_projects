@@ -1,0 +1,43 @@
+# mail2feishu 配置示例
+#
+# 复制为 config.yaml 后填入真实凭证；config.yaml 已在 .gitignore 中，
+# 严禁把 QQ 授权码或飞书 Webhook 提交到仓库。
+#
+# 白名单采用零信任语义：未命中任何规则的邮件会被静默丢弃，不会推送。
+# 规则之间是 OR；规则内部类别之间是 AND，同一类别内多个值是 OR。
+# 例：同时配置 sender_domains 与 subject_keywords 时，两者都要满足。
+
+imap:
+  host: imap.qq.com          # 默认 imap.qq.com
+  port: 993                  # SSL 端口，默认 993
+  username: your@qq.com      # QQ 邮箱地址
+  password: "QQ邮箱授权码"    # 不是 QQ 登录密码；在 QQ 邮箱设置中开启 IMAP 后获取
+  mailbox: INBOX             # 监听的邮箱文件夹
+  idle_timeout: 25m          # IMAP IDLE 单次等待上限，到期后重新进入 IDLE
+  poll_interval: 5m          # 连接异常时的轮询兜底间隔
+
+feishu:
+  # 飞书群自定义机器人 Webhook。群设置 -> 群机器人 -> 添加自定义机器人
+  webhook_url: https://open.feishu.cn/open-apis/bot/v2/hook/REPLACE_WITH_YOUR_TOKEN
+  secret: ""                 # 若机器人开启了签名校验，填入签名密钥；未开启留空
+
+ratelimit:
+  debounce_window: 15s       # 同一讨论串在此窗口内的新事件聚合为一条推送
+  thread_cooldown: 10m       # 同一讨论串推送后的冷却时间，期间新事件不再打扰
+
+whitelist:
+  # GitHub 通知：按发件域放行。不要额外限制主题关键词：
+  # 评论类邮件主题通常是 "Re: [repo] 标题 (#123)"，不含 issue 字样。
+  - name: github
+    sender_domains:
+      - github.com
+
+  # VIP 发件人：精确匹配邮箱，不限制主题
+  - name: vip
+    sender_emails:
+      - boss@example.com
+
+  # 关键词白名单：主题包含「面试」的邮件一律放行（不限发件人）
+  - name: interview
+    subject_keywords:
+      - 面试

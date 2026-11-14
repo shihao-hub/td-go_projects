@@ -1,0 +1,11 @@
+# 构建产物
+/bin/
+*.exe
+/rsrc_windows_amd64.syso
+
+# 本地配置含 QQ 授权码与飞书 Webhook，严禁入库
+/config.yaml
+
+# Python 运行缓存（scripts/build.py）
+__pycache__/
+*.pyc
