@@ -24,6 +24,12 @@ const (
 	maxMailBytes   = 10 << 20 // 单封邮件读取上限 10 MiB
 )
 
+// StateStore 持久化已处理邮件的 UID 水位线。
+type StateStore interface {
+	LastUID(username string, uidValidity uint32) (uint32, bool)
+	Save(username string, uidValidity, lastUID uint32) error
+}
+
 // Options 是监听器的连接与回调配置。
 type Options struct {
 	Host         string
@@ -33,10 +39,16 @@ type Options struct {
 	Mailbox      string
 	IdleTimeout  time.Duration
 	PollInterval time.Duration
+	// State 可选：跨进程持久化水位线；nil 时退化为纯内存。
+	State StateStore
 	// OnMessage 在收到新邮件时调用，raw 为完整 RFC 5322 原文。
 	// 返回错误只记录日志，不会中断监听。
 	OnMessage func(uid uint32, raw []byte) error
-	Logger    *log.Logger
+	// OnConnected 在登录并选中邮箱成功后调用。
+	OnConnected func(addr string)
+	// OnDisconnected 在会话结束时调用，err 为结束原因。
+	OnDisconnected func(err error)
+	Logger         *log.Logger
 }
 
 // Listener 是 IMAP IDLE 监听器。
@@ -47,6 +59,7 @@ type Listener struct {
 	// lastUID 是已处理邮件的 UID 水位线。它必须在重连之间保持，
 	// 否则每次重连都会把断线期间到达的邮件当成历史邮件跳过。
 	lastUID     uint32
+	uidValidity uint32
 	baselineSet bool
 }
 
@@ -136,8 +149,17 @@ func (l *Listener) session(ctx context.Context) (connected bool, err error) {
 	if err != nil {
 		return true, fmt.Errorf("选择邮箱 %q 失败: %w", l.opts.Mailbox, err)
 	}
+	l.uidValidity = mbox.UidValidity
 	l.initBaseline(mbox.UidNext)
 	l.logf("IMAP 已连接 %s，监听 %s（只处理 UID > %d 的新邮件）", addr, l.opts.Mailbox, l.lastUID)
+	if l.opts.OnConnected != nil {
+		l.opts.OnConnected(addr)
+	}
+	defer func() {
+		if l.opts.OnDisconnected != nil {
+			l.opts.OnDisconnected(err)
+		}
+	}()
 
 	updates := make(chan client.Update, 16)
 	conn.Updates = updates
@@ -192,16 +214,40 @@ func (l *Listener) session(ctx context.Context) (connected bool, err error) {
 	}
 }
 
-// initBaseline 只在首次成功连接时用 UIDNEXT 建立水位线；后续重连保持原水位线，
-// 这样断线期间到达的邮件会在重连后的第一次拉取中被补上，而不是被静默跳过。
+// initBaseline 只在首次成功连接时建立水位线：
+//   - 优先使用持久化的水位线（账号与 UIDVALIDITY 都匹配），这样进程重启后
+//     停机期间到达的邮件会被补拉；
+//   - 否则以当前 UIDNEXT-1 为基线（首次运行或账号/邮箱已变化）。
+//
+// 后续重连保持原水位线，断线期间的邮件同样会被补上。
 func (l *Listener) initBaseline(uidNext uint32) {
 	if l.baselineSet {
 		return
+	}
+	if l.opts.State != nil {
+		if uid, ok := l.opts.State.LastUID(l.opts.Username, l.uidValidity); ok {
+			l.lastUID = uid
+			l.baselineSet = true
+			l.logf("从持久化水位线 UID %d 继续（UIDVALIDITY=%d）", uid, l.uidValidity)
+			return
+		}
 	}
 	if uidNext > 0 {
 		l.lastUID = uidNext - 1
 	}
 	l.baselineSet = true
+	l.logf("建立新水位线 UID %d（UIDVALIDITY=%d）", l.lastUID, l.uidValidity)
+	l.persistLastUID()
+}
+
+// persistLastUID 把当前水位线写回持久化存储；失败只告警，不中断监听。
+func (l *Listener) persistLastUID() {
+	if l.opts.State == nil {
+		return
+	}
+	if err := l.opts.State.Save(l.opts.Username, l.uidValidity, l.lastUID); err != nil {
+		l.logf("保存 UID 水位线失败: %v", err)
+	}
 }
 
 // fetchNew 拉取水位线之后的新邮件并逐封回调。
@@ -209,6 +255,13 @@ func (l *Listener) fetchNew(conn *client.Client) error {
 	mbox, err := conn.Select(l.opts.Mailbox, true)
 	if err != nil {
 		return fmt.Errorf("重新选择邮箱失败: %w", err)
+	}
+	// 同一 UIDVALIDITY 下 UID 单调递增；水位线超出 UIDNEXT 说明邮箱被
+	// 重建或服务器异常，重置基线避免永久跳过后续邮件。
+	if mbox.UidNext > 0 && l.lastUID >= mbox.UidNext {
+		l.logf("水位线 UID %d 超出 UIDNEXT=%d，重置为 UIDNEXT-1", l.lastUID, mbox.UidNext)
+		l.lastUID = mbox.UidNext - 1
+		l.persistLastUID()
 	}
 	if mbox.UidNext == 0 || mbox.UidNext <= l.lastUID+1 {
 		return nil
@@ -251,6 +304,7 @@ func (l *Listener) fetchNew(conn *client.Client) error {
 		return fmt.Errorf("FETCH 失败: %w", err)
 	}
 	if count > 0 {
+		l.persistLastUID()
 		l.logf("已处理 %d 封新邮件（最新 UID %d）", count, l.lastUID)
 	}
 	return nil

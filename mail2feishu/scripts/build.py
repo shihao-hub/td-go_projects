@@ -2,28 +2,30 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""mail2feishu 构建脚本（dev / release 严格隔离）。
+"""mail2feishu 双通道二进制构建流水线。
 
-产物规则：
-  - dev（默认）：bin/mail2feishu-dev.exe
-  - release：bin/mail2feishu.exe
-仅当 HEAD 精确命中 mail2feishu/v* tag 且本项目路径下工作区干净时
-才允许 release（monorepo 兄弟项目的改动不阻塞）；dev 与 release
-产物名不同，互不覆盖。
+产物规则（每条通道两个二进制）：
+  - dev（默认）：mail2feishu-gui-dev.exe（GUI）+ mail2feishu-cli-dev.exe（Console）
+  - release：mail2feishu-gui.exe（GUI）+ mail2feishu-cli.exe（Console）
+只有 HEAD 精确命中 mail2feishu/v* tag 且本项目路径工作区干净时才允许 release。
 
-构建前会用 rsrc 把 icon.ico 写入 rsrc_windows_amd64.syso。
+双通道设计：
+  - GUI 通道 -H windowsgui，双击零黑框；启动完整服务与托盘；
+  - Console 通道为 console 子系统，保留 -check / -test-webhook / -version
+    与前台常驻能力，供终端、脚本与 Agent 使用。
+
+图标：release 由 scripts/render_icon.py 生成绿色信封图标，dev 用 Go 地鼠。
 
 用法：
-  uv run scripts/build.py              # dev 构建
-  uv run scripts/build.py --release    # 发布构建（条件不满足 exit 2）
-  uv run scripts/build.py --version 0.2.0   # 覆盖版本基线，不改变通道判定
+  uv run scripts/build.py              # 开发构建
+  uv run scripts/build.py --release    # 发布构建（tag/脏工作区不满足时退出码 2）
+  uv run scripts/build.py --version 1.2.0   # 覆盖版本基线
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -31,17 +33,37 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = PROJECT_ROOT / "bin"
 TAG_PREFIX = "mail2feishu/"
-MAIN_PKG = PROJECT_ROOT
-ICON = MAIN_PKG / "icon.ico"
-SYSO = MAIN_PKG / "rsrc_windows_amd64.syso"
-RSRC_EXE = shutil.which("rsrc") or str(
-    Path(os.environ.get("GOPATH", str(Path.home() / "go"))) / "bin" / "rsrc.exe"
+MAIN_PKG = "./cmd/mail2feishu"
+
+WINRES_EXE = Path(os.environ.get("GO_WINRES") or r"C:\Users\29580\go\bin\go-winres.exe")
+WINRES_DIR = PROJECT_ROOT / "winres"
+MANIFEST = PROJECT_ROOT / "wails.exe.manifest"
+ICON_RELEASE = PROJECT_ROOT / "icon.ico"
+ICON_DEV = PROJECT_ROOT / "internal" / "app" / "icon_dev.ico"
+SYSO_OUT = PROJECT_ROOT / "cmd" / "mail2feishu" / "rsrc_windows_amd64.syso"
+
+EXE_GUI_RELEASE = OUT_DIR / "mail2feishu-gui.exe"
+EXE_GUI_DEV = OUT_DIR / "mail2feishu-gui-dev.exe"
+EXE_CLI_RELEASE = OUT_DIR / "mail2feishu-cli.exe"
+EXE_CLI_DEV = OUT_DIR / "mail2feishu-cli-dev.exe"
+
+LEGACY_EXES = (
+    PROJECT_ROOT / "mail2feishu.exe",
+    PROJECT_ROOT / "mail2feishu-dev.exe",
 )
 
+RENDER_ICON = PROJECT_ROOT / "scripts" / "render_icon.py"
+DEFAULT_VERSION = "0.2.0"
+
 GENERATED_SUFFIXES = (
-    "/bin/mail2feishu.exe",
-    "/bin/mail2feishu-dev.exe",
-    "/rsrc_windows_amd64.syso",
+    "/bin/mail2feishu-gui.exe",
+    "/bin/mail2feishu-gui-dev.exe",
+    "/bin/mail2feishu-cli.exe",
+    "/bin/mail2feishu-cli-dev.exe",
+    "/cmd/mail2feishu/rsrc_windows_amd64.syso",
+    "/winres/.tmp-winres.json",
+    "/icon.ico",
+    "/icon.png",
 )
 
 
@@ -80,12 +102,15 @@ def latest_project_tag() -> str | None:
     return tag or None
 
 
-def worktree_dirty() -> bool:
-    """仅检查本项目路径下的改动。
+def base_version() -> str:
+    tag = latest_project_tag()
+    if tag:
+        return tag[len(TAG_PREFIX) :].lstrip("v")
+    return DEFAULT_VERSION
 
-    go_projects 是 monorepo（一个子目录 = 一个项目），兄弟项目的进行中
-    改动与本项目的发布产物无关，不应阻塞 release 门禁。
-    """
+
+def worktree_dirty() -> bool:
+    """仅检查本项目路径下的改动，兄弟项目的进行中改动不阻塞发布。"""
     result = run_git(
         "-c", "status.relativePaths=false", "status", "--porcelain", "--untracked-files=normal"
     )
@@ -105,53 +130,85 @@ def worktree_dirty() -> bool:
     return False
 
 
-def base_version() -> str:
-    tag = latest_project_tag()
-    if tag:
-        return tag[len(TAG_PREFIX) :].lstrip("v")
-    return "0.1.0"
-
-
-def build_resources() -> int:
-    if not Path(RSRC_EXE).exists():
-        print(f"❌ 缺少 rsrc: {RSRC_EXE}", file=sys.stderr)
-        print("   安装：go install github.com/akavel/rsrc@latest", file=sys.stderr)
-        return 4
-    if not ICON.exists():
-        print(f"❌ 缺少图标: {ICON}", file=sys.stderr)
-        print("   从 docs/assets/projects/go_projects/go-default.ico 复制到项目根目录", file=sys.stderr)
-        return 4
-
-    result = subprocess.run(
-        [str(RSRC_EXE), "-ico", str(ICON), "-o", str(SYSO)],
-        cwd=str(PROJECT_ROOT),
-    )
+def render_release_icon() -> None:
+    if not RENDER_ICON.exists():
+        print(f"⚠️ 缺少图标渲染脚本: {RENDER_ICON}", file=sys.stderr)
+        return
+    result = subprocess.run(["uv", "run", str(RENDER_ICON)], cwd=str(PROJECT_ROOT))
     if result.returncode != 0:
-        print(f"❌ rsrc 生成 syso 失败（exit {result.returncode}）", file=sys.stderr)
+        print("⚠️ 图标渲染脚本执行异常，继续使用现有图标", file=sys.stderr)
+
+
+def four_part_version(version: str) -> str:
+    core = version.lstrip("v").split("-")[0]
+    parts = (core.split(".") + ["0", "0", "0"])[:4]
+    return ".".join(parts)
+
+
+def build_resources(release: bool, gui: bool, out_exe: Path, version: str) -> int:
+    if not WINRES_EXE.exists():
+        print(f"❌ 缺少 go-winres: {WINRES_EXE}", file=sys.stderr)
+        print("   安装：go install github.com/tc-hib/go-winres@latest", file=sys.stderr)
+        return 4
+    icon = ICON_RELEASE if release else ICON_DEV
+    if not icon.exists():
+        print(f"❌ 缺少图标文件: {icon}", file=sys.stderr)
+        return 4
+    template = WINRES_DIR / ("gui.json" if gui else "cli.json")
+    if not template.exists():
+        print(f"❌ 缺少资源模板: {template}", file=sys.stderr)
+        return 4
+
+    fixed_version = four_part_version(version)
+    rel_icon = Path(os.path.relpath(icon, WINRES_DIR)).as_posix()
+    rel_manifest = Path(os.path.relpath(MANIFEST, WINRES_DIR)).as_posix()
+    rendered = (
+        template.read_text(encoding="utf-8")
+        .replace("__ICON__", rel_icon)
+        .replace("__MANIFEST__", rel_manifest)
+        .replace("__FIXED_VERSION__", fixed_version)
+        .replace("__VERSION__", version.lstrip("v"))
+        .replace("__ORIGINAL_NAME__", out_exe.name)
+    )
+
+    winres_json = WINRES_DIR / ".tmp-winres.json"
+    try:
+        winres_json.write_text(rendered, encoding="utf-8", newline="\n")
+        result = subprocess.run(
+            [
+                str(WINRES_EXE), "make",
+                "--in", str(winres_json),
+                "--arch", "amd64",
+                "--out", str(SYSO_OUT.parent / "rsrc"),
+            ],
+            cwd=str(PROJECT_ROOT),
+        )
+    finally:
+        winres_json.unlink(missing_ok=True)
+
+    if result.returncode != 0:
+        print(f"❌ go-winres 生成 syso 失败（exit {result.returncode}）", file=sys.stderr)
         return result.returncode
-    print(f"✅ PE 资源已注入: icon={ICON.name}")
+
+    kind = "GUI" if gui else "CLI"
+    print(f"✅ [{kind}] PE 资源已注入: VERSIONINFO={fixed_version} icon={icon.name} → {SYSO_OUT.name}")
     return 0
 
 
 def main() -> int:
     setup_console()
 
-    parser = argparse.ArgumentParser(description="构建 mail2feishu（dev / release 隔离）")
+    parser = argparse.ArgumentParser(description="构建 mail2feishu 双通道二进制（dev / release 严格隔离）")
     parser.add_argument("--release", action="store_true", help="声明发布构建；tag 或工作区条件不满足时报错")
-    parser.add_argument("--dev", action="store_true", help="显式声明 dev 构建（默认行为，保留以便脚本调用）")
     parser.add_argument("--version", default="", help="覆盖版本基线（不改变 dev/release 判定）")
     args = parser.parse_args()
 
-    if args.release and args.dev:
-        print("❌ --release 与 --dev 不能同时使用", file=sys.stderr)
-        return 2
-
-    tag = exact_project_tag()
+    exact_tag = exact_project_tag()
     dirty = worktree_dirty()
-    release = tag is not None and not dirty
+    release = exact_tag is not None and not dirty
 
     if args.release and not release:
-        reason = "当前 HEAD 未命中 mail2feishu/v* tag" if tag is None else "工作区存在未提交改动"
+        reason = "当前 HEAD 未命中 mail2feishu/v* tag" if exact_tag is None else "工作区存在未提交改动"
         print(f"❌ 拒绝发布构建：{reason}（release 需同时满足 精确 tag + 工作区干净）", file=sys.stderr)
         return 2
 
@@ -160,44 +217,70 @@ def main() -> int:
         version = f"v{base}"
     else:
         version = f"v{base}-dev" + ("-dirty" if dirty else "")
-    mode = "release" if release else "dev"
+    build_mode = "release" if release else "dev"
     rev = run_git("rev-parse", "--short", "HEAD").stdout.strip() or "unknown"
     build_id = rev + ("-dirty" if dirty else "")
 
-    print(f"📦 构建配置: Version={version}, Mode={mode} (tag={tag or '-'}, dirty={dirty})")
+    print(f"📦 构建配置: Version={version}, Mode={build_mode} (tag={exact_tag or '-'}, dirty={dirty})")
+
+    if release:
+        render_release_icon()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    rc = build_resources()
-    if rc != 0:
-        return rc
 
-    out_exe = OUT_DIR / ("mail2feishu.exe" if release else "mail2feishu-dev.exe")
-    ldflags = " ".join(
-        [
-            "-s",
-            "-w",
-            f"-X mail2feishu/internal/buildinfo.Version={version}",
-            f"-X mail2feishu/internal/buildinfo.Mode={mode}",
-            f"-X mail2feishu/internal/buildinfo.BuildID={build_id}",
-        ]
+    targets = (
+        (EXE_GUI_RELEASE if release else EXE_GUI_DEV, True),
+        (EXE_CLI_RELEASE if release else EXE_CLI_DEV, False),
     )
-    go_cmd = ["go", "build", "-trimpath", f"-ldflags={ldflags}", "-o", str(out_exe), "."]
+    for out_exe, gui in targets:
+        rc = build_resources(release, gui, out_exe, version)
+        if rc != 0:
+            return rc
 
-    print(f"🔨 {out_exe.name}")
-    result = subprocess.run(go_cmd, cwd=str(PROJECT_ROOT))
-    if result.returncode != 0:
-        print(f"❌ go build 失败（exit {result.returncode}）", file=sys.stderr)
-        return result.returncode
+        flags = ["-w", "-s"]
+        if gui:
+            flags.append("-H windowsgui")
+        flags.append(f"-X mail2feishu/internal/buildinfo.Version={version}")
+        flags.append(f"-X mail2feishu/internal/buildinfo.Mode={build_mode}")
+        flags.append(f"-X mail2feishu/internal/buildinfo.BuildID={build_id}")
 
-    if release and out_exe.stem.endswith("-dev"):
-        print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
-        return 3
-    if not release and not out_exe.stem.endswith("-dev"):
-        print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
-        return 3
+        tags = [] if release else ["dev"]
+        if not gui:
+            tags.append("cli")
 
-    size_mb = out_exe.stat().st_size / (1024 * 1024)
-    print(f"🎉 构建完成: {out_exe} ({size_mb:.2f} MB)")
+        go_cmd = ["go", "build", "-trimpath"]
+        if tags:
+            go_cmd += ["-tags", ",".join(tags)]
+        go_cmd += [f"-ldflags={' '.join(flags)}", "-o", str(out_exe), MAIN_PKG]
+
+        channel = "GUI" if gui else "Console"
+        print(f"🔨 [{channel}] {out_exe.name}")
+        result = subprocess.run(go_cmd, cwd=str(PROJECT_ROOT))
+        if result.returncode != 0:
+            print(f"❌ go build 失败（exit {result.returncode}）: {out_exe.name}", file=sys.stderr)
+            return result.returncode
+
+    for out_exe, _gui in targets:
+        if release and "dev" in out_exe.stem:
+            print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
+            return 3
+        if not release and not out_exe.stem.endswith("-dev"):
+            print(f"❌ 产物命名违规: {out_exe}", file=sys.stderr)
+            return 3
+
+    for out_exe, gui in targets:
+        size_mb = out_exe.stat().st_size / (1024 * 1024)
+        print(f"🎉 构建完成 [{'GUI' if gui else 'Console'}]: {out_exe.name} ({size_mb:.2f} MB)")
+
+    for legacy in LEGACY_EXES:
+        if not legacy.exists():
+            continue
+        try:
+            legacy.unlink()
+        except OSError as exc:
+            print(f"⚠️ 无法清理历史产物（可能仍在运行）: {legacy.name} ({exc})", file=sys.stderr)
+            continue
+        print(f"🧹 已清理历史产物: {legacy.name}")
     return 0
 
 

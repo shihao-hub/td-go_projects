@@ -9,3 +9,9 @@ var (
 	// BuildID 是 git 短哈希，工作区不干净时带 -dirty。
 	BuildID = "unknown"
 )
+
+// IsRelease 返回是否为正式版构建。
+func IsRelease() bool { return Mode == "release" }
+
+// Channel 返回构建通道（dev / release）。
+func Channel() string { return Mode }

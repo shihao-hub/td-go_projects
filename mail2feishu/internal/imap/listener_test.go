@@ -51,6 +51,80 @@ func TestInitBaselineOnlyOnce(t *testing.T) {
 	}
 }
 
+type fakeState struct {
+	username    string
+	uidValidity uint32
+	lastUID     uint32
+	ok          bool
+	saves       []uint32
+}
+
+func (f *fakeState) LastUID(username string, uidValidity uint32) (uint32, bool) {
+	if f.ok && f.username == username && f.uidValidity == uidValidity {
+		return f.lastUID, true
+	}
+	return 0, false
+}
+
+func (f *fakeState) Save(username string, uidValidity, lastUID uint32) error {
+	f.username, f.uidValidity, f.lastUID, f.ok = username, uidValidity, lastUID, true
+	f.saves = append(f.saves, lastUID)
+	return nil
+}
+
+func TestInitBaselineUsesPersistedState(t *testing.T) {
+	store := &fakeState{username: "u", uidValidity: 7, lastUID: 120, ok: true}
+	listener, err := New(Options{
+		Username:  "u",
+		Password:  "p",
+		OnMessage: noopHandler,
+		State:     store,
+	})
+	if err != nil {
+		t.Fatalf("New() 错误: %v", err)
+	}
+	listener.uidValidity = 7
+	listener.initBaseline(500)
+
+	if listener.lastUID != 120 {
+		t.Fatalf("应沿用持久化水位线 120，got %d", listener.lastUID)
+	}
+	if len(store.saves) != 0 {
+		t.Fatalf("沿用已有水位线时不应重写，saves=%v", store.saves)
+	}
+}
+
+func TestInitBaselineResetsWhenUIDValidityChanges(t *testing.T) {
+	store := &fakeState{username: "u", uidValidity: 6, lastUID: 120, ok: true}
+	listener, err := New(Options{
+		Username:  "u",
+		Password:  "p",
+		OnMessage: noopHandler,
+		State:     store,
+	})
+	if err != nil {
+		t.Fatalf("New() 错误: %v", err)
+	}
+	listener.uidValidity = 7
+	listener.initBaseline(500)
+
+	if listener.lastUID != 499 {
+		t.Fatalf("UIDVALIDITY 变化后应以 UIDNEXT-1=499 重建，got %d", listener.lastUID)
+	}
+	if len(store.saves) != 1 || store.saves[0] != 499 {
+		t.Fatalf("新基线应落盘，saves=%v", store.saves)
+	}
+}
+
+func TestPersistLastUIDWithoutStore(t *testing.T) {
+	listener, err := New(Options{Username: "u", Password: "p", OnMessage: noopHandler})
+	if err != nil {
+		t.Fatalf("New() 错误: %v", err)
+	}
+	listener.lastUID = 10
+	listener.persistLastUID() // 未配置 State 时不应 panic
+}
+
 func TestNewRejectsInvalidOptions(t *testing.T) {
 	cases := map[string]Options{
 		"缺少用户名": {Password: "p", OnMessage: noopHandler},

@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 
+	"mail2feishu/internal/audit"
 	"mail2feishu/internal/feishu"
 	"mail2feishu/internal/matcher"
 	"mail2feishu/internal/parser"
@@ -20,13 +21,21 @@ const (
 	summaryRunes = 800
 )
 
+// Auditor 接收结构化审计事件。
+type Auditor interface {
+	Append(event audit.Event) error
+}
+
 // Options 是 Pipeline 的依赖与参数。
 type Options struct {
 	Matcher        *matcher.Matcher
 	Feishu         *feishu.Client
 	DebounceWindow time.Duration
 	ThreadCooldown time.Duration
-	Logger         *log.Logger
+	Auditor        Auditor
+	// OnPush 在每次投递结束后调用，供运行时更新界面状态。
+	OnPush func(ok bool, err error)
+	Logger *log.Logger
 }
 
 // Pipeline 串联白名单、防抖与飞书投递。
@@ -48,17 +57,45 @@ func New(opts Options) (*Pipeline, error) {
 	return p, nil
 }
 
-// HandleMail 是 IMAP 监听器的回调入口。未命中白名单的邮件静默丢弃。
+// HandleMail 是 IMAP 监听器的回调入口。未命中白名单的邮件静默丢弃，
+// 但无论命中与否都会留下审计记录，便于排查规则配置问题。
 func (p *Pipeline) HandleMail(uid uint32, raw []byte) error {
 	mail, err := parser.Parse(raw)
 	if err != nil {
+		p.audit(audit.Event{
+			Type:   audit.TypeMail,
+			UID:    uid,
+			Action: audit.ActionParseFailed,
+			Error:  err.Error(),
+		})
 		return fmt.Errorf("解析邮件失败: %w", err)
 	}
-	if _, ok := p.opts.Matcher.Match(mail.From, mail.Subject); !ok {
+
+	key := threadKey(mail)
+	result, matched := p.opts.Matcher.Match(mail.From, mail.Subject)
+	if !matched {
+		p.audit(audit.Event{
+			Type:    audit.TypeMail,
+			UID:     uid,
+			From:    mail.FromAddress,
+			Subject: mail.Subject,
+			Action:  audit.ActionDropped,
+			Reason:  "未命中白名单",
+			Thread:  key,
+		})
 		p.logf("UID %d 未命中白名单，已丢弃（from=%s subject=%q）", uid, mail.FromAddress, mail.Subject)
 		return nil
 	}
-	key := threadKey(mail)
+
+	p.audit(audit.Event{
+		Type:    audit.TypeMail,
+		UID:     uid,
+		From:    mail.FromAddress,
+		Subject: mail.Subject,
+		Action:  audit.ActionWhitelisted,
+		Rule:    result.Rule,
+		Thread:  key,
+	})
 	if !p.debouncer.Push(ratelimit.Item{Key: key, Data: mail}) {
 		p.logf("UID %d 处于冷却期，已丢弃（%s）", uid, key)
 		return nil
@@ -77,13 +114,44 @@ func (p *Pipeline) send(item ratelimit.Item) {
 		p.logf("防抖事件数据类型异常: %T", item.Data)
 		return
 	}
+
+	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
 	defer cancel()
-	if err := p.opts.Feishu.SendCard(ctx, buildCardOptions(mail)); err != nil {
+	err := p.opts.Feishu.SendCard(ctx, buildCardOptions(mail))
+	elapsed := time.Since(start).Milliseconds()
+
+	succeeded := err == nil
+	event := audit.Event{
+		Type:       audit.TypePush,
+		Thread:     item.Key,
+		Action:     audit.ActionPushed,
+		OK:         &succeeded,
+		DurationMS: elapsed,
+	}
+	if err != nil {
+		event.Action = audit.ActionPushFailed
+		event.Error = err.Error()
+	}
+	p.audit(event)
+	if p.opts.OnPush != nil {
+		p.opts.OnPush(succeeded, err)
+	}
+
+	if err != nil {
 		p.logf("推送失败（%s）: %v", item.Key, err)
 		return
 	}
-	p.logf("已推送（%s）", item.Key)
+	p.logf("已推送（%s，%dms）", item.Key, elapsed)
+}
+
+func (p *Pipeline) audit(event audit.Event) {
+	if p.opts.Auditor == nil {
+		return
+	}
+	if err := p.opts.Auditor.Append(event); err != nil {
+		p.logf("写审计日志失败: %v", err)
+	}
 }
 
 // threadKey 生成防抖与冷却的讨论串标识。

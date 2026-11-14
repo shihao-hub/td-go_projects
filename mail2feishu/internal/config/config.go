@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -84,6 +85,11 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 // Std 返回标准库时长。
 func (d Duration) Std() time.Duration { return time.Duration(d) }
 
+// MarshalYAML 让配置写回时保持 "15s" 这样的可读形式。
+func (d Duration) MarshalYAML() (any, error) {
+	return time.Duration(d).String(), nil
+}
+
 // Load 从指定路径读取并校验配置。
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -101,14 +107,38 @@ func Parse(data []byte) (*Config, error) {
 	if err := decoder.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("解析配置文件失败: %w", err)
 	}
-	cfg.applyDefaults()
+	cfg.ApplyDefaults()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
-func (c *Config) applyDefaults() {
+// Save 校验后原子写回配置文件，权限收紧到仅当前用户可读写。
+func (c *Config) Save(path string) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("创建配置目录失败: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("写入临时配置失败: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("替换配置文件失败: %w", err)
+	}
+	return nil
+}
+
+// ApplyDefaults 填充未配置的默认值。
+func (c *Config) ApplyDefaults() {
 	if c.IMAP.Host == "" {
 		c.IMAP.Host = DefaultIMAPHost
 	}

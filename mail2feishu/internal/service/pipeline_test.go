@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"mail2feishu/internal/audit"
 	"mail2feishu/internal/feishu"
 	"mail2feishu/internal/matcher"
 )
@@ -61,7 +63,30 @@ func githubMail(t *testing.T, subject, body string) []byte {
 	)
 }
 
+type fakeAuditor struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (f *fakeAuditor) Append(event audit.Event) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+	return nil
+}
+
+func (f *fakeAuditor) snapshot() []audit.Event {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]audit.Event(nil), f.events...)
+}
+
 func newTestPipeline(t *testing.T, serverURL string, window, cooldown time.Duration) *Pipeline {
+	t.Helper()
+	return newTestPipelineWithAuditor(t, serverURL, window, cooldown, nil)
+}
+
+func newTestPipelineWithAuditor(t *testing.T, serverURL string, window, cooldown time.Duration, auditor Auditor) *Pipeline {
 	t.Helper()
 	matcherInstance, err := matcher.New([]matcher.Rule{
 		{Name: "github", SenderDomains: []string{"github.com"}},
@@ -74,12 +99,99 @@ func newTestPipeline(t *testing.T, serverURL string, window, cooldown time.Durat
 		Feishu:         feishu.NewClient(serverURL, "", feishu.WithRetry(1, 0)),
 		DebounceWindow: window,
 		ThreadCooldown: cooldown,
+		Auditor:        auditor,
 	})
 	if err != nil {
 		t.Fatalf("New() 错误: %v", err)
 	}
 	t.Cleanup(pipeline.Close)
 	return pipeline
+}
+
+func waitAuditEvents(t *testing.T, auditor *fakeAuditor, count int) []audit.Event {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		events := auditor.snapshot()
+		if len(events) >= count {
+			return events
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("等待审计事件超时，已有 %d 条", len(auditor.snapshot()))
+	return nil
+}
+
+func TestHandleMailAuditsDropped(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"code":0}`)
+	}))
+	defer server.Close()
+
+	auditor := &fakeAuditor{}
+	pipeline := newTestPipelineWithAuditor(t, server.URL, 10*time.Millisecond, 0, auditor)
+	if err := pipeline.HandleMail(3, mailBytes(t, "boss@example.com", "ordinary mail", "hello")); err != nil {
+		t.Fatalf("HandleMail() 错误: %v", err)
+	}
+
+	events := waitAuditEvents(t, auditor, 1)
+	event := events[0]
+	if event.Type != audit.TypeMail || event.UID != 3 {
+		t.Fatalf("事件 = %+v", event)
+	}
+	if event.Action != audit.ActionDropped {
+		t.Errorf("Action = %q, want dropped", event.Action)
+	}
+	if event.From != "boss@example.com" || event.Subject != "ordinary mail" {
+		t.Errorf("元信息不完整: %+v", event)
+	}
+}
+
+func TestHandleMailAuditsWhitelistedAndPush(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"code":0}`)
+	}))
+	defer server.Close()
+
+	auditor := &fakeAuditor{}
+	pipeline := newTestPipelineWithAuditor(t, server.URL, 10*time.Millisecond, 0, auditor)
+	raw := githubMail(t, "[octocat/hello-world] New issue: Broken (#42)", "body")
+	if err := pipeline.HandleMail(9, raw); err != nil {
+		t.Fatalf("HandleMail() 错误: %v", err)
+	}
+
+	events := waitAuditEvents(t, auditor, 2)
+	if events[0].Action != audit.ActionWhitelisted || events[0].Rule != "github" {
+		t.Errorf("白名单事件 = %+v", events[0])
+	}
+	if events[0].Thread != "octocat/hello-world#42" {
+		t.Errorf("Thread = %q", events[0].Thread)
+	}
+	push := events[1]
+	if push.Type != audit.TypePush || push.Action != audit.ActionPushed {
+		t.Errorf("推送事件 = %+v", push)
+	}
+	if push.OK == nil || !*push.OK {
+		t.Errorf("推送事件 OK = %v", push.OK)
+	}
+}
+
+func TestHandleMailAuditsParseFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"code":0}`)
+	}))
+	defer server.Close()
+
+	auditor := &fakeAuditor{}
+	pipeline := newTestPipelineWithAuditor(t, server.URL, 10*time.Millisecond, 0, auditor)
+	if err := pipeline.HandleMail(11, nil); err == nil {
+		t.Fatal("空邮件应返回错误")
+	}
+
+	events := waitAuditEvents(t, auditor, 1)
+	if events[0].Action != audit.ActionParseFailed || events[0].UID != 11 {
+		t.Fatalf("解析失败事件 = %+v", events[0])
+	}
 }
 
 func TestHandleMailDropsNonWhitelisted(t *testing.T) {

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mail2feishu</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">✉</div>
+      <div>
+        <h1>mail2feishu</h1>
+        <p>QQ 邮箱白名单 → 飞书群机器人</p>
+      </div>
+    </div>
+    <div class="top-status">
+      <span id="conn-dot" class="dot"></span>
+      <span id="conn-text">加载中…</span>
+      <span id="version" class="version"></span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-button active" data-tab="overview">概览</button>
+    <button class="tab-button" data-tab="config">配置</button>
+    <button class="tab-button" data-tab="records">记录</button>
+  </nav>
+
+  <main>
+    <section id="tab-overview" class="tab-panel active">
+      <div class="stat-grid">
+        <article class="card stat">
+          <span class="stat-label">IMAP 状态</span>
+          <strong id="stat-conn" class="stat-value">—</strong>
+          <span id="stat-conn-hint" class="stat-hint">IMAP IDLE</span>
+        </article>
+        <article class="card stat">
+          <span class="stat-label">UID 水位线</span>
+          <strong id="stat-uid" class="stat-value">—</strong>
+          <span class="stat-hint">重启后从此位置续拉</span>
+        </article>
+        <article class="card stat">
+          <span class="stat-label">白名单规则</span>
+          <strong id="stat-rules" class="stat-value">—</strong>
+          <span class="stat-hint">未命中静默丢弃</span>
+        </article>
+        <article class="card stat">
+          <span class="stat-label">最近推送</span>
+          <strong id="stat-push" class="stat-value">—</strong>
+          <span id="stat-push-hint" class="stat-hint">尚未推送</span>
+        </article>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>运行详情</h2>
+          <div class="actions">
+            <button id="btn-reconnect" class="button ghost">立即重连</button>
+            <button id="btn-test" class="button primary">测试飞书投递</button>
+          </div>
+        </div>
+        <dl class="details">
+          <div><dt>账号</dt><dd id="detail-account">—</dd></div>
+          <div><dt>监听邮箱</dt><dd id="detail-mailbox">—</dd></div>
+          <div><dt>最近收信</dt><dd id="detail-last-mail">—</dd></div>
+          <div><dt>启动时间</dt><dd id="detail-started">—</dd></div>
+          <div><dt>配置文件</dt><dd id="detail-config" class="mono">—</dd></div>
+          <div><dt>数据目录</dt><dd id="detail-data" class="mono">—</dd></div>
+        </dl>
+        <p id="detail-error" class="error-line hidden"></p>
+      </div>
+    </section>
+
+    <section id="tab-config" class="tab-panel">
+      <form id="config-form">
+        <div class="card">
+          <div class="card-head"><h2>IMAP</h2></div>
+          <div class="form-grid">
+            <label>服务器<input id="imap-host" placeholder="imap.qq.com"></label>
+            <label>端口<input id="imap-port" type="number" min="1" max="65535"></label>
+            <label>账号<input id="imap-username" placeholder="you@qq.com"></label>
+            <label>授权码<input id="imap-password" type="password" placeholder="留空表示不修改"></label>
+            <label>邮箱文件夹<input id="imap-mailbox" placeholder="INBOX"></label>
+            <label>IDLE 超时<input id="imap-idle" placeholder="25m"></label>
+            <label>轮询兜底<input id="imap-poll" placeholder="5m"></label>
+          </div>
+          <p id="password-hint" class="hint hidden">已保存授权码；留空表示不修改。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>飞书</h2></div>
+          <div class="form-grid">
+            <label class="wide">Webhook 地址<input id="feishu-webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."></label>
+            <label>签名密钥<input id="feishu-secret" type="password" placeholder="未开启签名校验则留空"></label>
+          </div>
+          <p id="secret-hint" class="hint hidden">已保存签名密钥；留空表示不修改。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>频率控制</h2></div>
+          <div class="form-grid">
+            <label>防抖窗口<input id="rl-debounce" placeholder="15s"></label>
+            <label>讨论串冷却<input id="rl-cooldown" placeholder="10m"></label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>白名单</h2>
+            <button type="button" id="btn-add-rule" class="button ghost">添加规则</button>
+          </div>
+          <p class="hint">规则之间 OR；一条规则内类别之间 AND，同一类别内多个值 OR。空规则会被拒绝保存。</p>
+          <div id="rule-list" class="rule-list"></div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="button primary">保存并重连</button>
+          <span id="save-hint" class="hint"></span>
+        </div>
+      </form>
+    </section>
+
+    <section id="tab-records" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>邮件审计</h2>
+          <div class="actions">
+            <button id="btn-refresh-records" class="button ghost">刷新</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>时间</th><th>类型</th><th>UID</th><th>发件人</th><th>主题</th><th>结果</th><th>规则 / 原因</th><th>耗时</th></tr>
+            </thead>
+            <tbody id="records-body">
+              <tr><td colspan="8" class="empty">暂无记录</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>运行日志</h2>
+          <button id="btn-refresh-logs" class="button ghost">刷新</button>
+        </div>
+        <pre id="logs" class="logs">加载中…</pre>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
