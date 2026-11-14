@@ -7,8 +7,9 @@
 产物规则：
   - dev（默认）：bin/rebootremind-dev.exe
   - release：bin/rebootremind.exe
-仅当 HEAD 精确命中 rebootremind/v* tag 且工作区干净时才允许 release；
-dev 与 release 产物名不同，互不覆盖。
+仅当 HEAD 精确命中 rebootremind/v* tag 且本项目路径下工作区干净时
+才允许 release（monorepo 兄弟项目的改动不阻塞）；dev 与 release
+产物名不同，互不覆盖。
 
 构建前会用 rsrc 把图标与 manifest（启用 Common Controls v6）写入
 cmd/rebootremind/rsrc_windows_amd64.syso。
@@ -90,14 +91,22 @@ def latest_project_tag() -> str | None:
 
 
 def worktree_dirty() -> bool:
+    """仅检查本项目路径下的改动。
+
+    go_projects 是 monorepo（一个子目录 = 一个项目），兄弟项目的进行中
+    改动与本项目的发布产物无关，不应阻塞 release 门禁。
+    """
     result = run_git("-c", "status.relativePaths=false", "status", "--porcelain", "--untracked-files=normal")
     if result.returncode != 0:
         return True
+    project_prefix = f"/{PROJECT_ROOT.name}/"
     for line in result.stdout.splitlines():
         path = line[3:].strip().strip('"')
         if " -> " in path:
             path = path.split(" -> ", 1)[1]
         normalized = "/" + path.replace("\\", "/").lstrip("/")
+        if not normalized.startswith(project_prefix):
+            continue
         if any(normalized.endswith(suffix) for suffix in GENERATED_SUFFIXES):
             continue
         return True
