@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -218,6 +219,11 @@ func (r *Runtime) UpdateConfig(view ConfigView) error {
 	}
 	if next.Feishu.WebhookURL == "" {
 		next.Feishu.WebhookURL = current.Feishu.WebhookURL
+	}
+	// 仅当测试发信仍处于启用状态时沿用旧授权码；清空 username 视作关闭该功能，
+	// 避免旧凭证被重新写回配置文件。
+	if next.TestSender.Password == "" && strings.TrimSpace(next.TestSender.Username) != "" {
+		next.TestSender.Password = current.TestSender.Password
 	}
 	next.ApplyDefaults()
 

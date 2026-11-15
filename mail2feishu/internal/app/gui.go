@@ -146,6 +146,17 @@ func (g *GUI) setupTray() {
 			g.logf("测试投递成功")
 		}()
 	})
+	menu.Add("发送测试邮件").OnClick(func(*application.Context) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := g.svc.SendTestMail(ctx); err != nil {
+				g.logf("发送测试邮件失败: %v", err)
+				return
+			}
+			g.logf("测试邮件已发送至 %s", g.svc.Config().IMAP.Username)
+		}()
+	})
 	menu.Add("立即重连").OnClick(func(*application.Context) {
 		go func() {
 			if err := g.svc.Reconnect(); err != nil {

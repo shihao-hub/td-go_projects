@@ -140,6 +140,49 @@ whitelist:
 	}
 }
 
+func TestTestSenderOptionalAndValidated(t *testing.T) {
+	// 整段未配置合法，且默认值填充为 163 官方地址。
+	cfg, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("未配置 test_sender 应合法: %v", err)
+	}
+	if cfg.TestSender.Host != DefaultTestSenderHost || cfg.TestSender.Port != DefaultTestSenderPort {
+		t.Errorf("TestSender 默认值 = %+v", cfg.TestSender)
+	}
+
+	full := minimalYAML + `
+test_sender:
+  username: sender@163.com
+  password: auth-code
+  from_name: mail2feishu 测试
+`
+	cfg, err = Parse([]byte(full))
+	if err != nil {
+		t.Fatalf("完整 test_sender 应合法: %v", err)
+	}
+	if cfg.TestSender.Username != "sender@163.com" || cfg.TestSender.FromName != "mail2feishu 测试" {
+		t.Errorf("TestSender = %+v", cfg.TestSender)
+	}
+
+	missingPassword := minimalYAML + `
+test_sender:
+  username: sender@163.com
+`
+	if _, err := Parse([]byte(missingPassword)); err == nil {
+		t.Fatal("填写 username 却缺少授权码应报错")
+	}
+
+	badPort := minimalYAML + `
+test_sender:
+  username: sender@163.com
+  password: auth-code
+  port: 70000
+`
+	if _, err := Parse([]byte(badPort)); err == nil {
+		t.Fatal("非法端口应报错")
+	}
+}
+
 func TestExampleConfigIsValid(t *testing.T) {
 	path := filepath.Join("..", "..", "config.yaml.example")
 	data, err := os.ReadFile(path)

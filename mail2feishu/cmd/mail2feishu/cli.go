@@ -28,6 +28,7 @@ func run() int {
 	showVersion := flag.Bool("version", false, "显示版本后退出")
 	checkOnly := flag.Bool("check", false, "只校验配置并退出")
 	testWebhook := flag.Bool("test-webhook", false, "发送一条测试卡片后退出")
+	sendTestMail := flag.Bool("send-test", false, "用配置的 163 邮箱向 IMAP 账号发送测试邮件后退出")
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
 		fmt.Fprintf(out, "mail2feishu %s\n\n", buildinfo.Version)
@@ -91,6 +92,17 @@ func run() int {
 			return 1
 		}
 		fmt.Println("✅ 测试卡片已发送，请检查飞书群")
+		return 0
+	}
+
+	if *sendTestMail {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := svc.SendTestMail(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ 测试邮件发送失败: %v\n", err)
+			return 1
+		}
+		fmt.Printf("✅ 测试邮件已发送至 %s，请检查收件箱\n", svc.Config().IMAP.Username)
 		return 0
 	}
 

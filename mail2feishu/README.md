@@ -5,14 +5,14 @@ status: implemented
 manual_test: pending
 created: "2026-11-14"
 last_verified: ""
-verified_scope: 单元测试、GUI 启动与真实 IMAP 连接、水位线持久化、飞书 Webhook 联调
+verified_scope: 单元测试、GUI 启动与真实 IMAP 连接、水位线持久化、飞书 Webhook 联调、内置测试发信（163 → QQ）
 manual_test_gap: 托盘菜单交互、审计面板真实数据、开机自启注册、重启续拉的人工验证
 ---
 
 # mail2feishu
 
-> **状态：桌面化功能已实现，尚未完成全部人工测试。**
-> 已验证：`go test ./... -race`、GUI 启动并连接真实 QQ 邮箱、`state.json` 水位线落盘、飞书 Webhook 联调。
+> **状态：桌面化功能已实现，人工测试进行中（准备 release 版实测）。**
+> 已验证：`go test ./... -race`、GUI 启动并连接真实 QQ 邮箱、`state.json` 水位线落盘、飞书 Webhook 联调、内置测试发信（163 → QQ）。
 > 待人工验证：托盘菜单、配置页保存、审计面板、开机自启、重启续拉。
 > 人工测试完成后，先询问用户是否更新此处状态与 `last_verified`。
 
@@ -30,10 +30,11 @@ QQ 邮箱白名单邮件推送飞书：常驻监听 IMAP，命中白名单的邮
 | 控制面板 | 托盘「打开控制面板」 | 无（本地 HTTP API） | 查看状态/审计/日志，编辑配置并保存 | GUI 与 `127.0.0.1` 本地 API 已覆盖机器调用 |
 | 配置校验 | 保存时校验 | `-check` | 校验配置语法与必填项；零网络 I/O | 部署前自检 |
 | 测试投递 | 托盘/概览按钮 | `-test-webhook` | 发送一张测试卡片 | 一次性连通性验证 |
+| 测试发信 | 托盘/概览按钮 | `-send-test` | 用配置的 163 邮箱向 `imap.username` 发一封测试邮件，触发真实外部来信链路 | 一次性外部链路验证 |
 | 版本查询 | 托盘提示/面板 | `-version` | 输出版本、构建模式与 commit | 部署排查 |
 | 单实例保护 | 自动 | 自动 | GUI 与 CLI 共用命名互斥，禁止同时监听造成重复推送 | 运行期安全约束 |
 
-> 按《CLI 工具开发标准》§0.1，不提供 MCP 的理由已登记：本工具是常驻监听器，`-check` / `-test-webhook` / `-version` 与本地 HTTP API 已覆盖自动化需求；未实现 `schema` 导出。
+> 按《CLI 工具开发标准》§0.1，不提供 MCP 的理由已登记：本工具是常驻监听器，`-check` / `-test-webhook` / `-send-test` / `-version` 与本地 HTTP API 已覆盖自动化需求；未实现 `schema` 导出。
 
 ## 白名单语义
 
@@ -73,13 +74,14 @@ cscript //nologo .\run_background.vbs
 # Console 版：前台常驻，Ctrl+C 退出
 .\bin\mail2feishu-cli-dev.exe
 
-# 配置校验 / 测试投递 / 版本
+# 配置校验 / 测试投递 / 测试发信 / 版本
 .\bin\mail2feishu-cli-dev.exe -check
 .\bin\mail2feishu-cli-dev.exe -test-webhook
+.\bin\mail2feishu-cli-dev.exe -send-test
 .\bin\mail2feishu-cli-dev.exe -version
 ```
 
-GUI 与 CLI 共用同一数据目录和单实例锁，**同一时间只能运行一个监听实例**。托盘菜单提供：打开控制面板、测试飞书投递、立即重连、开机自启（仅 release）、彻底退出。
+GUI 与 CLI 共用同一数据目录和单实例锁，**同一时间只能运行一个监听实例**。托盘菜单提供：打开控制面板、测试飞书投递、发送测试邮件、立即重连、开机自启（仅 release）、彻底退出。
 
 ## 配置
 
@@ -87,10 +89,24 @@ GUI 与 CLI 共用同一数据目录和单实例锁，**同一时间只能运行
 
 - `imap.username` / `imap.password`：QQ 邮箱地址与 **IMAP 授权码**（不是登录密码）。
 - `feishu.webhook_url`：飞书群自定义机器人 Webhook；开启签名校验时填 `feishu.secret`。
+- `test_sender.username` / `test_sender.password`：可选，内置「发送测试邮件」使用的 163 邮箱与**客户端授权码**；`host`/`port` 默认 `smtp.163.com:465`。`username` 留空即禁用。
 - `ratelimit.debounce_window` / `thread_cooldown`：同讨论串防抖窗口与推送后冷却。
 - 通过 GUI 保存会重写整个 YAML 文件，原有注释不保留；需要保留注释时请直接编辑文件。
 
 ## 链路自测
+
+### 内置测试发信（163 → QQ，推荐）
+
+配置页「测试发信（163）」填写 163 地址与客户端授权码并保存后，可一键发信：
+
+- GUI：托盘「发送测试邮件」或概览页按钮；
+- CLI：`mail2feishu-cli-dev.exe -send-test`。
+
+邮件由 163 发往 `imap.username`，属于真实外部来信，会正常进入 QQ 收件箱（若被投入垃圾箱，请在 QQ 邮箱设置中放行）。
+白名单需包含该 163 发件人（邮箱或 `163.com` 域名），否则审计页会记录 `dropped`，这本身也是一次有效验证。
+授权码只写入本机 `config.yaml`（0600、已 gitignore），代码、日志与 HTTP 响应均不回显。
+
+### 脚本自测（可选）
 
 `scripts/send_test_mail.py` 用于验证「IMAP 收信 → 白名单 → 飞书推送」全链路，
 凭证直接取自 `config.yaml`，脚本不保存密钥：
@@ -105,7 +121,7 @@ uv run scripts/send_test_mail.py --cleanup m2f-test --apply   # 清理自测邮�
 
 > QQ 会把「自己发给自己」的邮件分流到自定义文件夹（如 `其他文件夹/测试目录`），
 > 而本工具只监听 `INBOX`，所以自发邮件必须用 `--deliver` 注入 INBOX 才会触发推送。
-> 更贴近真实场景的验证方式是从其它邮箱发信，或触发一次真实的 GitHub 通知。
+> 内置测试发信从 163 外部发入，不存在这个分流问题。
 
 ## 构建
 
@@ -158,4 +174,5 @@ internal/buildinfo          ldflags 注入的版本信息
 - 配置页保存后监听重启、白名单即时生效；
 - 审计面板展示真实邮件记录；
 - release 版开机自启注册与 `--hidden` 静默启动；
-- 进程重启后从 `state.json` 续拉停机期间邮件。
+- 进程重启后从 `state.json` 续拉停机期间邮件；
+- 内置测试发信的真实投递（163 → QQ 收件箱 → 白名单 → 飞书）。

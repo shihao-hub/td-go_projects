@@ -18,6 +18,18 @@ func NewLogger(dir string) (*log.Logger, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("打开日志文件失败: %w", err)
 	}
-	logger := log.New(io.MultiWriter(os.Stderr, file), "", log.LstdFlags)
+	logger := log.New(bestEffortWriter{os.Stderr, file}, "", log.LstdFlags)
 	return logger, func() { _ = file.Close() }, nil
+}
+
+// bestEffortWriter 把日志同时写到多个目标，任一目标失败不影响其它目标。
+// GUI 子系统下 stderr 是无效句柄，若用 io.MultiWriter，stderr 写失败会
+// 直接短路，导致文件日志一并丢失。
+type bestEffortWriter []io.Writer
+
+func (writers bestEffortWriter) Write(p []byte) (int, error) {
+	for _, writer := range writers {
+		_, _ = writer.Write(p)
+	}
+	return len(p), nil
 }

@@ -58,6 +58,7 @@
           <h2>运行详情</h2>
           <div class="actions">
             <button id="btn-reconnect" class="button ghost">立即重连</button>
+            <button id="btn-test-mail" class="button ghost">发送测试邮件</button>
             <button id="btn-test" class="button primary">测试飞书投递</button>
           </div>
         </div>
@@ -96,6 +97,19 @@
             <label>签名密钥<input id="feishu-secret" type="password" placeholder="未开启签名校验则留空"></label>
           </div>
           <p id="secret-hint" class="hint hidden">已保存签名密钥；留空表示不修改。</p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>测试发信（163）</h2></div>
+          <div class="form-grid">
+            <label>SMTP 服务器<input id="test-host" placeholder="smtp.163.com"></label>
+            <label>端口<input id="test-port" type="number" min="1" max="65535"></label>
+            <label>163 邮箱<input id="test-username" placeholder="yourname@163.com"></label>
+            <label>授权码<input id="test-password" type="password" placeholder="留空表示不修改"></label>
+            <label class="wide">发件人显示名<input id="test-from-name" placeholder="mail2feishu 测试"></label>
+          </div>
+          <p class="hint">「发送测试邮件」由该 163 邮箱发往当前 IMAP 账号，触发真实的外部来信链路；163 邮箱留空即禁用。</p>
+          <p id="test-password-hint" class="hint hidden">已保存授权码；留空表示不修改。</p>
         </div>
 
         <div class="card">

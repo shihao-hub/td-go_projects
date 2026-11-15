@@ -25,6 +25,9 @@ const (
 	DefaultIMAPPort = 993
 	DefaultMailbox  = "INBOX"
 
+	DefaultTestSenderHost = "smtp.163.com"
+	DefaultTestSenderPort = 465
+
 	DefaultIdleTimeout    = 25 * time.Minute
 	DefaultPollInterval   = 5 * time.Minute
 	DefaultDebounceWindow = 15 * time.Second
@@ -33,10 +36,11 @@ const (
 
 // Config 是 mail2feishu 的完整配置。
 type Config struct {
-	IMAP      IMAPConfig      `yaml:"imap"`
-	Feishu    FeishuConfig    `yaml:"feishu"`
-	Ratelimit RatelimitConfig `yaml:"ratelimit"`
-	Whitelist []matcher.Rule  `yaml:"whitelist"`
+	IMAP       IMAPConfig       `yaml:"imap"`
+	Feishu     FeishuConfig     `yaml:"feishu"`
+	Ratelimit  RatelimitConfig  `yaml:"ratelimit"`
+	TestSender TestSenderConfig `yaml:"test_sender"`
+	Whitelist  []matcher.Rule   `yaml:"whitelist"`
 }
 
 // IMAPConfig 是 QQ 邮箱 IMAP 连接配置。
@@ -54,6 +58,16 @@ type IMAPConfig struct {
 type FeishuConfig struct {
 	WebhookURL string `yaml:"webhook_url"`
 	Secret     string `yaml:"secret"`
+}
+
+// TestSenderConfig 是内置「发送测试邮件」使用的 163 发信账号。
+// 整段可选：username 为空表示未启用，加载与保存都不会强制要求。
+type TestSenderConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	FromName string `yaml:"from_name"`
 }
 
 // RatelimitConfig 控制防抖窗口与讨论串冷却时间。
@@ -148,6 +162,12 @@ func (c *Config) ApplyDefaults() {
 	if c.IMAP.Mailbox == "" {
 		c.IMAP.Mailbox = DefaultMailbox
 	}
+	if c.TestSender.Host == "" {
+		c.TestSender.Host = DefaultTestSenderHost
+	}
+	if c.TestSender.Port == 0 {
+		c.TestSender.Port = DefaultTestSenderPort
+	}
 	if c.IMAP.IdleTimeout == 0 {
 		c.IMAP.IdleTimeout = Duration(DefaultIdleTimeout)
 	}
@@ -181,6 +201,18 @@ func (c *Config) Validate() error {
 	}
 	if err := validateWebhook(c.Feishu.WebhookURL); err != nil {
 		return err
+	}
+	// test_sender 整段可选；只有填写了 username 才视为启用并做完整校验。
+	if strings.TrimSpace(c.TestSender.Username) != "" {
+		if strings.TrimSpace(c.TestSender.Host) == "" {
+			return errors.New("test_sender.host 不能为空")
+		}
+		if c.TestSender.Port < 1 || c.TestSender.Port > 65535 {
+			return fmt.Errorf("test_sender.port 超出范围: %d", c.TestSender.Port)
+		}
+		if c.TestSender.Password == "" {
+			return errors.New("test_sender.password 不能为空（163 邮箱需使用客户端授权码）")
+		}
 	}
 	if c.IMAP.IdleTimeout.Std() <= 0 {
 		return errors.New("imap.idle_timeout 必须大于 0")

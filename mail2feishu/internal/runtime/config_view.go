@@ -12,10 +12,11 @@ import (
 // ConfigView 是配置的界面视图。password/secret 留空表示沿用当前值，
 // 布尔标志仅用于告诉界面"已设置"，不会把凭证回传给前端。
 type ConfigView struct {
-	IMAP      IMAPView       `json:"imap"`
-	Feishu    FeishuView     `json:"feishu"`
-	Ratelimit RatelimitView  `json:"ratelimit"`
-	Whitelist []matcher.Rule `json:"whitelist"`
+	IMAP       IMAPView       `json:"imap"`
+	Feishu     FeishuView     `json:"feishu"`
+	Ratelimit  RatelimitView  `json:"ratelimit"`
+	TestSender TestSenderView `json:"test_sender"`
+	Whitelist  []matcher.Rule `json:"whitelist"`
 }
 
 // IMAPView 是 IMAP 配置的界面视图。
@@ -43,6 +44,16 @@ type RatelimitView struct {
 	ThreadCooldown string `json:"thread_cooldown"`
 }
 
+// TestSenderView 是内置测试发信配置的界面视图。
+type TestSenderView struct {
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	PasswordSet bool   `json:"password_set"`
+	FromName    string `json:"from_name"`
+}
+
 // NewConfigView 把配置转换为脱敏视图。
 func NewConfigView(cfg *config.Config) ConfigView {
 	return ConfigView{
@@ -62,6 +73,13 @@ func NewConfigView(cfg *config.Config) ConfigView {
 		Ratelimit: RatelimitView{
 			DebounceWindow: cfg.Ratelimit.DebounceWindow.Std().String(),
 			ThreadCooldown: cfg.Ratelimit.ThreadCooldown.Std().String(),
+		},
+		TestSender: TestSenderView{
+			Host:        cfg.TestSender.Host,
+			Port:        cfg.TestSender.Port,
+			Username:    cfg.TestSender.Username,
+			PasswordSet: cfg.TestSender.Password != "",
+			FromName:    cfg.TestSender.FromName,
 		},
 		Whitelist: append([]matcher.Rule(nil), cfg.Whitelist...),
 	}
@@ -103,6 +121,13 @@ func (v ConfigView) ToConfig() (*config.Config, error) {
 		Ratelimit: config.RatelimitConfig{
 			DebounceWindow: config.Duration(debounce),
 			ThreadCooldown: config.Duration(cooldown),
+		},
+		TestSender: config.TestSenderConfig{
+			Host:     v.TestSender.Host,
+			Port:     v.TestSender.Port,
+			Username: v.TestSender.Username,
+			Password: v.TestSender.Password,
+			FromName: v.TestSender.FromName,
 		},
 		Whitelist: v.Whitelist,
 	}

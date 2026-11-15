@@ -95,10 +95,17 @@ function fillConfig(config) {
   $('imap-poll').value = config.imap.poll_interval || '';
   $('feishu-webhook').value = config.feishu.webhook_url || '';
   $('feishu-secret').value = '';
+  const testSender = config.test_sender || {};
+  $('test-host').value = testSender.host || '';
+  $('test-port').value = testSender.port || '';
+  $('test-username').value = testSender.username || '';
+  $('test-password').value = '';
+  $('test-from-name').value = testSender.from_name || '';
   $('rl-debounce').value = config.ratelimit.debounce_window || '';
   $('rl-cooldown').value = config.ratelimit.thread_cooldown || '';
   $('password-hint').classList.toggle('hidden', !config.imap.password_set);
   $('secret-hint').classList.toggle('hidden', !config.feishu.secret_set);
+  $('test-password-hint').classList.toggle('hidden', !testSender.password_set);
 
   rules = (config.whitelist || []).map((rule) => ({
     name: rule.name || '',
@@ -192,6 +199,13 @@ function collectConfig() {
     feishu: {
       webhook_url: $('feishu-webhook').value.trim(),
       secret: $('feishu-secret').value,
+    },
+    test_sender: {
+      host: $('test-host').value.trim(),
+      port: Number($('test-port').value) || 0,
+      username: $('test-username').value.trim(),
+      password: $('test-password').value,
+      from_name: $('test-from-name').value.trim(),
     },
     ratelimit: {
       debounce_window: $('rl-debounce').value.trim(),
@@ -338,6 +352,18 @@ async function init() {
       toast('测试卡片已发送');
     } catch (error) {
       toast(error.message, 'error');
+    }
+  });
+  $('btn-test-mail').addEventListener('click', async () => {
+    const button = $('btn-test-mail');
+    button.disabled = true;
+    try {
+      const data = await request('/api/test-mail', { method: 'POST' });
+      toast(`测试邮件已发送至 ${data.to}`);
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      button.disabled = false;
     }
   });
 

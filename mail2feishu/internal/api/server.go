@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -17,7 +18,10 @@ import (
 	"mail2feishu/internal/web"
 )
 
-const testWebhookTimeout = 30 * time.Second
+const (
+	testWebhookTimeout = 30 * time.Second
+	testMailTimeout    = 30 * time.Second
+)
 
 // Server 是 GUI 与 CLI 共用的 HTTP 服务。
 type Server struct {
@@ -39,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/records", s.handleRecords)
 	mux.HandleFunc("GET /api/logs", s.handleLogs)
 	mux.HandleFunc("POST /api/test-webhook", s.handleTestWebhook)
+	mux.HandleFunc("POST /api/test-mail", s.handleTestMail)
 	mux.HandleFunc("POST /api/reconnect", s.handleReconnect)
 
 	subFS, err := fs.Sub(web.Assets, "assets")
@@ -151,6 +156,23 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeData(w, map[string]any{"sent": true})
+}
+
+func (s *Server) handleTestMail(w http.ResponseWriter, _ *http.Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), testMailTimeout)
+	defer cancel()
+	if err := s.runtime.SendTestMail(ctx); err != nil {
+		if errors.Is(err, runtime.ErrTestSenderMissing) {
+			writeFailure(w, http.StatusBadRequest, "test_sender_missing", err.Error())
+			return
+		}
+		writeFailure(w, http.StatusBadGateway, "test_mail_failed", err.Error())
+		return
+	}
+	writeData(w, map[string]any{
+		"sent": true,
+		"to":   s.runtime.Config().IMAP.Username,
+	})
 }
 
 func (s *Server) handleReconnect(w http.ResponseWriter, _ *http.Request) {

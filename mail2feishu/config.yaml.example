@@ -21,6 +21,16 @@ feishu:
   webhook_url: https://open.feishu.cn/open-apis/bot/v2/hook/REPLACE_WITH_YOUR_TOKEN
   secret: ""                 # 若机器人开启了签名校验，填入签名密钥；未开启留空
 
+test_sender:
+  # 可选：内置「发送测试邮件」使用的网易 163 邮箱。
+  # 邮件由 username 发往 imap.username，用于触发真实的外部来信链路。
+  # username 留空即禁用该功能（GUI/CLI 会提示先填写）。
+  host: smtp.163.com         # 默认 smtp.163.com
+  port: 465                  # 隐式 TLS 端口，默认 465
+  username: ""               # 163 邮箱地址，如 yourname@163.com
+  password: ""               # 163 客户端授权码，不是登录密码
+  from_name: mail2feishu 测试 # 发件人显示名
+
 ratelimit:
   debounce_window: 15s       # 同一讨论串在此窗口内的新事件聚合为一条推送
   thread_cooldown: 10m       # 同一讨论串推送后的冷却时间，期间新事件不再打扰

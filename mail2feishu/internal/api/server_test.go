@@ -118,6 +118,18 @@ func TestConfigUpdateRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestTestMailEndpointWithoutSender(t *testing.T) {
+	server := newTestServer(t)
+	status, payload := requestJSON(t, server.Handler(), http.MethodPost, "/api/test-mail", "")
+	if status != http.StatusBadRequest || payload["ok"] != false {
+		t.Fatalf("未配置测试发信应返回 400，got %d %v", status, payload)
+	}
+	errObj := payload["error"].(map[string]any)
+	if errObj["code"] != "test_sender_missing" {
+		t.Errorf("error.code = %v", errObj["code"])
+	}
+}
+
 func TestRecordsAndLogsEndpoints(t *testing.T) {
 	server := newTestServer(t)
 	status, payload := requestJSON(t, server.Handler(), http.MethodGet, "/api/records?limit=10", "")
