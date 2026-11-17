@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -32,10 +33,14 @@ type IMAPView struct {
 }
 
 // FeishuView 是飞书配置的界面视图。
+// Webhook 路径本身就是投递凭证，因此只回传「已配置」标志与掩码提示；
+// WebhookURL 留空表示沿用当前值。
 type FeishuView struct {
-	WebhookURL string `json:"webhook_url"`
-	Secret     string `json:"secret"`
-	SecretSet  bool   `json:"secret_set"`
+	WebhookURL  string `json:"webhook_url"`
+	WebhookSet  bool   `json:"webhook_set"`
+	WebhookHint string `json:"webhook_hint"`
+	Secret      string `json:"secret"`
+	SecretSet   bool   `json:"secret_set"`
 }
 
 // RatelimitView 是频控配置的界面视图。
@@ -67,8 +72,9 @@ func NewConfigView(cfg *config.Config) ConfigView {
 			PollInterval: cfg.IMAP.PollInterval.Std().String(),
 		},
 		Feishu: FeishuView{
-			WebhookURL: cfg.Feishu.WebhookURL,
-			SecretSet:  cfg.Feishu.Secret != "",
+			WebhookSet:  cfg.Feishu.WebhookURL != "",
+			WebhookHint: maskWebhook(cfg.Feishu.WebhookURL),
+			SecretSet:   cfg.Feishu.Secret != "",
 		},
 		Ratelimit: RatelimitView{
 			DebounceWindow: cfg.Ratelimit.DebounceWindow.Std().String(),
@@ -148,4 +154,28 @@ func parseDurationOr(raw string, fallback time.Duration) (time.Duration, error) 
 		return 0, fmt.Errorf("不能为负: %s", raw)
 	}
 	return parsed, nil
+}
+
+// maskWebhook 生成可安全展示的 Webhook 提示：只保留主机与路径末 4 位。
+// 飞书 Webhook 的路径 token 等同于投递凭证，不能完整回传给前端。
+func maskWebhook(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "已配置"
+	}
+	path := strings.TrimSuffix(parsed.Path, "/")
+	runes := []rune(path)
+	suffix := string(runes)
+	if len(runes) > 4 {
+		suffix = string(runes[len(runes)-4:])
+	}
+	prefix := parsed.Scheme + "://" + parsed.Host + "/…"
+	if suffix == "" {
+		return prefix
+	}
+	return prefix + suffix
 }

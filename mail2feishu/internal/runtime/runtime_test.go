@@ -49,6 +49,15 @@ func TestConfigViewRedactsSecrets(t *testing.T) {
 	if !view.Feishu.SecretSet {
 		t.Error("SecretSet 应为 true")
 	}
+	if view.Feishu.WebhookURL != "" {
+		t.Error("Webhook 地址（含投递路径 token）不应完整回传")
+	}
+	if !view.Feishu.WebhookSet {
+		t.Error("WebhookSet 应为 true")
+	}
+	if !strings.Contains(view.Feishu.WebhookHint, "open.feishu.cn") {
+		t.Errorf("WebhookHint = %q", view.Feishu.WebhookHint)
+	}
 	if view.IMAP.IdleTimeout != "25m0s" {
 		t.Errorf("IdleTimeout = %q", view.IMAP.IdleTimeout)
 	}

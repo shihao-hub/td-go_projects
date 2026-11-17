@@ -2,10 +2,15 @@
 
 const $ = (id) => document.getElementById(id);
 
+// 令牌由 GUI 通过窗口地址的 fragment 注入；fragment 不会随请求发送，
+// 也不会进入日志或 Referer。手动用浏览器打开时没有令牌，API 会返回 401。
+const TOKEN = new URLSearchParams(location.hash.replace(/^#/, '')).get('token') || '';
+
 const ACTION_LABELS = {
   whitelisted: { text: '放行', cls: 'ok' },
   dropped: { text: '丢弃', cls: 'drop' },
   parse_failed: { text: '解析失败', cls: 'fail' },
+  cooldown_dropped: { text: '冷却丢弃', cls: 'drop' },
   pushed: { text: '已推送', cls: 'ok' },
   push_failed: { text: '推送失败', cls: 'fail' },
 };
@@ -14,10 +19,9 @@ let rules = [];
 let toastTimer = null;
 
 async function request(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
+  const headers = { 'Content-Type': 'application/json' };
+  if (TOKEN) headers['X-Auth-Token'] = TOKEN;
+  const response = await fetch(path, { ...options, headers });
   let payload;
   try {
     payload = await response.json();
@@ -94,6 +98,9 @@ function fillConfig(config) {
   $('imap-idle').value = config.imap.idle_timeout || '';
   $('imap-poll').value = config.imap.poll_interval || '';
   $('feishu-webhook').value = config.feishu.webhook_url || '';
+  $('feishu-webhook').placeholder = config.feishu.webhook_hint
+    ? `已配置：${config.feishu.webhook_hint}（留空则沿用）`
+    : 'https://open.feishu.cn/open-apis/bot/v2/hook/...';
   $('feishu-secret').value = '';
   const testSender = config.test_sender || {};
   $('test-host').value = testSender.host || '';

@@ -6,8 +6,9 @@
 
 产物规则（每条通道两个二进制）：
   - dev（默认）：mail2feishu-gui-dev.exe（GUI）+ mail2feishu-cli-dev.exe（Console）
-  - release：mail2feishu-gui.exe（GUI）+ mail2feishu-cli.exe（Console）
-只有 HEAD 精确命中 mail2feishu/v* tag 且本项目路径工作区干净时才允许 release。
+  - release（仅 --release）：mail2feishu-gui.exe（GUI）+ mail2feishu-cli.exe（Console）
+  即使 HEAD 精确命中 mail2feishu/v* tag 且工作区干净，也必须显式传 --release；
+  否则一律构建 dev（dev 与 release 使用不同数据目录，误用代价高）。
 
 双通道设计：
   - GUI 通道 -H windowsgui，双击零黑框；启动完整服务与托盘；
@@ -205,7 +206,9 @@ def main() -> int:
 
     exact_tag = exact_project_tag()
     dirty = worktree_dirty()
-    release = exact_tag is not None and not dirty
+    # 默认只产 dev：哪怕 HEAD 正好命中 tag，也必须显式传 --release 才会覆盖
+    # 生产数据目录，避免开发时误用正式版。
+    release = args.release and exact_tag is not None and not dirty
 
     if args.release and not release:
         reason = "当前 HEAD 未命中 mail2feishu/v* tag" if exact_tag is None else "工作区存在未提交改动"

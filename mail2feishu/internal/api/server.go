@@ -3,6 +3,9 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +13,9 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"mail2feishu/internal/buildinfo"
@@ -21,16 +26,34 @@ import (
 const (
 	testWebhookTimeout = 30 * time.Second
 	testMailTimeout    = 30 * time.Second
+
+	// tokenHeader 是 WebUI 与外部脚本携带访问令牌的请求头。
+	tokenHeader = "X-Auth-Token"
 )
 
 // Server 是 GUI 与 CLI 共用的 HTTP 服务。
 type Server struct {
 	runtime *runtime.Runtime
+	token   string
 }
 
-// NewServer 创建 API 服务。
+// NewServer 创建 API 服务，并生成随机会话令牌。
+// 令牌只注入 WebUI 窗口地址，未携带令牌的 /api 请求一律拒绝，
+// 防止本机其他进程或已发现端口的网页调用发信、重连与配置接口。
 func NewServer(rt *runtime.Runtime) *Server {
-	return &Server{runtime: rt}
+	return &Server{runtime: rt, token: newToken()}
+}
+
+// Token 返回会话令牌，供 GUI 拼接带令牌的窗口地址。
+func (s *Server) Token() string { return s.token }
+
+func newToken() string {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		// crypto/rand 不可用的极端情况下仍要求携带令牌，只是强度下降。
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(buf)
 }
 
 // Handler 返回完整路由（API + 静态资源）。
@@ -51,7 +74,56 @@ func (s *Server) Handler() http.Handler {
 		panic("内嵌 WebUI 资产缺失: " + err.Error())
 	}
 	mux.Handle("/", http.FileServer(http.FS(subFS)))
-	return mux
+	return s.guard(mux)
+}
+
+// guard 校验来源与访问令牌：只接受回环地址访问，拒绝跨站 Origin，
+// 且 /api/ 下的所有请求都必须携带会话令牌。
+func (s *Server) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackHost(r.Host) {
+			writeFailure(w, http.StatusForbidden, "forbidden_host", "只允许从本机回环地址访问")
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" && !sameOrigin(origin, r.Host) {
+			writeFailure(w, http.StatusForbidden, "forbidden_origin", "拒绝跨站请求")
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") && !s.authorized(r) {
+			writeFailure(w, http.StatusUnauthorized, "unauthorized", "缺少或错误的访问令牌")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) authorized(r *http.Request) bool {
+	token := r.Header.Get(tokenHeader)
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(s.token)) == 1
+}
+
+func isLoopbackHost(hostport string) bool {
+	host := hostport
+	if parsed, _, err := net.SplitHostPort(hostport); err == nil {
+		host = parsed
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func sameOrigin(origin, hostport string) bool {
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, hostport)
 }
 
 // Listen 在回环地址绑定监听器；port=0 表示由内核动态分配。

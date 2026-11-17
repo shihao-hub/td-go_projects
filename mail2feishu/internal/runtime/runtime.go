@@ -21,8 +21,17 @@ import (
 	"mail2feishu/internal/feishu"
 	imaplistener "mail2feishu/internal/imap"
 	"mail2feishu/internal/matcher"
+	"mail2feishu/internal/outbox"
 	"mail2feishu/internal/service"
 	"mail2feishu/internal/state"
+)
+
+// stopTimeout 是停止 IMAP 监听的上限：网络半开时不能让退出、保存配置或
+// 「立即重连」无限期阻塞。drainTimeout 覆盖投递队列的收尾——单次投递有
+// 30s 超时，必须留出余量，否则旧队列协程可能与新队列并发写同一目录。
+const (
+	stopTimeout  = 15 * time.Second
+	drainTimeout = 40 * time.Second
 )
 
 // Options 是 Runtime 的路径与日志配置。
@@ -40,6 +49,7 @@ type Runtime struct {
 	mu        sync.Mutex
 	cfg       *config.Config
 	state     *state.Store
+	outbox    *outbox.Store
 	audit     *audit.Logger
 	pipeline  *service.Pipeline
 	listener  *imaplistener.Listener
@@ -80,6 +90,13 @@ func New(opts Options) (*Runtime, error) {
 	if err != nil {
 		opts.Logger.Printf("读取状态文件失败，将重建 UID 水位线: %v", err)
 	}
+	outboxStore, err := outbox.Open(filepath.Join(opts.DataDir, "outbox"))
+	if outboxStore == nil {
+		return nil, fmt.Errorf("初始化待投递队列失败: %w", err)
+	}
+	if err != nil {
+		opts.Logger.Printf("待投递队列存在损坏记录，已跳过: %v", err)
+	}
 	auditLogger, err := audit.OpenDefault(opts.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("初始化审计日志失败: %w", err)
@@ -89,6 +106,7 @@ func New(opts Options) (*Runtime, error) {
 		logger:    opts.Logger,
 		cfg:       cfg,
 		state:     stateStore,
+		outbox:    outboxStore,
 		audit:     auditLogger,
 		configErr: configErr,
 	}, nil
@@ -116,6 +134,7 @@ func (r *Runtime) startLocked() error {
 	pipeline, err := service.New(service.Options{
 		Matcher:        whitelist,
 		Feishu:         feishu.NewClient(cfg.Feishu.WebhookURL, cfg.Feishu.Secret),
+		Outbox:         r.outbox,
 		DebounceWindow: cfg.Ratelimit.DebounceWindow.Std(),
 		ThreadCooldown: cfg.Ratelimit.ThreadCooldown.Std(),
 		Auditor:        r.audit,
@@ -175,8 +194,22 @@ func (r *Runtime) Stop() {
 	r.mu.Unlock()
 
 	cancel()
-	<-done
-	pipeline.Close()
+	select {
+	case <-done:
+	case <-time.After(stopTimeout):
+		r.logger.Printf("等待 IMAP 监听退出超时（%s），继续关闭", stopTimeout)
+	}
+	// 未投递邮件留在磁盘上，下次启动继续补投，因此关闭队列不会丢通知。
+	closed := make(chan struct{})
+	go func() {
+		pipeline.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(drainTimeout):
+		r.logger.Printf("等待投递队列关闭超时（%s），已记录到待投递目录", drainTimeout)
+	}
 }
 
 // Reconnect 用当前配置重启监听。
@@ -306,7 +339,7 @@ func (r *Runtime) ConfigPath() string { return r.opts.ConfigPath }
 // DataDir 返回数据目录。
 func (r *Runtime) DataDir() string { return r.opts.DataDir }
 
-func (r *Runtime) handleMail(uid uint32, raw []byte) error {
+func (r *Runtime) handleMail(uid, uidValidity uint32, raw []byte) error {
 	r.mu.Lock()
 	r.lastMailAt = time.Now()
 	pipeline := r.pipeline
@@ -314,7 +347,7 @@ func (r *Runtime) handleMail(uid uint32, raw []byte) error {
 	if pipeline == nil {
 		return errors.New("服务尚未启动")
 	}
-	err := pipeline.HandleMail(uid, raw)
+	err := pipeline.HandleMail(uid, uidValidity, raw)
 	if err != nil {
 		r.setError(err)
 	}

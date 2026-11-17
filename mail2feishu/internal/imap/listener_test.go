@@ -3,9 +3,11 @@ package imap
 import (
 	"testing"
 	"time"
+
+	imapv1 "github.com/emersion/go-imap"
 )
 
-func noopHandler(uint32, []byte) error { return nil }
+func noopHandler(uint32, uint32, []byte) error { return nil }
 
 func TestNewAppliesDefaults(t *testing.T) {
 	listener, err := New(Options{
@@ -113,6 +115,45 @@ func TestInitBaselineResetsWhenUIDValidityChanges(t *testing.T) {
 	}
 	if len(store.saves) != 1 || store.saves[0] != 499 {
 		t.Fatalf("新基线应落盘，saves=%v", store.saves)
+	}
+}
+
+// TestSyncMailboxRebuildsOnRuntimeUIDValidityChange 覆盖「进程运行期间邮箱被重建」：
+// 旧水位线对新邮箱没有意义，必须按新 UIDNEXT 重建，否则新邮件会被跳过。
+func TestSyncMailboxRebuildsOnRuntimeUIDValidityChange(t *testing.T) {
+	listener, err := New(Options{Username: "u", Password: "p", OnMessage: noopHandler})
+	if err != nil {
+		t.Fatalf("New() 错误: %v", err)
+	}
+	listener.uidValidity = 7
+	listener.lastUID = 120
+	listener.baselineSet = true
+
+	listener.syncMailbox(&imapv1.MailboxStatus{UidValidity: 8, UidNext: 500})
+
+	if listener.uidValidity != 8 {
+		t.Errorf("uidValidity = %d, want 8", listener.uidValidity)
+	}
+	if listener.lastUID != 499 {
+		t.Errorf("UIDVALIDITY 变化后应以 UIDNEXT-1=499 重建，got %d", listener.lastUID)
+	}
+}
+
+// TestSyncMailboxKeepsBaselineWithoutChange 确认普通重连不会重置水位线，
+// 断线期间到达的邮件仍会被补拉。
+func TestSyncMailboxKeepsBaselineWithoutChange(t *testing.T) {
+	listener, err := New(Options{Username: "u", Password: "p", OnMessage: noopHandler})
+	if err != nil {
+		t.Fatalf("New() 错误: %v", err)
+	}
+	listener.uidValidity = 7
+	listener.lastUID = 120
+	listener.baselineSet = true
+
+	listener.syncMailbox(&imapv1.MailboxStatus{UidValidity: 7, UidNext: 500})
+
+	if listener.lastUID != 120 {
+		t.Errorf("同一 UIDVALIDITY 下不应重置水位线，got %d", listener.lastUID)
 	}
 }
 

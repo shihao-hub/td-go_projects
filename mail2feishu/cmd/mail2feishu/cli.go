@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -27,6 +28,7 @@ func run() int {
 	configPath := flag.String("config", "", "配置文件路径（默认 <数据目录>/config.yaml）")
 	showVersion := flag.Bool("version", false, "显示版本后退出")
 	checkOnly := flag.Bool("check", false, "只校验配置并退出")
+	jsonOut := flag.Bool("json", false, "与 -version / -check 配合，输出机器可读 JSON")
 	testWebhook := flag.Bool("test-webhook", false, "发送一条测试卡片后退出")
 	sendTestMail := flag.Bool("send-test", false, "用配置的 163 邮箱向 IMAP 账号发送测试邮件后退出")
 	flag.Usage = func() {
@@ -40,6 +42,14 @@ func run() int {
 	flag.Parse()
 
 	if *showVersion {
+		if *jsonOut {
+			emitJSON(map[string]any{
+				"version":  buildinfo.Version,
+				"mode":     buildinfo.Mode,
+				"build_id": buildinfo.BuildID,
+			})
+			return 0
+		}
 		fmt.Println(versionString())
 		return 0
 	}
@@ -59,6 +69,17 @@ func run() int {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ 配置无效: %v\n", err)
 			return 1
+		}
+		if *jsonOut {
+			emitJSON(map[string]any{
+				"ok":          true,
+				"config_path": path,
+				"imap_host":   cfg.IMAP.Host,
+				"imap_port":   cfg.IMAP.Port,
+				"username":    cfg.IMAP.Username,
+				"rules":       len(cfg.Whitelist),
+			})
+			return 0
 		}
 		fmt.Printf("✅ 配置有效: %s\n", path)
 		fmt.Printf("   IMAP: %s:%d（%s）\n", cfg.IMAP.Host, cfg.IMAP.Port, cfg.IMAP.Username)
@@ -131,4 +152,12 @@ func run() int {
 
 func versionString() string {
 	return fmt.Sprintf("mail2feishu %s (%s, build %s)", buildinfo.Version, buildinfo.Mode, buildinfo.BuildID)
+}
+
+// emitJSON 以机器可读形式输出运维命令结果（-version / -check）。
+// 失败路径仍然写 stderr 并返回非零退出码，避免脚本把错误当成功解析。
+func emitJSON(value any) {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(value)
 }

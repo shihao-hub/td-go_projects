@@ -21,6 +21,7 @@ const (
 	initialBackoff = time.Second
 	maxBackoff     = 2 * time.Minute
 	commandTimeout = 2 * time.Minute
+	dialTimeout    = 30 * time.Second
 	maxMailBytes   = 10 << 20 // 单封邮件读取上限 10 MiB
 )
 
@@ -42,8 +43,9 @@ type Options struct {
 	// State 可选：跨进程持久化水位线；nil 时退化为纯内存。
 	State StateStore
 	// OnMessage 在收到新邮件时调用，raw 为完整 RFC 5322 原文。
-	// 返回错误只记录日志，不会中断监听。
-	OnMessage func(uid uint32, raw []byte) error
+	// 返回错误表示这封邮件没有被安全接管（例如落盘失败），监听器不会推进
+	// UID 水位线，并会在下一轮重连时重试同一条及之后的邮件。
+	OnMessage func(uid, uidValidity uint32, raw []byte) error
 	// OnConnected 在登录并选中邮箱成功后调用。
 	OnConnected func(addr string)
 	// OnDisconnected 在会话结束时调用，err 为结束原因。
@@ -128,14 +130,24 @@ func (l *Listener) Run(ctx context.Context) error {
 // 返回值 connected 表示是否已成功登录（用于决定是否重置退避）。
 func (l *Listener) session(ctx context.Context) (connected bool, err error) {
 	addr := net.JoinHostPort(l.opts.Host, strconv.Itoa(l.opts.Port))
-	conn, err := client.DialTLS(addr, &tls.Config{
-		ServerName: l.opts.Host,
-		MinVersion: tls.VersionTLS12,
-	})
+	conn, rawConn, err := l.dial(ctx, addr)
 	if err != nil {
-		return false, fmt.Errorf("连接 %s 失败: %w", addr, err)
+		return false, err
 	}
 	defer conn.Logout()
+
+	// ctx 取消时主动断开底层连接：IDLE 期间协程可能长时间阻塞在读上，
+	// 仅靠 cancel 无法让 session 及时退出，退出/重连会因此卡住。
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = rawConn.Close()
+		case <-stopWatch:
+		}
+	}()
+
 	// Timeout 是 go-imap 单条命令的读写超时，也会覆盖 IDLE 期间的读操作。
 	// 必须大于 IdleTimeout，否则 IDLE 会被读超时打断，形成「每 2 分钟断线重连」
 	// 的抖动，还会触发服务端限流。
@@ -149,8 +161,7 @@ func (l *Listener) session(ctx context.Context) (connected bool, err error) {
 	if err != nil {
 		return true, fmt.Errorf("选择邮箱 %q 失败: %w", l.opts.Mailbox, err)
 	}
-	l.uidValidity = mbox.UidValidity
-	l.initBaseline(mbox.UidNext)
+	l.syncMailbox(mbox)
 	l.logf("IMAP 已连接 %s，监听 %s（只处理 UID > %d 的新邮件）", addr, l.opts.Mailbox, l.lastUID)
 	if l.opts.OnConnected != nil {
 		l.opts.OnConnected(addr)
@@ -214,7 +225,53 @@ func (l *Listener) session(ctx context.Context) (connected bool, err error) {
 	}
 }
 
-// initBaseline 只在首次成功连接时建立水位线：
+// dial 建立带超时的 TLS 连接，并返回底层连接供取消时强制关闭。
+func (l *Listener) dial(ctx context.Context, addr string) (*client.Client, net.Conn, error) {
+	dialer := &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}
+	rawConn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("连接 %s 失败: %w", addr, err)
+	}
+	tlsConn := tls.Client(rawConn, &tls.Config{
+		ServerName: l.opts.Host,
+		MinVersion: tls.VersionTLS12,
+	})
+	// 握手阶段同样需要截止时间：服务端在 greeting 阶段不响应时必须能超时退出。
+	if err := tlsConn.SetDeadline(time.Now().Add(dialTimeout)); err != nil {
+		_ = rawConn.Close()
+		return nil, nil, fmt.Errorf("设置 TLS 超时失败: %w", err)
+	}
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		_ = rawConn.Close()
+		return nil, nil, fmt.Errorf("TLS 握手失败: %w", err)
+	}
+	if err := tlsConn.SetDeadline(time.Time{}); err != nil {
+		_ = rawConn.Close()
+		return nil, nil, fmt.Errorf("清除 TLS 超时失败: %w", err)
+	}
+	conn, err := client.New(tlsConn)
+	if err != nil {
+		_ = tlsConn.Close()
+		return nil, nil, fmt.Errorf("初始化 IMAP 客户端失败: %w", err)
+	}
+	return conn, tlsConn, nil
+}
+
+// syncMailbox 在每次选中邮箱后同步 UIDVALIDITY：
+// 运行期间邮箱被重建（UIDVALIDITY 变化）时，旧 UID 对新邮箱没有意义，
+// 必须重建基线，否则新邮件会被旧水位线跳过。
+func (l *Listener) syncMailbox(mbox *imapv1.MailboxStatus) {
+	if l.baselineSet && l.uidValidity != 0 && mbox.UidValidity != l.uidValidity {
+		l.logf("UIDVALIDITY 变化（%d → %d），重建 UID 水位线；outbox 中未投递邮件继续投递",
+			l.uidValidity, mbox.UidValidity)
+		l.baselineSet = false
+		l.lastUID = 0
+	}
+	l.uidValidity = mbox.UidValidity
+	l.initBaseline(mbox.UidNext)
+}
+
+// initBaseline 只在首次成功连接（或 UIDVALIDITY 变化）时建立水位线：
 //   - 优先使用持久化的水位线（账号与 UIDVALIDITY 都匹配），这样进程重启后
 //     停机期间到达的邮件会被补拉；
 //   - 否则以当前 UIDNEXT-1 为基线（首次运行或账号/邮箱已变化）。
@@ -251,11 +308,15 @@ func (l *Listener) persistLastUID() {
 }
 
 // fetchNew 拉取水位线之后的新邮件并逐封回调。
+//
+// 水位线只推进到「已确认接管」的最后一封：任何一封处理失败都会立即停止
+// 本轮推进，并返回错误触发重连，避免失败邮件被永久跳过。
 func (l *Listener) fetchNew(conn *client.Client) error {
 	mbox, err := conn.Select(l.opts.Mailbox, true)
 	if err != nil {
 		return fmt.Errorf("重新选择邮箱失败: %w", err)
 	}
+	l.syncMailbox(mbox)
 	// 同一 UIDVALIDITY 下 UID 单调递增；水位线超出 UIDNEXT 说明邮箱被
 	// 重建或服务器异常，重置基线避免永久跳过后续邮件。
 	if mbox.UidNext > 0 && l.lastUID >= mbox.UidNext {
@@ -281,33 +342,47 @@ func (l *Listener) fetchNew(conn *client.Client) error {
 	}()
 
 	count := 0
+	advanced := false
+	var handlerErr error
 	for msg := range messages {
+		// 已发生错误：继续消费剩余消息避免 FETCH 协程阻塞，但不再推进水位线，
+		// 也不处理后续邮件——UID 水位线是单值，越过失败点就会丢信。
+		if handlerErr != nil {
+			continue
+		}
 		body := msg.GetBody(section)
 		if body == nil {
-			l.logf("UID %d 没有正文，跳过", msg.Uid)
+			handlerErr = fmt.Errorf("UID %d 没有正文", msg.Uid)
 			continue
 		}
 		raw, readErr := io.ReadAll(io.LimitReader(body, maxMailBytes))
 		if readErr != nil {
-			l.logf("读取 UID %d 失败: %v", msg.Uid, readErr)
+			handlerErr = fmt.Errorf("读取 UID %d 失败: %w", msg.Uid, readErr)
 			continue
 		}
-		if err := l.opts.OnMessage(msg.Uid, raw); err != nil {
-			l.logf("处理 UID %d 失败: %v", msg.Uid, err)
+		if err := l.opts.OnMessage(msg.Uid, l.uidValidity, raw); err != nil {
+			handlerErr = fmt.Errorf("处理 UID %d 失败: %w", msg.Uid, err)
+			continue
 		}
 		if msg.Uid > l.lastUID {
 			l.lastUID = msg.Uid
+			advanced = true
 		}
 		count++
 	}
 	if err := <-fetchDone; err != nil {
+		if advanced {
+			l.persistLastUID()
+		}
 		return fmt.Errorf("FETCH 失败: %w", err)
 	}
-	if count > 0 {
+	if advanced {
 		l.persistLastUID()
-		l.logf("已处理 %d 封新邮件（最新 UID %d）", count, l.lastUID)
 	}
-	return nil
+	if count > 0 {
+		l.logf("已入队 %d 封新邮件（最新 UID %d）", count, l.lastUID)
+	}
+	return handlerErr
 }
 
 func drainUpdates(updates <-chan client.Update) {

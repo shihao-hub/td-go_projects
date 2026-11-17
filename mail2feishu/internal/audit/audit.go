@@ -34,8 +34,10 @@ const (
 	ActionWhitelisted = "whitelisted"
 	ActionDropped     = "dropped"
 	ActionParseFailed = "parse_failed"
-	ActionPushed      = "pushed"
-	ActionPushFailed  = "push_failed"
+	// ActionCooldownDropped 表示邮件命中白名单，但因同讨论串仍在冷却期内被有意丢弃。
+	ActionCooldownDropped = "cooldown_dropped"
+	ActionPushed          = "pushed"
+	ActionPushFailed      = "push_failed"
 )
 
 // Event 是一条审计事件。Type=mail 时记录接收与过滤结果；

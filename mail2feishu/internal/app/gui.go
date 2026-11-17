@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -77,13 +78,17 @@ func Launch(port int, hidden bool) error {
 	if err != nil {
 		return fmt.Errorf("启动本地 HTTP 服务失败: %w", err)
 	}
-	serverURL := api.URL(listener)
+	apiServer := api.NewServer(svc)
 	go func() {
-		if err := api.NewServer(svc).Serve(listener); err != nil {
+		if err := apiServer.Serve(listener); err != nil {
 			logger.Printf("HTTP 服务退出: %v", err)
 		}
 	}()
-	logger.Printf("WebUI 已启动: %s", serverURL)
+	baseURL := api.URL(listener)
+	logger.Printf("WebUI 已启动: %s", baseURL)
+	// 令牌放在 fragment 里：不会进入 HTTP 请求行、日志或 Referer，
+	// 但 WebUI 可以从 location.hash 读取并附加到 API 请求头。
+	serverURL := baseURL + "/#token=" + url.QueryEscape(apiServer.Token())
 
 	gui := &GUI{
 		svc:       svc,
