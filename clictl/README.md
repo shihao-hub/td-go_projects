@@ -9,7 +9,7 @@ Windows 工具注册器/启动台：注册任意 exe，`clictl run <名>` 前台
 - **Chrome 应用模式（`--chrome`）**：主界面改走共享专用 profile 的 Chrome `--app` 窗口，多开只新增渲染进程；托盘常驻与单实例语义不变，失败自动回退默认浏览器
 - **按需控制台**：源码/命令行目标以隐藏控制台启动，详情页可随时显示/隐藏控制台窗口，不重启进程；`start --console` 仍直接打开可见控制台
 - **分组与视图**：`meta.group` 自定义分组；详情标题旁分组徽标点击即设，注册弹窗也可选已有分组；平铺（默认）/ 分组两种视图，分组内可随时在标签页与树形折叠之间切换，标签栏只横向滚动，名称升序稳定排序，列表顺序不随启动次数跳动；视图、排序、当前分组与折叠状态服务端持久化
-- **双通道产物**：`bin/clictl-gui[-dev].exe` 只出窗口（带任何参数都不做 CLI），`bin/clictl-cli[-dev].exe` 是 console 子系统，prompt/管道/重定向全部合规；二者不可合并（原因见 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md`）
+- **双通道产物**：`bin/clictl-gui[-dev].exe` 只出窗口（带任何参数都不做 CLI），`bin/clictl-cli[-dev].exe` 是 console 子系统，prompt/管道/重定向全部合规；二者不可合并（原因见 `docs/projects/go_projects/clictl/plans/archive/01-wails-dual-channel.md`）
 - **同一 HTTP Handler**：GUI 与 `clictl serve` 托管完全相同的 WebUI + REST；WebUI 根路径永远是完整工作台，不存在「GUI 有页面、CLI 只有裸 API」的分裂
 - **管理命令永远输出 JSON**：`{"ok":true,"data":...}` / `{"ok":false,"error":{"code":"...","message":"..."}}`
 - **MCP server（`clictl mcp`）**：标准 MCP stdio 协议通道，把注册/启动/执行暴露为带 JSON Schema 的 MCP 工具（`clictl.list` / `clictl.run` 等 10 个）；`clictl schema` 可离线导出与 `tools/list` 同源的工具定义
@@ -140,4 +140,4 @@ uv run scripts/build.py --release   # release → bin/clictl-gui.exe + bin/clict
 - WebUI 视图偏好：`<通道目录>\ui_preferences.json`（视图 / 排序 / 当前分组 / 折叠分组；GUI 随机端口下 localStorage 不可靠，故服务端落盘）
 - Chrome 应用模式共享 profile：`%LOCALAPPDATA%\language_projects\chrome-apps\<dev|prod>`（回退 `~/.language_projects/chrome-apps/<通道>`）。它**不属于**上面按项目分目录的运行时数据：profile 存放大量浏览器缓存且不漫游，故按「共享型例外」放在 LocalAppData，且路径**不含项目名**——所有 go_projects 的 Wails 应用都要逐字共用同一路径，否则多开会裂成多个浏览器进程，方案失效。dev/prod 仍分层隔离。
 
-完整设计见 `PLAN.md`、父仓 `docs/projects/go_projects/clictl/plans/01-wails-dual-channel.md` 与 `plans/06-source-command-launch.md`；使用文档见父仓 `docs/projects/go_projects/clictl/clictl 使用指南.md`；表结构变更存档见父仓 `docs/projects/go_projects/clictl/migrations/`；其他 CLI 项目复用 JSON 输出模式见 `Go CLI JSON 输出模式参考.md`。
+完整设计见 `PLAN.md`、父仓 `docs/projects/go_projects/clictl/plans/archive/01-wails-dual-channel.md` 与 `plans/archive/05-source-command-launch.md`；使用文档见父仓 `docs/projects/go_projects/clictl/clictl 使用指南.md`；表结构变更存档见父仓 `docs/projects/go_projects/clictl/migrations/`；其他 CLI 项目复用 JSON 输出模式见 `Go CLI JSON 输出模式参考.md`。
