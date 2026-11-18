@@ -19,8 +19,8 @@ manual_test_gap: 托盘菜单交互、审计面板真实数据、开机自启注
 QQ 邮箱白名单邮件推送飞书：常驻监听 IMAP，命中白名单的邮件经防抖聚合后推送飞书群自定义机器人。桌面版提供托盘与控制面板；Console 版保留脚本化能力。
 
 设计文档：
-- <../../docs/projects/go_projects/mail2feishu/plans/01-mail2feishu.md>
-- <../../docs/projects/go_projects/mail2feishu/plans/02-mail2feishu-desktop.md>
+- <../../docs/projects/go_projects/mail2feishu/plans/archive/01-mail2feishu.md>
+- <../../docs/projects/go_projects/mail2feishu/plans/archive/02-mail2feishu-desktop.md>
 
 ## 能力表
 
