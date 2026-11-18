@@ -1,0 +1,28 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": "__ICON__"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "__FIXED_VERSION__",
+          "product_version": "__FIXED_VERSION__"
+        },
+        "info": {
+          "0409": {
+            "CompanyName": "shihao",
+            "FileDescription": "ccquota GUI - 额度托盘应用",
+            "FileVersion": "__VERSION__",
+            "InternalName": "ccquota-gui",
+            "OriginalFilename": "__ORIGINAL_NAME__",
+            "ProductName": "ccquota",
+            "ProductVersion": "__VERSION__"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# 构建产物
+/bin/
+/icon.ico
+/cmd/ccquota/rsrc_windows_amd64.syso
+/cmd/ccquota-gui/rsrc_windows_amd64.syso
+/winres/.tmp-*
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# Go 测试产物
+*.test
+*.out

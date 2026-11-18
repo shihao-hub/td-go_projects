@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ccquota · 额度</title>
+<style>
+  :root {
+    --bg: #17181c;
+    --panel: #202127;
+    --panel-2: #26272f;
+    --line: #33353f;
+    --text: #e6e7ea;
+    --muted: #9b9daa;
+    --accent: #ff7a2f;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    background: rgba(23, 24, 28, 0.92);
+    backdrop-filter: blur(8px);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
+  header .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  main { padding: 20px 24px 48px; max-width: 1080px; }
+  section { margin-bottom: 28px; }
+  section > h2 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 0 0 10px 2px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 10px;
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.4fr);
+    gap: 18px;
+    align-items: center;
+  }
+  .card.current { border-color: #3d4a63; box-shadow: inset 0 0 0 1px rgba(96, 132, 190, 0.25); }
+  .name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .url { color: var(--muted); font-size: 12px; margin-top: 3px; word-break: break-all; }
+  .badge {
+    font-size: 11px;
+    font-weight: 500;
+    color: #9fc4ff;
+    background: rgba(96, 132, 190, 0.14);
+    border-radius: 999px;
+    padding: 1px 8px;
+  }
+  .tiers { display: flex; flex-direction: column; gap: 8px; }
+  .tier { display: grid; grid-template-columns: minmax(120px, 168px) 1fr 56px 84px; gap: 10px; align-items: center; font-size: 12.5px; }
+  .tier .label { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar { height: 6px; background: #2f313a; border-radius: 999px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--ok); border-radius: 999px; transition: width 0.4s ease; }
+  .tier.low .bar > i { background: var(--bad); }
+  .tier.mid .bar > i { background: var(--warn); }
+  .pct { text-align: right; font-variant-numeric: tabular-nums; }
+  .tier.low .pct { color: var(--bad); font-weight: 700; }
+  .reset { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+  .balance { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .balance small { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 4px; }
+  .error { color: var(--bad); font-size: 12.5px; }
+  .stale { color: var(--warn); font-size: 12px; margin-top: 4px; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  footer { color: var(--muted); font-size: 12px; padding: 0 24px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ccquota</h1>
+  <span class="meta" id="updated">加载中…</span>
+  <button id="refresh" type="button">刷新</button>
+</header>
+<main id="root"><div class="empty">正在查询额度…</div></main>
+<footer>数据只读自 cc-switch 的供应商配置；不刷新、不回写任何登录凭据。</footer>
+
+<script>
+const APP_TITLES = { claude: "Claude Code", codex: "Codex", kimi: "Kimi Code", agy: "Antigravity" };
+const TIER_TITLES = { five_hour: "5 小时", weekly: "本周", monthly: "本月" };
+
+let timer = null;
+
+function appTitle(app) { return APP_TITLES[app] || app || "其他"; }
+function tierTitle(t) {
+  const base = TIER_TITLES[t.key] || t.key;
+  return t.label ? t.label + " · " + base : base;
+}
+function remaining(t) {
+  const v = 100 - t.utilization;
+  return Math.max(0, Math.min(100, v));
+}
+function countdown(iso) {
+  if (!iso) return "";
+  const diff = new Date(iso).getTime() - Date.now();
+  if (diff <= 0) return "已重置";
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  if (days > 0) return days + "d" + hours + "h";
+  if (hours > 0) return hours + "h" + mins + "m";
+  return mins + "m";
+}
+
+function tierRow(t) {
+  const left = remaining(t);
+  const cls = left < 10 ? "tier low" : left < 30 ? "tier mid" : "tier";
+  return `<div class="${cls}">
+    <span class="label" title="${tierTitle(t)}">${tierTitle(t)}</span>
+    <span class="bar"><i style="width:${left}%"></i></span>
+    <span class="pct">${Math.round(left)}%</span>
+    <span class="reset">${countdown(t.resetsAt)}</span>
+  </div>`;
+}
+
+function cardEl(c) {
+  const el = document.createElement("div");
+  el.className = "card" + (c.current ? " current" : "");
+  const body = c.kind === "balance"
+    ? `<div class="balance">${c.balance ? c.balance.value.toFixed(2) : "—"}<small>${c.balance ? c.balance.unit : ""}</small></div>`
+    : `<div class="tiers">${(c.tiers || []).map(tierRow).join("")}</div>`;
+  const err = c.err
+    ? `<div class="${c.ok ? "stale" : "error"}">${c.ok ? c.err + "（显示上次成功值）" : c.err}</div>`
+    : "";
+  el.innerHTML = `
+    <div>
+      <div class="name">${c.name}${c.current ? '<span class="badge">使用中</span>' : ""}</div>
+      <div class="url">${c.baseUrl || ""}</div>
+      ${err}
+    </div>
+    <div>${body}</div>`;
+  return el;
+}
+
+function render(data) {
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+  const cards = data.cards || [];
+  if (!cards.length) {
+    root.innerHTML = '<div class="empty">没有找到已启用的额度查询供应商。</div>';
+    return;
+  }
+  const groups = new Map();
+  for (const c of cards) {
+    if (!groups.has(c.app)) groups.set(c.app, []);
+    groups.get(c.app).push(c);
+  }
+  for (const [app, list] of groups) {
+    const section = document.createElement("section");
+    const h2 = document.createElement("h2");
+    h2.textContent = appTitle(app);
+    section.appendChild(h2);
+    for (const c of list) section.appendChild(cardEl(c));
+    root.appendChild(section);
+  }
+}
+
+async function load(force) {
+  const btn = document.getElementById("refresh");
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/cards" + (force ? "?refresh=1" : ""));
+    const payload = await res.json();
+    if (!payload.ok) throw new Error(payload.error ? payload.error.message : "查询失败");
+    render(payload.data);
+    const at = new Date(payload.data.updatedAt);
+    document.getElementById("updated").textContent =
+      (payload.data.fromCache ? "缓存 · " : "已查询 · ") + at.toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("updated").textContent = "查询失败";
+    const root = document.getElementById("root");
+    root.innerHTML = '<div class="empty">加载失败：' + String(e.message || e) + "<br><br>可执行 <code>ccquota doctor</code> 定位原因。</div>";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("refresh").addEventListener("click", () => load(true));
+load(false);
+timer = setInterval(() => load(false), 60000);
+</script>
+</body>
+</html>
