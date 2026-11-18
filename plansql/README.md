@@ -65,8 +65,8 @@ plansql-cli list --json
 plansql-cli check
 
 # 4. 更新/登记某篇文档的状态 (原子追加至 plans_status.sql 并更新内存库)
-plansql-cli set docs/plans/28-plansql-tracker.md --status completed
-plansql-cli set docs/plans/28-plansql-tracker.md --status '{"state":"in_progress","note":"Task 1 done"}'
+plansql-cli set docs/projects/go_projects/plansql/plans/archive/01-plansql-tracker.md --status completed
+plansql-cli set docs/projects/go_projects/plansql/plans/archive/01-plansql-tracker.md --status '{"state":"in_progress","note":"Task 1 done"}'
 
 # 5. 启动共享 daemon 并唤起浏览器看板
 plansql-cli serve --root D:/Users/language_projects
