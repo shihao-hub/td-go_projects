@@ -6,7 +6,7 @@ Windows 开机时长与内存健康巡检重启提醒工具。
 
 长期不重启时，同样的软件组合内存占用会从正常的 70%~80% 慢性膨胀到 90%+；重启能清空内核驱动非分页池与 V8 堆碎片。但「刚开机就开大项目」也会让内存短暂冲高，因此本工具把**开机时长作为硬前置条件**，避免高负载误报。
 
-设计文档：<../../docs/projects/go_projects/rebootremind/plans/01-rebootremind-plan.md>
+设计文档：<../../docs/projects/go_projects/rebootremind/plans/archive/01-rebootremind-plan.md>
 
 ## 判定规则
 
