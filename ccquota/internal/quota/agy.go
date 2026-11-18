@@ -119,7 +119,7 @@ func runAgyOnce(ctx context.Context, path string) ([]model.Tier, error) {
 				continue
 			}
 			tier := remainToTier(key, bucket.RemainingFraction, parseFlexTime(bucket.ResetTime))
-			tier.Label = group.Name
+			tier.Label = simplifyGroupName(group.Name)
 			byKey[key] = tier
 		}
 		for _, key := range []string{model.TierFiveHour, model.TierWeekly, model.TierMonthly} {
@@ -142,6 +142,17 @@ func agyWindowKey(window string) string {
 		return model.TierMonthly
 	}
 	return ""
+}
+
+// simplifyGroupName 缩短 agy 的模型分组名，避免卡片标签被截断。
+func simplifyGroupName(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "gemini models":
+		return "Gemini"
+	case "claude and gpt models":
+		return "Claude/GPT"
+	}
+	return name
 }
 
 // isTransientAgyError 判定是否值得重试（EOF 类瞬态中断）。

@@ -37,6 +37,8 @@
   }
   header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
   header .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .switch { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; cursor: pointer; user-select: none; }
+  .switch input { accent-color: var(--accent); cursor: pointer; }
   button {
     background: var(--panel-2);
     color: var(--text);
@@ -102,6 +104,9 @@
 <header>
   <h1>ccquota</h1>
   <span class="meta" id="updated">加载中…</span>
+  <label class="switch" title="默认只显示每个应用使用中的供应商">
+    <input type="checkbox" id="showAll" /> 显示全部
+  </label>
   <button id="refresh" type="button">刷新</button>
 </header>
 <main id="root"><div class="empty">正在查询额度…</div></main>
@@ -191,7 +196,12 @@ async function load(force) {
   const btn = document.getElementById("refresh");
   btn.disabled = true;
   try {
-    const res = await fetch("/api/cards" + (force ? "?refresh=1" : ""));
+    const showAll = document.getElementById("showAll").checked;
+    const params = new URLSearchParams();
+    if (showAll) params.set("all", "1");
+    if (force) params.set("refresh", "1");
+    const qs = params.toString();
+    const res = await fetch("/api/cards" + (qs ? "?" + qs : ""));
     const payload = await res.json();
     if (!payload.ok) throw new Error(payload.error ? payload.error.message : "查询失败");
     render(payload.data);
@@ -206,6 +216,17 @@ async function load(force) {
     btn.disabled = false;
   }
 }
+
+const showAllBox = document.getElementById("showAll");
+// 用 URL 参数记住视图（随机端口会让 localStorage 的 origin 每次变化，故不依赖它）。
+showAllBox.checked = new URLSearchParams(location.search).get("all") === "1";
+showAllBox.addEventListener("change", () => {
+  const url = new URL(location.href);
+  if (showAllBox.checked) url.searchParams.set("all", "1");
+  else url.searchParams.delete("all");
+  history.replaceState(null, "", url);
+  load(false);
+});
 
 document.getElementById("refresh").addEventListener("click", () => load(true));
 load(false);

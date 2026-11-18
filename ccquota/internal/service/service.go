@@ -24,6 +24,9 @@ type Options struct {
 	TTL time.Duration
 	// App 非空时只保留该 app_type 的卡片。
 	App string
+	// All 为真时显示全部启用额度查询的供应商；否则每个应用只留一张
+	//（优先「使用中」，没有则取第一张）。
+	All bool
 }
 
 // Result 是一次取数的结果。
@@ -59,7 +62,7 @@ func (s *Service) Cards(ctx context.Context, opts Options) (Result, error) {
 
 	cached, hasCache := store.Load()
 	if !opts.Refresh && hasCache && store.Fresh(cached, ttl) {
-		return Result{Cards: filterByApp(cached.Cards, opts.App), UpdatedAt: cached.UpdatedAt, FromCache: true}, nil
+		return Result{Cards: applyView(cached.Cards, opts), UpdatedAt: cached.UpdatedAt, FromCache: true}, nil
 	}
 
 	providers, err := ccswitch.Load(s.DBPath)
@@ -77,7 +80,31 @@ func (s *Service) Cards(ctx context.Context, opts Options) (Result, error) {
 	// 缓存写入失败不阻塞主流程（只影响下次是否能免查询）。
 	_ = store.Save(snap)
 
-	return Result{Cards: filterByApp(cards, opts.App), UpdatedAt: now}, nil
+	return Result{Cards: applyView(cards, opts), UpdatedAt: now}, nil
+}
+
+// applyView 先按应用过滤，再按视图裁剪（默认每个应用只留一张）。
+func applyView(cards []model.Card, opts Options) []model.Card {
+	out := filterByApp(cards, opts.App)
+	if opts.All {
+		return out
+	}
+	return pickPrimaryPerApp(out)
+}
+
+// pickPrimaryPerApp 每个应用只保留一张：优先「使用中」，否则取排序后的第一张。
+// filterByApp 已保证组内 current 在前，因此取首个即可。
+func pickPrimaryPerApp(cards []model.Card) []model.Card {
+	seen := make(map[string]bool, len(cards))
+	out := make([]model.Card, 0, len(cards))
+	for _, c := range cards {
+		if seen[c.App] {
+			continue
+		}
+		seen[c.App] = true
+		out = append(out, c)
+	}
+	return out
 }
 
 func filterByApp(cards []model.Card, app string) []model.Card {

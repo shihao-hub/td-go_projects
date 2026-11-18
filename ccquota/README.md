@@ -19,13 +19,19 @@
 
 ### 桌面（托盘）
 
-双击 `bin\ccquota-gui-dev.exe`：无黑框窗口，关窗收进托盘，托盘菜单可「打开窗口 / 退出」；
+双击 `bin\ccquota-gui-dev.exe`：无黑框窗口，关窗收进托盘。
+
+托盘交互：**左键单击显示窗口，右键弹菜单**（打开窗口 / 退出）。
 重复启动不会开第二个实例，而是把已有窗口唤到前台。
+
+窗口默认**每个应用只显示一张卡**（使用中的那张），勾选右上角「显示全部」查看所有启用了
+额度查询的供应商。
 
 ### 命令行
 
 ```powershell
-ccquota list                 # 人读列表（默认读 5 分钟缓存）
+ccquota list                 # 每个应用只显示使用中的那张（默认读 5 分钟缓存）
+ccquota list --all           # 显示全部供应商
 ccquota list --refresh       # 强制访问上游
 ccquota list --json          # 机器输出：{"ok":true,"data":{...}}
 ccquota list --app codex     # 只看某个应用
@@ -62,6 +68,16 @@ uv run scripts/build.py --release    # release → ccquota.exe + ccquota-gui.exe
 
 两个产物分工：`ccquota.exe` 是控制台通道（CLI、脚本、Agent 用它）；`ccquota-gui.exe` 是
 `-H windowsgui` 的窗口通道（双击零黑框，托盘常驻），忽略除 GUI 语义外的参数。
+
+图标与主题按通道区分（与 typeai / clictl 一致）：
+
+| 通道 | 窗口图标 | 标题栏主题 |
+|---|---|---|
+| dev | 仓库默认 `icon_dev.ico`（Go 图标，白底） | 跟随系统 |
+| release | `scripts/render_icon.py` 生成的专属透明底图标 | 深色 |
+
+默认 Go 图标是白底图，只有配深色标题栏才会显出一个白色方块；dev 通道因此不强制深色。
+托盘图标两种通道都用专属透明图标（任务栏背景是深色，白底小图标会很难看）。
 
 ## 已知限制
 

@@ -26,6 +26,7 @@ func Handler(svc *service.Service) http.Handler {
 		opts := service.Options{
 			Refresh: r.URL.Query().Get("refresh") == "1",
 			App:     r.URL.Query().Get("app"),
+			All:     r.URL.Query().Get("all") == "1",
 		}
 		res, err := svc.Cards(r.Context(), opts)
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")

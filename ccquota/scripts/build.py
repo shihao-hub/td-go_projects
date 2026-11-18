@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -32,9 +31,10 @@ WINRES_DIR = PROJECT_ROOT / "winres"
 SYSO_DIR = PROJECT_ROOT / "cmd" / "ccquota"
 VERSION_FILE = PROJECT_ROOT / "info.json"
 
-# 默认图标来源：父仓 docs/assets；子仓独立使用时可能不存在，届时跳过图标注入。
-DEFAULT_ICON = PROJECT_ROOT.parent.parent / "docs" / "assets" / "projects" / "go_projects" / "go-default.ico"
+RENDER_ICON = PROJECT_ROOT / "scripts" / "render_icon.py"
 ICON_LOCAL = PROJECT_ROOT / "icon.ico"
+# 开发版沿用仓库默认 Go 图标（与 typeai / clictl 的 dev 通道一致）。
+ICON_DEV = PROJECT_ROOT / "cmd" / "ccquota-gui" / "icon_dev.ico"
 
 
 def setup_console() -> None:
@@ -96,17 +96,26 @@ def four_part(version: str) -> str:
     return ".".join((core.split(".") + ["0", "0", "0"])[:4])
 
 
-def ensure_icon() -> Path | None:
-    if DEFAULT_ICON.exists():
-        shutil.copyfile(DEFAULT_ICON, ICON_LOCAL)
-        return ICON_LOCAL
-    if ICON_LOCAL.exists():
-        return ICON_LOCAL
-    return None
+def ensure_icons() -> None:
+    """确保两份图标都存在。
+
+    - icon.ico：release 窗口图标 + 全通道托盘图标（专属透明底，由 render_icon.py 生成）；
+    - icon_dev.ico：dev 窗口图标（仓库默认 Go 图标，随仓入库，无需生成）。
+    """
+    if ICON_LOCAL.exists() or not RENDER_ICON.exists():
+        return
+    r = subprocess.run(["uv", "run", str(RENDER_ICON)], cwd=str(PROJECT_ROOT))
+    if r.returncode != 0:
+        print("⚠️ 图标渲染失败，跳过 PE 资源注入", file=sys.stderr)
 
 
-def build_resources(version: str, out_name: str, gui: bool, syso_dir: Path) -> int:
-    icon = ensure_icon()
+def pick_icon(release: bool) -> Path | None:
+    if release:
+        return ICON_LOCAL if ICON_LOCAL.exists() else None
+    return ICON_DEV if ICON_DEV.exists() else (ICON_LOCAL if ICON_LOCAL.exists() else None)
+
+
+def build_resources(version: str, out_name: str, gui: bool, syso_dir: Path, icon: Path | None) -> int:
     if icon is None:
         print("⚠️ 未找到图标，跳过 PE 资源注入", file=sys.stderr)
         return 0
@@ -166,11 +175,13 @@ def main() -> int:
 
     targets = [
         (out_cli, False, []),
-        (out_gui, True, ["-tags", "desktop,production", "-ldflags", ldflags + " -H windowsgui"]),
+        (out_gui, True, ["-tags", "desktop,production" if release else "desktop,dev", "-ldflags", ldflags + " -H windowsgui"]),
     ]
+    ensure_icons()
+    icon = pick_icon(release)
     for out_exe, gui, extra in targets:
         syso_dir = PROJECT_ROOT / "cmd" / ("ccquota-gui" if gui else "ccquota")
-        rc = build_resources(version, out_exe.name, gui, syso_dir)
+        rc = build_resources(version, out_exe.name, gui, syso_dir, icon)
         if rc != 0:
             print("❌ PE 资源注入失败", file=sys.stderr)
             return rc

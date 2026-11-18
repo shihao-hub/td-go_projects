@@ -14,12 +14,13 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"ccquota/internal/server"
 	"ccquota/internal/service"
 	"ccquota/internal/version"
 )
+
+const windowClassName = "ccquotaMainWindow"
 
 func main() {
 	svc, err := service.New(os.Getenv("CCQUOTA_DB"))
@@ -48,11 +49,7 @@ func main() {
 		OnShutdown: func(ctx context.Context) {
 			systray.Quit()
 		},
-		OnBeforeClose: func(ctx context.Context) bool {
-			// 关窗 = 收进托盘，只有托盘「退出」才真正结束进程。
-			runtime.WindowHide(ctx)
-			return true
-		},
+		OnBeforeClose: app.beforeClose,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: uniqueID,
 			OnSecondInstanceLaunch: func(options.SecondInstanceData) {
@@ -62,7 +59,8 @@ func main() {
 		Windows: &windows.Options{
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
-			Theme:                windows.Dark,
+			Theme:                windowTheme,
+			WindowClassName:      windowClassName,
 		},
 	})
 	if err != nil {

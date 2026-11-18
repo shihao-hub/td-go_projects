@@ -83,7 +83,7 @@ func Run(args []string, opt *Options) int {
 const usageText = `ccquota —— 只读渲染 cc-switch 已启用供应商的额度
 
 用法：
-  ccquota list    [--json] [--app claude|codex|kimi|agy] [--refresh]
+  ccquota list    [--json] [--app claude|codex|kimi|agy] [--all] [--refresh]
   ccquota watch   [--interval 5m] [--once] [--app ...]
   ccquota web     [--addr 127.0.0.1:0] [--open]
   ccquota doctor  [--json]
@@ -91,7 +91,7 @@ const usageText = `ccquota —— 只读渲染 cc-switch 已启用供应商的�
   ccquota url
 
 说明：
-  list     列出额度卡片；默认读 5 分钟缓存，--refresh 强制刷新
+  list     列出额度卡片；默认每个应用只显示使用中的那张，--all 看全部
   watch    终端常驻刷新（--once 只刷一次）
   web      启动本地 WebUI（随机端口，地址打印在 stdout）
   doctor   自检数据源、凭据与端点连通性
@@ -105,6 +105,7 @@ func runList(args []string, opt *Options) int {
 	asJSON := fs.Bool("json", false, "输出 JSON 包络")
 	app := fs.String("app", "", "只显示指定 app_type（claude/codex/kimi/agy）")
 	refresh := fs.Bool("refresh", false, "忽略缓存，强制访问上游")
+	all := fs.Bool("all", false, "显示全部供应商（默认每个应用只显示使用中的那张）")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -119,7 +120,7 @@ func runList(args []string, opt *Options) int {
 		return 1
 	}
 
-	res, err := svc.Cards(context.Background(), service.Options{Refresh: *refresh, App: *app})
+	res, err := svc.Cards(context.Background(), service.Options{Refresh: *refresh, App: *app, All: *all})
 	if err != nil {
 		if *asJSON {
 			failJSON(opt.Stdout, "query_failed", err.Error())
