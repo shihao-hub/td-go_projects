@@ -134,6 +134,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!cfg) return;
     cfgApiKey.value = cfg.apiKey || "";
     cfgBaseUrl.value = cfg.baseUrl || "https://api.deepseek.com";
+    document.getElementById("cfgAIModel").value = cfg.aiModel || "deepseek-flash";
     cfgDefaultCount.value = cfg.defaultCount || 10;
     cfgNeedContent.checked = !!cfg.needContent;
 
@@ -150,6 +151,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const payload = {
       apiKey: cfgApiKey.value.trim(),
       baseUrl: cfgBaseUrl.value.trim(),
+      aiModel: document.getElementById("cfgAIModel").value.trim() || "deepseek-flash",
       defaultCount: parseInt(cfgDefaultCount.value, 10) || 10,
       needContent: cfgNeedContent.checked,
     };

@@ -43,6 +43,7 @@ type AppConfig struct {
 	BaseURL      string `json:"baseUrl"`
 	DefaultCount int    `json:"defaultCount"`
 	NeedContent  bool   `json:"needContent"`
+	AIModel      string `json:"aiModel"`
 	UpdatedAt    string `json:"updatedAt"`
 }
 
@@ -82,6 +83,10 @@ func NewStore(dbPath string) (*Store, error) {
 	}
 
 	s := &Store{db: db, dbPath: dbPath}
+	if err := s.initResearchSchema(); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := s.initSchema(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("初始化数据库 Schema 失败: %w", err)
@@ -146,6 +151,7 @@ func (s *Store) GetConfig() (AppConfig, error) {
 		BaseURL:      "https://api.deepseek.com",
 		DefaultCount: 10,
 		NeedContent:  false,
+		AIModel:      "deepseek-flash",
 	}
 
 	rows, err := s.db.Query("SELECT key, value FROM app_settings")
@@ -160,6 +166,10 @@ func (s *Store) GetConfig() (AppConfig, error) {
 			continue
 		}
 		switch k {
+		case "ai_model":
+			if strings.TrimSpace(v) != "" {
+				cfg.AIModel = strings.TrimSpace(v)
+			}
 		case "api_key":
 			cfg.APIKey = v
 		case "base_url":
@@ -203,6 +213,9 @@ func (s *Store) SaveConfig(cfg AppConfig) error {
 		"updated_at":    nowStr,
 	}
 
+	if strings.TrimSpace(cfg.AIModel) != "" {
+		pairs["ai_model"] = strings.TrimSpace(cfg.AIModel)
+	}
 	for k, v := range pairs {
 		if _, err := tx.Exec(upsertStmt, k, v); err != nil {
 			return err

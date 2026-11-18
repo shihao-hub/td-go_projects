@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DeepSeek Search Studio</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="research.css">
+  <link rel="stylesheet" href="research.css">
 </head>
 <body>
   <div class="app-container">
@@ -20,6 +22,7 @@
       </div>
 
       <nav class="nav-tabs">
+        <button class="nav-tab" data-tab="researchTab">研究工作台</button>
         <button class="nav-tab active" data-tab="searchTab">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           搜索工作台
@@ -50,6 +53,66 @@
 
     <!-- 主体内容 -->
     <main class="main-content">
+      <section class="tab-panel" id="researchTab">
+        <div class="research-layout">
+          <aside class="research-sidebar">
+            <div class="research-eyebrow">持续探索</div>
+            <h2>我的研究</h2>
+            <button class="btn btn-outline" id="researchReload">刷新记录</button>
+            <div id="researchSessions" class="research-sessions"></div>
+          </aside>
+          <div class="research-workspace">
+            <form id="researchCreate" class="research-create">
+              <label for="researchQuestion">这次想弄清什么？</label>
+              <div class="research-toolbar"><input id="researchQuestion" placeholder="描述问题、使用场景和你关心的限制" required maxlength="1200"><button class="btn btn-primary">新建研究</button></div>
+            </form>
+            <p id="researchNotice" role="status" aria-live="polite">输入问题，先整理搜索词，再执行选中的查询。</p>
+            <div id="researchBody" hidden>
+              <div class="research-heading"><h2 id="researchTitle"></h2><span id="researchSaveState"></span></div>
+              <div class="research-step"><span>01</span><h3>搜索词工作台</h3><small>AI 建议需要你勾选后才会执行</small></div>
+              <fieldset id="researchControls">
+                <div id="researchQueries"></div>
+                <div class="research-toolbar">
+                  <button type="button" class="btn btn-outline" id="researchAdd">添加搜索词</button>
+                  <button type="button" class="btn btn-outline" id="researchSuggest">帮我扩展搜索词</button>
+                  <button type="button" class="btn btn-outline" id="researchSave">保存草稿</button>
+                </div>
+                <div class="research-toolbar research-options">
+                  <label>每路条数 <input type="number" id="researchCount" min="1" max="50" value="10"></label>
+                  <label>地域 <input id="researchLocale" placeholder="可选" maxlength="100"></label>
+                  <label><input type="checkbox" id="researchContent">附带正文</label>
+                  <label><input type="checkbox" id="researchRefresh">跳过缓存</label>
+                </div>
+                <div class="research-toolbar">
+                  <button type="button" class="btn btn-primary" id="researchRun">执行选中的查询</button>
+                  <button type="button" class="btn btn-outline" id="researchRetry">仅重试上轮失败项</button>
+                  <span id="researchBudget"></span>
+                </div>
+              </fieldset>
+              <button type="button" class="btn btn-outline" id="researchCancel" hidden>停止本轮搜索</button>
+              <div id="researchRounds" class="research-rounds"></div>
+              <div class="research-step"><span>02</span><h3>合并结果</h3><small id="researchResultCount"></small></div>
+              <div class="research-toolbar">
+                <label for="researchFilter">来源查询</label><select id="researchFilter"><option value="">全部查询</option></select>
+                <button type="button" class="btn btn-outline" id="researchExport">下载研究 JSON</button>
+              </div>
+              <div id="researchResults" class="research-results"></div>
+              <div class="research-step"><span>03</span><h3>根据反馈补搜</h3><small>先保存反馈，再生成建议</small></div>
+              <fieldset id="researchFeedbackControls">
+                <form id="researchFeedbackForm">
+                  <div class="research-toolbar">
+                    <label>反馈角度 <select id="researchFeedbackKind"><option value="too_broad">太泛</option><option value="off_topic">偏题</option><option value="need_examples">缺少实际案例</option><option value="need_counterexamples">缺少反面材料</option><option value="custom">其他反馈</option></select></label>
+                    <label>针对 <select id="researchFeedbackResult"><option value="">整体结果</option></select></label>
+                  </div>
+                  <textarea id="researchFeedbackText" placeholder="还想找到什么？哪些条件需要更明确？" maxlength="1200" rows="3"></textarea>
+                  <div class="research-toolbar"><button class="btn btn-outline">保存反馈</button><button type="button" class="btn btn-primary" id="researchRefine">根据已保存反馈生成补搜建议</button></div>
+                </form>
+              </fieldset>
+              <div id="researchFeedbackHistory" class="research-feedback-history"></div>
+            </div>
+          </div>
+        </div>
+      </section>
       <!-- 搜索 Tab -->
       <section class="tab-panel active" id="searchTab">
         <div class="search-hero">
@@ -193,6 +256,11 @@
             <label for="cfgBaseUrl">API Base URL</label>
             <input type="text" id="cfgBaseUrl" value="https://api.deepseek.com">
           </div>
+          <div class="form-group">
+            <label for="cfgAIModel">扩词与补搜模型</label>
+            <input type="text" id="cfgAIModel" value="deepseek-flash">
+            <small class="field-hint">复用以上 Key 和服务地址，仅在生成建议时调用。</small>
+          </div>
 
           <div class="form-row">
             <div class="form-group col">
@@ -218,5 +286,6 @@
   </div>
 
   <script src="app.js"></script>
+  <script src="research.js"></script>
 </body>
 </html>

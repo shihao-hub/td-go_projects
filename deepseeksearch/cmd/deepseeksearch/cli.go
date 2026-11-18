@@ -32,6 +32,13 @@ func main() {
 	}
 
 	switch command := os.Args[1]; command {
+	case "research":
+		code := researchCLI(os.Args[2:])
+		if code != 0 {
+			os.Exit(code)
+		}
+	case "schema":
+		_ = researchCLI([]string{"schema"})
 	case "search":
 		handleSearch(os.Args[2:])
 	case "fetch":
@@ -72,6 +79,8 @@ func printUsage() {
   deepseeksearch-gui.exe  GUI 通道：只负责桌面工作台（窗口 + 托盘），不解析子命令。
 
 命令:
+  research   多轮研究（create/list/show/suggest/set-queries/run/feedback/schema）
+  schema     离线导出新增研究命令的输入与输出契约
   search     调用 DeepSeek Search API 进行精准网页搜索（支持 --json / --content / --count / --refresh）
   fetch      调用 DeepSeek Fetch API 抓取指定 URL 并提取为纯净 Markdown（支持 --save / --refresh）
   config     配置 API Key 与基础参数 (show / set-key / set-url / clear-key / test)

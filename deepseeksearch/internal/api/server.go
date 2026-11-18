@@ -38,6 +38,7 @@ func NewServer(store *storage.Store, meta Meta) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	s.researchRoutes(mux)
 
 	mux.HandleFunc("GET /api/meta", s.handleMeta)
 	mux.HandleFunc("GET /api/config", s.handleGetConfig)
